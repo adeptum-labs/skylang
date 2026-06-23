@@ -1,0 +1,12 @@
+# Maven build output of the compiler itself
+target/
+
+# The staged target project — a disposable artifact, regenerated from sources + sky.lock
+build/
+
+*.class
+
+# Shade plugin side-output
+dependency-reduced-pom.xml
+
+# NOTE: sky.lock is intentionally NOT ignored — it is the freeze store and must be committed.
