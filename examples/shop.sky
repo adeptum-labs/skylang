@@ -1,0 +1,16 @@
+module shop
+
+entity Product {
+  id    Int
+  name  Text
+  stock Int @min(0)
+}
+
+service Catalog {
+
+  restock(p Product, units Int) -> Product
+    intent  "Return a copy of the product with its stock increased by units."
+    requires units > 0
+    ensures  result.stock == p.stock + units
+    example  restock(Product(1, "Notebook", 5), 3) -> a Product with stock 8
+}

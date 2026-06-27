@@ -1,0 +1,5 @@
+// SkyLang project manifest.
+// The thin slice reads the .sky file directly; a full manifest parser (profile +
+// requires block) comes with the dependency-registry work.
+project shop
+profile jvm-jakarta
