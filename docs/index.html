@@ -1,0 +1,465 @@
+<!--
+  SkyLang — promotional page.
+  Copyright © 2026 Adeptum AB, Org.nr 559494-1824.
+  Free software under the GNU General Public License v3. See ../LICENSE.
+  Visual identity (petrol/teal-black/sage, Zen Dots + Roboto) after adeptum.se.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkyLang — you write the contract, the compiler writes the code</title>
+<meta name="description" content="SkyLang is a specification language: declare types, signatures and guarantees; a model synthesises the code; the compiler proves it and ships only what it can verify.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Dots&family=Roboto:wght@300;400;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0b1618; --ink-2:#0f2024; --panel:#132a30;
+    --petrol:#275f67; --petrol-bright:#73a0aa;
+    --paper:#e5e6e1; --paper-2:#cecfca;
+    --on-paper:#0f2024; --muted-paper:#5c6a6b;
+    --on-dark:rgba(255,255,255,.92); --muted-dark:#8ba0a3;
+    --brick:#8b2e2e; --brick-bright:#c07575;
+    --line-dark:rgba(115,160,170,.22); --line-paper:rgba(24,37,41,.14);
+    --display:"Zen Dots",system-ui,sans-serif;
+    --body:"Roboto",system-ui,-apple-system,Segoe UI,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--ink); color:var(--on-dark);
+    font-family:var(--body); font-weight:400; line-height:1.6;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  }
+  a{color:inherit}
+  ::selection{background:var(--petrol); color:#fff}
+  .wrap{max-width:1140px; margin:0 auto; padding:0 clamp(1.25rem,4vw,2.5rem)}
+
+  /* ---- rhythm ---- */
+  .band{padding:clamp(4.5rem,9vw,7.5rem) 0}
+  .band--paper{background:var(--paper); color:var(--on-paper)}
+  .band--paper .muted{color:var(--muted-paper)}
+  .muted{color:var(--muted-dark)}
+
+  .eyebrow{
+    font-family:var(--mono); font-size:.72rem; font-weight:600;
+    letter-spacing:.28em; text-transform:uppercase; color:var(--petrol-bright);
+    margin:0 0 1.4rem;
+  }
+  .band--paper .eyebrow{color:var(--petrol)}
+  h1,h2{font-family:var(--display); font-weight:400; letter-spacing:-.01em; line-height:1.12}
+  h3{font-family:var(--body); font-weight:700; letter-spacing:0; line-height:1.25}
+  h2{font-size:clamp(1.5rem,3.4vw,2.35rem); margin:0 0 1.1rem}
+  .lede{font-size:clamp(1.05rem,1.6vw,1.2rem); font-weight:300; max-width:60ch}
+
+  /* ---- top bar ---- */
+  header.nav{position:sticky; top:0; z-index:20;
+    backdrop-filter:blur(10px); background:rgba(11,22,24,.72);
+    border-bottom:1px solid var(--line-dark)}
+  .nav .wrap{display:flex; align-items:center; gap:1.5rem; height:64px}
+  .brand{font-family:var(--display); font-size:.95rem; letter-spacing:.02em; text-decoration:none}
+  .brand .tm{color:var(--petrol-bright)}
+  .nav nav{margin-left:auto; display:flex; gap:1.75rem; align-items:center}
+  .nav nav a{font-family:var(--mono); font-size:.8rem; text-decoration:none; color:var(--muted-dark)}
+  .nav nav a:hover{color:var(--on-dark)}
+  .nav .ghost{border:1px solid var(--line-dark); padding:.5rem .9rem; color:var(--on-dark)}
+  .nav .ghost:hover{border-color:var(--petrol-bright)}
+
+  /* ---- hero ---- */
+  .hero{position:relative; overflow:hidden; padding-top:clamp(3.5rem,7vw,5.5rem)}
+  .hero::before{content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(120% 80% at 85% -10%, rgba(39,95,103,.30), transparent 60%),
+      radial-gradient(90% 70% at 0% 110%, rgba(39,95,103,.16), transparent 55%);
+    pointer-events:none}
+  .hero .wrap{position:relative}
+  .hero h1{font-size:clamp(2.15rem,5.6vw,4rem); max-width:16ch; margin:0 0 1.5rem}
+  .hero .lede{margin:0 0 2rem}
+  .cta{display:flex; flex-wrap:wrap; gap:.9rem; margin:2.2rem 0 0}
+  .btn{font-family:var(--mono); font-size:.85rem; font-weight:600; text-decoration:none;
+    padding:.85rem 1.4rem; border:1px solid transparent; letter-spacing:.02em;
+    transition:transform .15s ease, background .15s ease, border-color .15s ease}
+  .btn:hover{transform:translateY(-2px)}
+  .btn--solid{background:var(--petrol); color:#fff}
+  .btn--solid:hover{background:#2f717a}
+  .btn--ghost{border-color:var(--line-dark); color:var(--on-dark)}
+  .btn--ghost:hover{border-color:var(--petrol-bright)}
+  .thesis{margin:2.6rem 0 0; padding-top:1.6rem; border-top:1px solid var(--line-dark);
+    font-family:var(--mono); font-size:.9rem; color:var(--muted-dark); max-width:56ch}
+  .thesis b{color:var(--petrol-bright); font-weight:600}
+
+  /* ---- signature split ---- */
+  .split{margin-top:clamp(3rem,6vw,4.5rem);
+    display:grid; grid-template-columns:1fr auto 1fr; gap:0; align-items:stretch}
+  .code{position:relative; background:var(--ink-2); border:1px solid var(--line-dark);
+    font-family:var(--mono); font-size:.82rem; line-height:1.7; overflow:auto}
+  .code .cap{display:flex; gap:.55rem; align-items:center; padding:.7rem 1rem;
+    border-bottom:1px solid var(--line-dark); color:var(--muted-dark); font-size:.72rem;
+    letter-spacing:.14em; text-transform:uppercase}
+  .code .cap .dot{width:8px; height:8px; background:var(--petrol); display:inline-block}
+  .code pre{margin:0; padding:1.15rem 1.25rem; white-space:pre; tab-size:2}
+  .split .arrow{display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:0 1.1rem; color:var(--muted-dark); gap:.4rem}
+  .split .arrow .m{font-family:var(--mono); font-size:.62rem; letter-spacing:.18em;
+    text-transform:uppercase; writing-mode:vertical-rl; transform:rotate(180deg)}
+  .split .arrow .a{font-size:1.4rem; color:var(--petrol-bright)}
+  /* code tokens */
+  .k{color:var(--petrol-bright)} .s{color:#b7c9ac} .c{color:#6f8487; font-style:italic}
+  .t{color:#d8e0dc} .n{color:#cbd6cf}
+  .stamp{position:absolute; bottom:.85rem; right:.85rem; font-family:var(--mono); font-weight:600;
+    font-size:.66rem; letter-spacing:.14em; padding:.32rem .55rem; text-transform:uppercase}
+  .stamp--ok{color:var(--petrol-bright); border:1px solid var(--petrol-bright);
+    background:rgba(39,95,103,.16); transform:rotate(3deg)}
+  .stamp--bad{color:var(--brick-bright); border:1px solid var(--brick);
+    background:rgba(139,46,46,.14); transform:rotate(-3deg)}
+
+  /* ---- asterisk divider ---- */
+  .rule{display:flex; align-items:center; gap:1.2rem; color:var(--petrol);
+    max-width:1140px; margin:0 auto; padding:0 clamp(1.25rem,4vw,2.5rem)}
+  .band--paper + .rule, .rule{background:transparent}
+  .rule::before,.rule::after{content:""; height:1px; flex:1; background:var(--line-dark)}
+  .rule--paper{color:var(--petrol)}
+  .rule--paper::before,.rule--paper::after{background:var(--line-paper)}
+  .rule span{font-size:1rem}
+
+  /* ---- two layers ---- */
+  .layers{display:grid; grid-template-columns:1fr 1fr; gap:clamp(1rem,3vw,2rem); margin-top:2.5rem}
+  .layer{border:1px solid var(--line-paper); padding:clamp(1.5rem,3vw,2.2rem); background:#eceded}
+  .layer .tag{font-family:var(--mono); font-size:.72rem; letter-spacing:.2em; text-transform:uppercase;
+    color:var(--petrol); margin:0 0 .8rem}
+  .layer h3{font-size:1.25rem; margin:0 0 .7rem}
+  .layer p{margin:0 0 .8rem}
+  .layer .who{font-family:var(--mono); font-size:.78rem; color:var(--muted-paper);
+    border-top:1px solid var(--line-paper); padding-top:.9rem; margin-top:1rem}
+  .layer .who b{color:var(--on-paper)}
+
+  /* ---- verify / reject ---- */
+  .verify{display:grid; grid-template-columns:1.05fr .95fr; gap:clamp(1.5rem,4vw,3.5rem); align-items:center}
+  .verify .flow{display:grid; gap:.75rem}
+  .chip{font-family:var(--mono); font-size:.8rem; border:1px solid var(--line-dark);
+    padding:.75rem 1rem; display:flex; gap:.7rem; align-items:center}
+  .chip .lbl{color:var(--muted-dark); min-width:8.5ch}
+  .chip--bad{border-color:rgba(139,46,46,.5)} .chip--bad .lbl{color:var(--brick-bright)}
+  .chip--ok{border-color:rgba(115,160,170,.5)} .chip--ok .lbl{color:var(--petrol-bright)}
+
+  /* ---- pipeline ---- */
+  .steps{display:grid; grid-template-columns:repeat(4,1fr); gap:0; margin-top:2.6rem;
+    border-top:1px solid var(--line-paper)}
+  .step{padding:1.8rem 1.4rem 1.8rem 0; border-right:1px solid var(--line-paper)}
+  .step:last-child{border-right:0}
+  .step .no{font-family:var(--display); font-size:1.6rem; color:var(--petrol); line-height:1}
+  .step h3{font-size:1.02rem; margin:1rem 0 .5rem; letter-spacing:0}
+  .step p{margin:0; font-size:.92rem; color:var(--muted-paper)}
+
+  /* ---- freeze ---- */
+  .freeze{display:grid; grid-template-columns:1fr 1fr; gap:clamp(1.5rem,4vw,3rem); align-items:center}
+  .term{background:#08181b; border:1px solid var(--line-dark); font-family:var(--mono);
+    font-size:.82rem; line-height:1.9}
+  .term .bar{padding:.6rem 1rem; border-bottom:1px solid var(--line-dark); color:var(--muted-dark);
+    font-size:.72rem; letter-spacing:.14em; text-transform:uppercase}
+  .term pre{margin:0; padding:1.1rem 1.25rem; white-space:pre; overflow:auto}
+  .ok{color:var(--petrol-bright)} .re{color:#e2c98a} .dim{color:var(--muted-dark)}
+
+  /* ---- tooling ---- */
+  .cmds{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:1px;
+    background:var(--line-dark); border:1px solid var(--line-dark); margin-top:2.4rem}
+  .cmd{background:var(--ink); padding:1.3rem 1.4rem}
+  .cmd code{font-family:var(--mono); color:var(--petrol-bright); font-weight:600; font-size:.9rem}
+  .cmd p{margin:.5rem 0 0; font-size:.9rem; color:var(--muted-dark)}
+
+  /* ---- footer ---- */
+  footer{background:var(--ink-2); border-top:1px solid var(--line-dark);
+    padding:clamp(3rem,6vw,4.5rem) 0 2.5rem}
+  .foot{display:flex; flex-wrap:wrap; gap:2rem 3rem; align-items:flex-start; justify-content:space-between}
+  .foot .mk{font-family:var(--display); font-size:1.1rem}
+  .foot p{margin:.6rem 0 0; max-width:42ch; color:var(--muted-dark); font-size:.9rem}
+  .foot .lk{display:flex; gap:1.6rem; font-family:var(--mono); font-size:.82rem}
+  .foot .lk a{color:var(--muted-dark); text-decoration:none}
+  .foot .lk a:hover{color:var(--petrol-bright)}
+  .legal{margin-top:2.5rem; padding-top:1.4rem; border-top:1px solid var(--line-dark);
+    font-family:var(--mono); font-size:.74rem; color:var(--muted-dark);
+    display:flex; flex-wrap:wrap; gap:.4rem 1.4rem; justify-content:space-between}
+
+  a.inline{color:var(--petrol-bright); text-decoration:none; border-bottom:1px solid var(--line-dark)}
+  a.inline:hover{border-color:var(--petrol-bright)}
+
+  /* ---- reveal ---- */
+  [data-reveal]{opacity:0; transform:translateY(18px); transition:opacity .6s ease, transform .6s ease}
+  [data-reveal].in{opacity:1; transform:none}
+
+  /* ---- responsive ---- */
+  @media (max-width:860px){
+    .split{grid-template-columns:1fr; gap:1px; background:var(--line-dark)}
+    .split .arrow{padding:1rem; flex-direction:row; background:var(--ink)}
+    .split .arrow .m{writing-mode:horizontal-tb; transform:none}
+    .split .arrow .a{transform:rotate(90deg)}
+    .layers,.verify,.freeze{grid-template-columns:1fr}
+    .steps{grid-template-columns:1fr 1fr}
+    .step{border-right:0; border-bottom:1px solid var(--line-paper); padding-right:0}
+  }
+  @media (max-width:560px){
+    .nav nav a.hide{display:none}
+    .steps{grid-template-columns:1fr}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    [data-reveal]{opacity:1; transform:none; transition:none}
+    .btn:hover{transform:none}
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">Sky<span class="tm">Lang</span></a>
+    <nav>
+      <a class="hide" href="#layers">Two&nbsp;layers</a>
+      <a class="hide" href="#pipeline">Pipeline</a>
+      <a class="hide" href="#tooling">Tooling</a>
+      <a href="skylang-language-guide.md">Guide</a>
+      <a class="ghost" href="https://github.com/adeptum-labs/skylang">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="band hero">
+    <div class="wrap">
+      <p class="eyebrow">Specification language · JVM-first</p>
+      <h1>You write the contract. The compiler writes the code.</h1>
+      <p class="lede">
+        Declare the shape of a program — its types, signatures, and guarantees — and specify
+        each behaviour as <b>intent</b>, as <b>tests</b>, or both. A language model synthesises
+        the implementation; the compiler proves it against everything you wrote and emits
+        ordinary, verified code for your target platform.
+      </p>
+
+      <div class="cta">
+        <a class="btn btn--solid" href="skylang-language-guide.md">Read the language guide</a>
+        <a class="btn btn--ghost" href="https://github.com/adeptum-labs/skylang">View the source</a>
+      </div>
+
+      <p class="thesis">
+        The model proposes. The compiler disposes. <b>Code that cannot be proven against its
+        specification never ships.</b>
+      </p>
+
+      <!-- SIGNATURE: spec -> verified, frozen code -->
+      <div class="split" data-reveal>
+        <div class="code">
+          <div class="cap"><span class="dot"></span> account.sky · you write this</div>
+<pre><span class="k">service</span> <span class="t">AccountService</span> <span class="k">uses</span> db, clock, mail {
+
+  <span class="t">register</span>(email <span class="t">Email</span>, password <span class="t">Password</span>) -&gt; <span class="t">User</span>
+    <span class="k">intent</span>  <span class="s">"Create a user. Reject if the email is
+             already taken. Hash the password
+             with bcrypt before storing it."</span>
+    <span class="k">raises</span>  <span class="t">DuplicateEmail</span> <span class="c">when email taken</span>
+    <span class="k">ensures</span> result.email == email
+            result.password <span class="k">is</span> hashed
+    <span class="k">example</span> register(<span class="s">"a@b.com"</span>, <span class="s">"hunter2pw"</span>)
+            -&gt; <span class="k">a</span> <span class="t">User</span> whose email is <span class="s">"a@b.com"</span>
+}</pre>
+        </div>
+
+        <div class="arrow" aria-hidden="true">
+          <span class="m">synthesise</span><span class="a">→</span><span class="m">verify · freeze</span>
+        </div>
+
+        <div class="code">
+          <span class="stamp stamp--ok">frozen&nbsp;✓&nbsp;a17be0</span>
+          <div class="cap"><span class="dot"></span> AccountService.java · the compiler writes this</div>
+<pre><span class="c">// 4 contracts ✓   1 example ✓</span>
+<span class="k">public</span> <span class="t">User</span> <span class="n">register</span>(<span class="t">Email</span> email, <span class="t">Password</span> pw) {
+  <span class="k">if</span> (users.existsByEmail(email))
+    <span class="k">throw new</span> <span class="t">DuplicateEmail</span>(email);
+  <span class="k">var</span> hash = <span class="t">BCrypt</span>.hashpw(
+      pw.value(), <span class="t">BCrypt</span>.gensalt());
+  <span class="k">return</span> users.save(
+      <span class="k">new</span> <span class="t">User</span>(email, <span class="t">Secret</span>.of(hash)));
+}</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule" aria-hidden="true"><span>✳</span></div>
+
+  <!-- TWO LAYERS -->
+  <section class="band band--paper" id="layers">
+    <div class="wrap">
+      <p class="eyebrow">Two layers, side by side</p>
+      <h2>One layer you own. One the model realises.</h2>
+      <p class="lede muted">
+        Every declaration is made of two layers. The hard layer is deterministic and reviewable
+        like any source code. The soft layer is where prose and tests buy you brevity — but it is
+        never trusted blindly.
+      </p>
+
+      <div class="layers">
+        <div class="layer" data-reveal>
+          <p class="tag">Hard</p>
+          <h3>The shape and the guarantees</h3>
+          <p>Types, fields, signatures, contracts, policies. Diffable, reviewable, and enforced by
+             the compiler — not by convention.</p>
+          <p class="who">Written by <b>you</b> · enforced by the compiler</p>
+        </div>
+        <div class="layer" data-reveal>
+          <p class="tag">Soft</p>
+          <h3>What a body should do</h3>
+          <p><code>intent</code> prose and <code>example</code> / <code>spec</code> tests that
+             describe behaviour. Verified against the hard layer before it becomes your program.</p>
+          <p class="who">Specified by <b>you</b> · realised by the model</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- VERIFY / REJECT -->
+  <section class="band" id="verify">
+    <div class="wrap">
+      <div class="verify">
+        <div data-reveal>
+          <p class="eyebrow">Verification, not vibes</p>
+          <h2>Nothing reaches the artifact without passing its contracts.</h2>
+          <p class="lede">
+            When SkyLang synthesises a body it runs every example and checks every
+            <code>ensures</code> and <code>raises</code>. A candidate that violates the
+            specification is not quietly accepted — it is thrown out and regenerated, and if it
+            still cannot be proven, the build stops and shows you the clause that failed. The same
+            check applies to hand-written code.
+          </p>
+        </div>
+        <div class="flow" data-reveal>
+          <div class="chip chip--bad"><span class="lbl">candidate</span> ensures result.stock ≥ 0 &nbsp;✗</div>
+          <div class="chip"><span class="lbl">verdict</span> <span style="color:var(--brick-bright)">rejected · regenerate</span></div>
+          <div class="chip chip--ok"><span class="lbl">candidate</span> all contracts &amp; examples &nbsp;✓</div>
+          <div class="chip chip--ok"><span class="lbl">verdict</span> <span class="ok">frozen · shipped</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule rule--paper" aria-hidden="true" style="background:var(--paper)"><span>✳</span></div>
+
+  <!-- PIPELINE -->
+  <section class="band band--paper" id="pipeline">
+    <div class="wrap">
+      <p class="eyebrow">The compilation pipeline</p>
+      <h2>From spec to artifact — the model lives only here, at build time.</h2>
+      <p class="lede muted">Production is an ordinary artifact of the target platform. No model on the runtime path, ever.</p>
+
+      <div class="steps">
+        <div class="step" data-reveal>
+          <div class="no">01</div>
+          <h3>Parse &amp; type-check</h3>
+          <p>The hard layer only — refined types, effect sets, contract well-formedness. No model involved. This is what <code>sky check</code> runs.</p>
+        </div>
+        <div class="step" data-reveal>
+          <div class="no">02</div>
+          <h3>Synthesise &amp; verify</h3>
+          <p>For each body: reuse a frozen version, or call the model and verify the candidate against your contracts and every active policy.</p>
+        </div>
+        <div class="step" data-reveal>
+          <div class="no">03</div>
+          <h3>Freeze</h3>
+          <p>Write the accepted source plus a content hash into <code>sky.lock</code>. Later builds read the frozen body — no model, no network.</p>
+        </div>
+        <div class="step" data-reveal>
+          <div class="no">04</div>
+          <h3>Emit</h3>
+          <p>Materialise a conventional project for your profile and hand it to the standard toolchain. Real code you get to keep.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FREEZE MODEL -->
+  <section class="band" id="freeze">
+    <div class="wrap">
+      <div class="freeze">
+        <div data-reveal>
+          <p class="eyebrow">Reproducible builds, with a model in the loop</p>
+          <h2>A green build today is byte-identical tomorrow.</h2>
+          <p class="lede">
+            The obvious objection: <em>if a model writes the code, how is my build reproducible?</em>
+            SkyLang answers with freezing. The first build verifies each body and records it in
+            <code>sky.lock</code>, committed to version control. Every later build reads the frozen,
+            already-proven source — offline and identical for everyone. Change one
+            <code>intent</code> or contract, and only that method regenerates.
+          </p>
+          <p><a class="inline" href="skylang-language-guide.md">Read how freezing works →</a></p>
+        </div>
+        <div class="term" data-reveal>
+          <div class="bar">$ sky build</div>
+<pre>  Catalog.add             <span class="ok">▸ frozen @ 3f9ac2</span>   <span class="dim">✓ 2 contracts  ✓ 1 example</span>
+  Catalog.restock         <span class="re">▸ regenerated</span>      <span class="dim">✓ 3 contracts   (intent changed)</span>
+  AccountService.register <span class="ok">▸ frozen @ a17be0</span>   <span class="dim">✓ 4 contracts  ✓ 1 example</span>
+
+  <span class="dim">build/jvm-jakarta  →  target artifact   (no model at runtime)</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TOOLING -->
+  <section class="band" id="tooling">
+    <div class="wrap">
+      <p class="eyebrow">The toolchain</p>
+      <h2>A small set of verbs for the red → generate → green loop.</h2>
+      <div class="cmds">
+        <div class="cmd"><code>sky check</code><p>Type &amp; contract check only. Fast, offline, no model.</p></div>
+        <div class="cmd"><code>sky build</code><p>Synthesise and verify unfrozen bodies, then emit the artifact.</p></div>
+        <div class="cmd"><code>sky tdd</code><p>Watch mode: on a failing test, regenerate just that method until it's green.</p></div>
+        <div class="cmd"><code>sky why &lt;m&gt;</code><p>Show a method's intent, contracts, frozen body, and verification report.</p></div>
+        <div class="cmd"><code>sky freeze</code><p>Force-regenerate and re-verify every body, rewriting <code>sky.lock</code>.</p></div>
+        <div class="cmd"><code>sky test</code><p>Run every example, spec, and ensures clause as a suite.</p></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div>
+        <div class="mk">Sky<span style="color:var(--petrol-bright)">Lang</span></div>
+        <p>A specification language where you write the contract and the compiler writes the code. Built by <a class="inline" href="https://www.adeptum.se">Adeptum</a>.</p>
+      </div>
+      <div class="lk">
+        <a href="skylang-language-guide.md">Language guide</a>
+        <a href="https://github.com/adeptum-labs/skylang">Source</a>
+        <a href="https://www.adeptum.se">adeptum.se</a>
+      </div>
+    </div>
+    <div class="legal">
+      <span>© 2026 Adeptum AB, Org.nr 559494-1824.</span>
+      <span>Free software under the GNU General Public License v3.</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var els = document.querySelectorAll('[data-reveal]');
+    if (!('IntersectionObserver' in window) ||
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+      els.forEach(function(e){ e.classList.add('in'); }); return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); }
+      });
+    }, {threshold:.14, rootMargin:'0px 0px -8% 0px'});
+    els.forEach(function(e){ io.observe(e); });
+  })();
+</script>
+</body>
+</html>
