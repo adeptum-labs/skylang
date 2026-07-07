@@ -218,6 +218,7 @@
     <a class="brand" href="#top">Sky<span class="tm">Lang</span></a>
     <nav>
       <a class="hide" href="#layers">Two&nbsp;layers</a>
+      <a class="hide" href="#tests">Tests</a>
       <a class="hide" href="#pipeline">Pipeline</a>
       <a class="hide" href="#tooling">Tooling</a>
       <a href="skylang-language-guide.md">Guide</a>
@@ -341,6 +342,65 @@
           <div class="chip"><span class="lbl">verdict</span> <span style="color:var(--brick-bright)">rejected · regenerate</span></div>
           <div class="chip chip--ok"><span class="lbl">candidate</span> all contracts &amp; examples &nbsp;✓</div>
           <div class="chip chip--ok"><span class="lbl">verdict</span> <span class="ok">frozen · shipped</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule" aria-hidden="true"><span>✳</span></div>
+
+  <!-- GENERATED TESTS -->
+  <section class="band" id="tests">
+    <div class="wrap">
+      <p class="eyebrow">The tests write themselves</p>
+      <h2>Every example and contract becomes a real JUnit test.</h2>
+      <p class="lede">
+        You never write test scaffolding. Each <code>example</code> compiles to a
+        <code>@Test</code> that builds the arguments, calls the method, and asserts the expected
+        result — and every <code>ensures</code> clause rides along as an assertion inside it. This
+        generated suite is exactly what the compiler runs to accept or reject a synthesized body,
+        and it ships in the emitted project for you to keep and re-run.
+      </p>
+
+      <div class="split" data-reveal>
+        <div class="code">
+          <div class="cap"><span class="dot"></span> shop.sky · one contract, one example</div>
+<pre><span class="k">service</span> <span class="t">Catalog</span> {
+
+  <span class="t">restock</span>(p <span class="t">Product</span>, units <span class="t">Int</span>) -&gt; <span class="t">Product</span>
+    <span class="k">intent</span>   <span class="s">"Increase the product's stock by units."</span>
+    <span class="k">requires</span> units &gt; 0
+    <span class="k">ensures</span>  result.stock == p.stock + units
+    <span class="k">example</span>  restock(<span class="t">Product</span>(1, <span class="s">"Notebook"</span>, 5), 3)
+             -&gt; <span class="k">a</span> <span class="t">Product</span> with stock 8
+}</pre>
+        </div>
+
+        <div class="arrow" aria-hidden="true">
+          <span class="m">generate</span><span class="a">→</span><span class="m">run · verify</span>
+        </div>
+
+        <div class="code">
+          <span class="stamp stamp--ok">green&nbsp;✓</span>
+          <div class="cap"><span class="dot"></span> CatalogTest.java · the compiler writes and runs this</div>
+<pre><span class="k">package</span> shop;
+
+<span class="k">import</span> org.junit.jupiter.api.Test;
+<span class="k">import static</span> org.junit.jupiter.api.Assertions.*;
+
+<span class="k">public class</span> <span class="t">CatalogTest</span> {
+
+  <span class="m">@Test</span>
+  <span class="k">void</span> <span class="n">restock_example_1</span>() {
+    <span class="t">Catalog</span> svc = <span class="k">new</span> <span class="t">Catalog</span>();
+    <span class="k">var</span> p = <span class="k">new</span> <span class="t">Product</span>(1L, <span class="s">"Notebook"</span>, 5L);
+    <span class="k">var</span> units = 3L;
+    <span class="k">var</span> result = svc.<span class="n">restock</span>(p, units);
+    <span class="n">assertTrue</span>(((result).stock() == ((p).stock() + units)),
+        <span class="s">"ensures: ((result).stock() == ((p).stock() + units))"</span>);
+    <span class="n">assertEquals</span>(8L, result.stock(), <span class="s">"example: stock"</span>);
+  }
+}</pre>
         </div>
       </div>
     </div>
