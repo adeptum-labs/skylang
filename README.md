@@ -53,6 +53,22 @@ service Catalog {
 (with `@min` enforced in the compact constructor). `ensures` and `example` become JUnit tests
 in the staged project; `intent` drives the model.
 
+You write no test scaffolding: the example above compiles to `src/test/java/shop/CatalogTest.java`,
+where the `example` becomes a `@Test` and the `ensures` rides along as an assertion inside it —
+so a synthesized body is only accepted once both hold:
+
+```java
+@Test
+void restock_example_1() {
+    Catalog svc = new Catalog();
+    var p = new Product(1L, "Notebook", 5L);
+    var units = 3L;
+    var result = svc.restock(p, units);
+    assertTrue(((result).stock() == ((p).stock() + units)), "ensures: ((result).stock() == ((p).stock() + units))");
+    assertEquals(8L, result.stock(), "example: stock");
+}
+```
+
 Not yet implemented (deferred): effects/`uses db` + JPA, `Secret`/`Maybe`/`policy`,
 `page`/`flow`, the dependency `requires` registry, `spec` blocks, `raises`, `Money`, and
 property-based `ensures`.

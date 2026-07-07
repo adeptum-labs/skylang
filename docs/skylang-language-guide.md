@@ -535,6 +535,51 @@ to delete, and kept out of version control. Because it is an ordinary project, y
 open it in any IDE to step through generated code — and if you ever leave SkyLang, the
 staged project is real code you get to keep.
 
+#### The generated tests
+
+You never write test scaffolding: the suite is derived mechanically from the contracts and
+examples. Each `example` becomes one `@Test` that binds the call arguments, invokes the
+method, and asserts the expected result; every `ensures` clause is emitted as an assertion
+inside that same test — so a body only turns green when it satisfies both the example and the
+contract. Given the `Catalog` service:
+
+```sky
+service Catalog {
+  restock(p Product, units Int) -> Product
+    intent   "Increase the product's stock by units."
+    requires units > 0
+    ensures  result.stock == p.stock + units
+    example  restock(Product(1, "Notebook", 5), 3) -> a Product with stock 8
+}
+```
+
+the backend writes `src/test/java/shop/CatalogTest.java` verbatim:
+
+```java
+package shop;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class CatalogTest {
+
+    @Test
+    void restock_example_1() {
+        Catalog svc = new Catalog();
+        var p = new Product(1L, "Notebook", 5L);
+        var units = 3L;
+        var result = svc.restock(p, units);
+        assertTrue(((result).stock() == ((p).stock() + units)), "ensures: ((result).stock() == ((p).stock() + units))");
+        assertEquals(8L, result.stock(), "example: stock");
+    }
+}
+```
+
+A method with three examples yields `restock_example_1` through `restock_example_3`, each
+carrying the same `ensures` assertions. This generated class *is* the verification harness:
+`sky build` (and `sky test`) run exactly these tests against every synthesized body, and they
+ship inside the emitted project for you to keep and re-run.
+
 Two invariants hold the design together:
 
 - **The model is never on the runtime path.** It runs at build time only; production is a
