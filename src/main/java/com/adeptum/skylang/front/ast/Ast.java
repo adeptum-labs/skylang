@@ -91,7 +91,7 @@ public final class Ast {
     // ----- views -------------------------------------------------------------
 
     public record View(String name, Optional<String> route, Shows shows,
-                       List<Action> actions, List<Expect> expects) {
+                       List<Action> actions, List<Expect> expects, List<Appears> appears) {
     }
 
     /** A qualified query call like {@code Catalog.all()}. */
@@ -129,6 +129,21 @@ public final class Ast {
 
     /** {@code action "Restock" is button}. */
     public record ExpectActionKind(String label, String kind) implements Expect {
+    }
+
+    public sealed interface Appears permits AppearsPlacement, AppearsStyle, AppearsColumnOrder {
+    }
+
+    /** {@code appears action "Restock" in toolbar} — the control renders inside a named region. */
+    public record AppearsPlacement(String label, String region) implements Appears {
+    }
+
+    /** {@code appears rows is compact} — a style/density marker on a subject. */
+    public record AppearsStyle(String subject, String value) implements Appears {
+    }
+
+    /** {@code appears columns (name, stock)} — the rendered column order. */
+    public record AppearsColumnOrder(List<String> columns) implements Appears {
     }
 
     // ----- expressions -------------------------------------------------------

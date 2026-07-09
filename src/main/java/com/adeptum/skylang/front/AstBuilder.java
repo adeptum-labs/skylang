@@ -136,6 +136,7 @@ public final class AstBuilder {
         Ast.Shows shows = null;
         List<Ast.Action> actions = new ArrayList<>();
         List<Ast.Expect> expects = new ArrayList<>();
+        List<Ast.Appears> appears = new ArrayList<>();
 
         for (SkyLangParser.ViewClauseContext c : ctx.viewClause()) {
             if (c instanceof SkyLangParser.ShowsClauseContext sc) {
@@ -144,9 +145,11 @@ public final class AstBuilder {
                 actions.add(action(ac));
             } else if (c instanceof SkyLangParser.ExpectClauseContext ec) {
                 expects.add(expect(ec.expectPred()));
+            } else if (c instanceof SkyLangParser.AppearsClauseContext apc) {
+                appears.add(appears(apc.appearsPred()));
             }
         }
-        return new Ast.View(ctx.ID().getText(), route, shows, actions, expects);
+        return new Ast.View(ctx.ID().getText(), route, shows, actions, expects, appears);
     }
 
     private Ast.Shows shows(SkyLangParser.ShowsClauseContext ctx) {
@@ -196,6 +199,21 @@ public final class AstBuilder {
         }
         SkyLangParser.ExpectActionKindContext ak = (SkyLangParser.ExpectActionKindContext) ctx;
         return new Ast.ExpectActionKind(unquote(ak.STRING().getText()), ak.ID().getText());
+    }
+
+    private Ast.Appears appears(SkyLangParser.AppearsPredContext ctx) {
+        if (ctx instanceof SkyLangParser.AppearsPlacementContext p) {
+            return new Ast.AppearsPlacement(unquote(p.STRING().getText()), p.ID().getText());
+        }
+        if (ctx instanceof SkyLangParser.AppearsStyleContext s) {
+            return new Ast.AppearsStyle(s.ID(0).getText(), s.ID(1).getText());
+        }
+        SkyLangParser.AppearsColumnOrderContext co = (SkyLangParser.AppearsColumnOrderContext) ctx;
+        List<String> columns = new ArrayList<>();
+        for (int i = 0; i < co.ID().size(); i++) {
+            columns.add(co.ID(i).getText());
+        }
+        return new Ast.AppearsColumnOrder(columns);
     }
 
     // ----- examples ----------------------------------------------------------

@@ -181,4 +181,50 @@ class TypeCheckerTest {
                 """)));
         assertTrue(e.getMessage().contains("list"));
     }
+
+    @Test
+    void acceptsWellFormedAppears() {
+        assertDoesNotThrow(() -> check(withView("""
+                view V {
+                  shows  Catalog.all() as a table of (name, stock)
+                  action "Restock" on row -> Catalog.restock(row.id, ask Int)
+                  appears action "Restock" in toolbar
+                  appears rows is compact
+                  appears columns (name, stock)
+                }
+                """)));
+    }
+
+    @Test
+    void rejectsAppearsUnknownAction() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view V {
+                  shows Catalog.all() as a table of (name)
+                  appears action "Nope" in toolbar
+                }
+                """)));
+        assertTrue(e.getMessage().contains("no action"));
+    }
+
+    @Test
+    void rejectsAppearsColumnOrderUnknownField() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view V {
+                  shows Catalog.all() as a table of (name)
+                  appears columns (name, bogus)
+                }
+                """)));
+        assertTrue(e.getMessage().contains("not a field"));
+    }
+
+    @Test
+    void rejectsAppearsUnknownStyleSubject() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view V {
+                  shows Catalog.all() as a table of (name)
+                  appears sidebar is compact
+                }
+                """)));
+        assertTrue(e.getMessage().contains("sidebar"));
+    }
 }

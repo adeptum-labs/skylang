@@ -84,6 +84,7 @@ viewClause
     : SHOWS viewQuery (AS projection)?          # showsClause
     | ACTION STRING ON ID ARROW actionTarget    # actionClause
     | EXPECT expectPred                         # expectClause
+    | APPEARS appearsPred                       # appearsClause
     ;
 
 viewQuery    : ID DOT ID LPAREN args? RPAREN ;                        // Catalog.all()
@@ -94,6 +95,12 @@ actionArg    : expr | ASK type ;                                     // row.id  
 expectPred
     : ID HAS COLUMNS LPAREN ID (COMMA ID)* RPAREN  # expectColumns     // table has columns (name, stock)
     | ACTION STRING IS ID                          # expectActionKind  // action "Restock" is button
+    ;
+
+appearsPred
+    : ACTION STRING IN ID                          # appearsPlacement    // action "Restock" in toolbar
+    | ID IS ID                                     # appearsStyle        // rows is compact
+    | COLUMNS LPAREN ID (COMMA ID)* RPAREN         # appearsColumnOrder  // columns (name, stock)
     ;
 
 // ----- expressions (ANTLR left-recursion handles precedence) ----------------
@@ -132,6 +139,8 @@ HAS      : 'has' ;
 COLUMNS  : 'columns' ;
 ASK      : 'ask' ;
 IS       : 'is' ;
+APPEARS  : 'appears' ;
+IN       : 'in' ;
 
 ARROW  : '->' ;
 AT     : '@' ;

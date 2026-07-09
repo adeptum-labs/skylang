@@ -159,6 +159,29 @@ public final class TypeChecker {
                 }
             }
         }
+
+        // Appearance predicates must reference declared actions, real fields, or known style targets.
+        for (Ast.Appears a : v.appears()) {
+            switch (a) {
+                case Ast.AppearsPlacement p -> {
+                    boolean declared = v.actions().stream().anyMatch(act -> act.label().equals(p.label()));
+                    if (!declared) {
+                        throw new CheckException(where + " appears: no action labelled \"" + p.label() + "\"");
+                    }
+                }
+                case Ast.AppearsStyle s -> {
+                    if (!s.subject().equals("rows") && !s.subject().equals("table")) {
+                        throw new CheckException(where + " appears: unknown style subject '" + s.subject()
+                                + "' (expected 'rows' or 'table')");
+                    }
+                }
+                case Ast.AppearsColumnOrder co -> {
+                    for (String col : co.columns()) {
+                        requireField(where + " appears", rowType, rowFields, col);
+                    }
+                }
+            }
+        }
     }
 
     private MethodSig lookup(Map<String, Map<String, MethodSig>> services, String service, String method, String where) {
