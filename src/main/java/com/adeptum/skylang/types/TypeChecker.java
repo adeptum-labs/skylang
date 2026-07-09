@@ -23,6 +23,7 @@ package com.adeptum.skylang.types;
 
 import com.adeptum.skylang.front.ast.Ast;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,11 +61,127 @@ public final class TypeChecker {
             }
         }
 
-        // Pass 2: check every method.
+        // Pass 2: check every method and index its signature for view resolution.
+        Map<String, Map<String, MethodSig>> services = new HashMap<>();
         for (Ast.Service s : module.services()) {
+            Map<String, MethodSig> methods = services.computeIfAbsent(s.name(), k -> new HashMap<>());
             for (Ast.Method m : s.methods()) {
                 checkMethod(s.name(), m);
+                methods.put(m.name(), signatureOf(s.name(), m));
             }
+        }
+
+        // Pass 3: check every view against the entities and the service signatures.
+        for (Ast.View v : module.views()) {
+            checkView(v, services);
+        }
+    }
+
+    // ----- views -------------------------------------------------------------
+
+    /** A resolved service-method signature, used to type-check view queries and actions. */
+    private record MethodSig(List<Ty> params, Ty returnType) {
+    }
+
+    private MethodSig signatureOf(String service, Ast.Method m) {
+        List<Ty> params = new ArrayList<>();
+        for (Ast.Param p : m.params()) {
+            params.add(resolveType(p.type(), service + "." + m.name() + " parameter '" + p.name() + "'"));
+        }
+        return new MethodSig(params, resolveType(m.returnType(), service + "." + m.name() + " return type"));
+    }
+
+    private void checkView(Ast.View v, Map<String, Map<String, MethodSig>> services) {
+        String where = "view " + v.name();
+
+        if (v.shows() == null) {
+            throw new CheckException(where + " has no data source: add a 'shows' clause");
+        }
+
+        // The query must resolve to a service method returning a list of an entity (the row type).
+        Ast.QualifiedCall q = v.shows().query();
+        MethodSig querySig = lookup(services, q.service(), q.method(), where + " shows");
+        checkArgCount(where + " shows", q.service() + "." + q.method(), q.args().size(), querySig.params().size());
+        for (int i = 0; i < q.args().size(); i++) {
+            Ty actual = infer(q.args().get(i), Map.of(), where + " shows argument " + (i + 1));
+            if (!actual.equals(querySig.params().get(i))) {
+                throw new CheckException(where + " shows argument " + (i + 1) + " is " + actual
+                        + " but " + q.service() + "." + q.method() + " expects " + querySig.params().get(i));
+            }
+        }
+        Ty ret = querySig.returnType();
+        if (!ret.list() || !entities.containsKey(ret.name())) {
+            throw new CheckException(where + " shows: " + q.service() + "." + q.method()
+                    + " must return a list of an entity (e.g. [Product]) to drive a view, but returns " + ret);
+        }
+        String rowType = ret.name();
+        LinkedHashMap<String, Ty> rowFields = entities.get(rowType);
+
+        // Projected columns must be fields of the row entity.
+        if (v.shows().projection().isPresent()) {
+            for (String col : v.shows().projection().get().columns()) {
+                requireField(where + " shows", rowType, rowFields, col);
+            }
+        }
+
+        // Each action must call a declared method with row-typed / prompted arguments of matching type.
+        for (Ast.Action a : v.actions()) {
+            String actionWhere = where + " action \"" + a.label() + "\"";
+            MethodSig sig = lookup(services, a.service(), a.method(), actionWhere);
+            checkArgCount(actionWhere, a.service() + "." + a.method(), a.args().size(), sig.params().size());
+            Map<String, Ty> env = Map.of(a.rowVar(), Ty.entity(rowType));
+            for (int i = 0; i < a.args().size(); i++) {
+                Ty expected = sig.params().get(i);
+                Ty actual = switch (a.args().get(i)) {
+                    case Ast.ExprArg ea -> infer(ea.value(), env, actionWhere + " argument " + (i + 1));
+                    case Ast.AskArg ak -> resolveType(ak.type(), actionWhere + " argument " + (i + 1));
+                };
+                if (!actual.equals(expected)) {
+                    throw new CheckException(actionWhere + " argument " + (i + 1) + " is " + actual
+                            + " but " + a.service() + "." + a.method() + " expects " + expected);
+                }
+            }
+        }
+
+        // Expectations must reference real columns / declared actions.
+        for (Ast.Expect e : v.expects()) {
+            switch (e) {
+                case Ast.ExpectColumns ec -> {
+                    for (String col : ec.columns()) {
+                        requireField(where + " expect", rowType, rowFields, col);
+                    }
+                }
+                case Ast.ExpectActionKind ak -> {
+                    boolean declared = v.actions().stream().anyMatch(a -> a.label().equals(ak.label()));
+                    if (!declared) {
+                        throw new CheckException(where + " expect: no action labelled \"" + ak.label() + "\"");
+                    }
+                }
+            }
+        }
+    }
+
+    private MethodSig lookup(Map<String, Map<String, MethodSig>> services, String service, String method, String where) {
+        Map<String, MethodSig> methods = services.get(service);
+        if (methods == null) {
+            throw new CheckException(where + ": unknown service '" + service + "'");
+        }
+        MethodSig sig = methods.get(method);
+        if (sig == null) {
+            throw new CheckException(where + ": " + service + " has no method '" + method + "'");
+        }
+        return sig;
+    }
+
+    private static void checkArgCount(String where, String callee, int got, int expected) {
+        if (got != expected) {
+            throw new CheckException(where + ": " + callee + " takes " + expected + " argument(s) but got " + got);
+        }
+    }
+
+    private static void requireField(String where, String entity, Map<String, Ty> fields, String field) {
+        if (!fields.containsKey(field)) {
+            throw new CheckException(where + ": '" + field + "' is not a field of " + entity);
         }
     }
 
@@ -252,7 +369,7 @@ public final class TypeChecker {
     }
 
     private Ty resolveType(Ast.TypeRef ref, String where) {
-        return switch (ref.name()) {
+        Ty base = switch (ref.name()) {
             case "Int" -> Ty.INT;
             case "Text" -> Ty.TEXT;
             default -> {
@@ -262,5 +379,6 @@ public final class TypeChecker {
                 throw new CheckException(where + ": unknown type '" + ref.name() + "'");
             }
         };
+        return ref.list() ? Ty.list(base.name()) : base;
     }
 }

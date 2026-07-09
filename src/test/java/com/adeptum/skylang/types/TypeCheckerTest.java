@@ -103,4 +103,72 @@ class TypeCheckerTest {
                 """));
         assertTrue(e.getMessage().contains("@min"));
     }
+
+    // ----- views -------------------------------------------------------------
+
+    private static String withView(String view) {
+        return """
+                module shop
+                entity Product { id Int  name Text  stock Int @min(0) }
+                service Catalog {
+                  all() -> [Product]  intent "all"
+                  one() -> Product     intent "one"
+                  restock(id Int, units Int) -> Product  intent "restock"
+                }
+                %s
+                """.formatted(view);
+    }
+
+    @Test
+    void acceptsWellFormedView() {
+        assertDoesNotThrow(() -> check(withView("""
+                view ProductList at "/products" {
+                  shows  Catalog.all() as a table of (name, stock)
+                  action "Restock" on row -> Catalog.restock(row.id, ask Int)
+                  expect table has columns (name, stock)
+                }
+                """)));
+    }
+
+    @Test
+    void rejectsViewUnknownColumn() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view V {
+                  shows Catalog.all() as a table of (name, bogus)
+                }
+                """)));
+        assertTrue(e.getMessage().contains("not a field"));
+    }
+
+    @Test
+    void rejectsViewUnknownActionMethod() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view V {
+                  shows  Catalog.all() as a table of (name)
+                  action "X" on row -> Catalog.nope(row.id)
+                }
+                """)));
+        assertTrue(e.getMessage().contains("no method"));
+    }
+
+    @Test
+    void rejectsViewActionArgTypeMismatch() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view V {
+                  shows  Catalog.all() as a table of (name)
+                  action "Restock" on row -> Catalog.restock(row.id, ask Text)
+                }
+                """)));
+        assertTrue(e.getMessage().contains("Int"));
+    }
+
+    @Test
+    void rejectsViewQueryNotList() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view V {
+                  shows Catalog.one() as a table of (name)
+                }
+                """)));
+        assertTrue(e.getMessage().contains("list"));
+    }
 }
