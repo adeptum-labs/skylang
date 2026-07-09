@@ -22,20 +22,22 @@
 package com.adeptum.skylang.verify;
 
 import java.util.List;
+import java.util.Set;
 
 /**
- * A normalized, pixel-free view of a Faces view's markup: the columns it binds and the controls it
- * exposes. A view's {@code expect} clauses are checked against this structure, so the same
+ * A normalized, pixel-free view of a Faces view's markup: the columns it binds, the controls it
+ * exposes (with the style regions they render within), and the table's style classes. A view's
+ * {@code expect} and {@code appears} clauses are checked against this structure, so the same
  * assertions hold regardless of the component library that produced the markup.
  */
-public record SemanticTree(List<Column> columns, List<Control> controls) {
+public record SemanticTree(List<Column> columns, List<Control> controls, Set<String> tableClasses) {
 
     /** A data-table column: the row field it binds and its header text. */
     public record Column(String field, String header) {
     }
 
-    /** A control: its role ({@code "button"}, {@code "textbox"}, ...) and accessible name. */
-    public record Control(String role, String name) {
+    /** A control: its role ({@code "button"}, {@code "textbox"}, ...), accessible name, and enclosing region classes. */
+    public record Control(String role, String name, Set<String> regions) {
     }
 
     public List<String> columnFields() {
@@ -48,5 +50,15 @@ public record SemanticTree(List<Column> columns, List<Control> controls) {
 
     public boolean hasButton(String label) {
         return controls.stream().anyMatch(c -> c.role().equals("button") && label.equals(c.name()));
+    }
+
+    /** True if a control named {@code label} renders inside a region carrying the class {@code region}. */
+    public boolean controlInRegion(String label, String region) {
+        return controls.stream().anyMatch(c -> label.equals(c.name()) && c.regions().contains(region));
+    }
+
+    /** True if the data table carries the style class {@code style}. */
+    public boolean tableHasStyle(String style) {
+        return tableClasses.contains(style);
     }
 }

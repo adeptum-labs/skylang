@@ -33,7 +33,7 @@ class SemanticTreeExtractorTest {
 
     private static final String TABLE = """
             <h:form id="f">
-              <h:dataTable id="products" value="#{bean.rows}" var="row">
+              <h:dataTable id="products" styleClass="compact" value="#{bean.rows}" var="row">
                 <h:column id="c_name">
                   <f:facet name="header"><h:outputText value="Name"/></f:facet>
                   <h:outputText id="name" value="#{row.name}"/>
@@ -43,7 +43,9 @@ class SemanticTreeExtractorTest {
                   <h:outputText id="stock" value="#{row.stock}"/>
                 </h:column>
                 <h:column id="c_actions">
-                  <h:commandButton id="restock" value="Restock" action="#{bean.restock(row.id)}"/>
+                  <h:panelGroup styleClass="toolbar">
+                    <h:commandButton id="restock" value="Restock" action="#{bean.restock(row.id)}"/>
+                  </h:panelGroup>
                 </h:column>
               </h:dataTable>
             </h:form>
@@ -71,5 +73,13 @@ class SemanticTreeExtractorTest {
         SemanticTree tree = extractor.extract(TABLE);
         assertTrue(tree.hasButton("Restock"));
         assertFalse(tree.hasButton("Delete"));
+    }
+
+    @Test
+    void extractsRegionAndTableStyle() {
+        SemanticTree tree = extractor.extract(TABLE);
+        assertTrue(tree.tableHasStyle("compact"), "the data table's styleClass should be captured");
+        assertTrue(tree.controlInRegion("Restock", "toolbar"), "the button's enclosing region should be captured");
+        assertFalse(tree.controlInRegion("Restock", "sidebar"));
     }
 }

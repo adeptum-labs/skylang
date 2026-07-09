@@ -53,6 +53,25 @@ public final class ViewVerifier {
                 }
             }
         }
+        for (Ast.Appears a : view.appears()) {
+            switch (a) {
+                case Ast.AppearsPlacement p -> {
+                    if (!tree.controlInRegion(p.label(), p.region())) {
+                        unmet.add("expected \"" + p.label() + "\" to render in region " + p.region());
+                    }
+                }
+                case Ast.AppearsStyle s -> {
+                    if (!tree.tableHasStyle(s.value())) {
+                        unmet.add("expected the " + s.subject() + " to be " + s.value());
+                    }
+                }
+                case Ast.AppearsColumnOrder co -> {
+                    if (!tree.columnFields().equals(co.columns())) {
+                        unmet.add("expected column order " + co.columns() + " but got " + tree.columnFields());
+                    }
+                }
+            }
+        }
         return unmet;
     }
 }
