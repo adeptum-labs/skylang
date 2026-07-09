@@ -32,7 +32,7 @@ grammar SkyLang;
 
 module_ : MODULE ID decl* EOF ;
 
-decl : entity | service ;
+decl : entity | service | view ;
 
 // ----- entities -------------------------------------------------------------
 
@@ -51,7 +51,10 @@ method : ID LPAREN params? RPAREN ARROW type clause+ ;
 params : param (COMMA param)* ;
 param  : ID type ;
 
-type : ID ;   // Int | Text | an entity name
+type
+    : ID               # namedType    // Int | Text | an entity name
+    | LBRACK ID RBRACK # listType      // [Product] — a list of an entity
+    ;
 
 clause
     : INTENT STRING                        # intentClause
@@ -70,6 +73,28 @@ fieldExpect : ID expr ;                                     // "stock 8"  =>  fi
 
 call : ID LPAREN args? RPAREN ;
 args : expr (COMMA expr)* ;
+
+// ----- views ----------------------------------------------------------------
+
+view : VIEW ID route? LBRACE viewClause* RBRACE ;
+
+route : AT_KW STRING ;
+
+viewClause
+    : SHOWS viewQuery (AS projection)?          # showsClause
+    | ACTION STRING ON ID ARROW actionTarget    # actionClause
+    | EXPECT expectPred                         # expectClause
+    ;
+
+viewQuery    : ID DOT ID LPAREN args? RPAREN ;                        // Catalog.all()
+projection   : ID ID OF LPAREN ID (COMMA ID)* RPAREN ;               // a table of (name, stock)
+actionTarget : ID DOT ID LPAREN actionArg (COMMA actionArg)* RPAREN ; // Catalog.restock(row.id, ask Int)
+actionArg    : expr | ASK type ;                                     // row.id  |  ask Int
+
+expectPred
+    : ID HAS COLUMNS LPAREN ID (COMMA ID)* RPAREN  # expectColumns     // table has columns (name, stock)
+    | ACTION STRING IS ID                          # expectActionKind  // action "Restock" is button
+    ;
 
 // ----- expressions (ANTLR left-recursion handles precedence) ----------------
 
@@ -95,6 +120,18 @@ INTENT   : 'intent' ;
 REQUIRES : 'requires' ;
 ENSURES  : 'ensures' ;
 EXAMPLE  : 'example' ;
+VIEW     : 'view' ;
+SHOWS    : 'shows' ;
+ACTION   : 'action' ;
+EXPECT   : 'expect' ;
+AT_KW    : 'at' ;
+AS       : 'as' ;
+OF       : 'of' ;
+ON       : 'on' ;
+HAS      : 'has' ;
+COLUMNS  : 'columns' ;
+ASK      : 'ask' ;
+IS       : 'is' ;
 
 ARROW  : '->' ;
 AT     : '@' ;
@@ -102,6 +139,8 @@ LBRACE : '{' ;
 RBRACE : '}' ;
 LPAREN : '(' ;
 RPAREN : ')' ;
+LBRACK : '[' ;
+RBRACK : ']' ;
 COMMA  : ',' ;
 DOT    : '.' ;
 

@@ -32,13 +32,14 @@ public final class Lowering {
     private Lowering() {
     }
 
-    /** {@code Int -> long}, {@code Text -> String}, an entity name maps to its class. */
+    /** {@code Int -> long}, {@code Text -> String}, an entity name maps to its class, {@code [E] -> List<E>}. */
     public static String javaType(Ast.TypeRef type) {
-        return switch (type.name()) {
+        String base = switch (type.name()) {
             case "Int" -> "long";
             case "Text" -> "String";
             default -> type.name();
         };
+        return type.list() ? "java.util.List<" + base + ">" : base;
     }
 
     /** A Java literal/expression for an example argument or expected value. */

@@ -21,6 +21,7 @@
 
 package com.adeptum.skylang;
 
+import com.adeptum.skylang.backend.FacesViewStager;
 import com.adeptum.skylang.backend.JvmProfile;
 import com.adeptum.skylang.backend.ProjectStager;
 import com.adeptum.skylang.freeze.Hashing;
@@ -28,8 +29,10 @@ import com.adeptum.skylang.freeze.Lock;
 import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.synth.PromptBuilder;
+import com.adeptum.skylang.synth.UiPromptBuilder;
 import com.adeptum.skylang.verify.VerificationResult;
 import com.adeptum.skylang.verify.Verifier;
+import com.adeptum.skylang.verify.ViewVerifier;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -39,16 +42,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Drives the build pipeline for one already-checked module (guide §12): resolve each method's
- * body from the freeze store or the model, stage the target project, verify it, then freeze the
- * newly-synthesized bodies. The model is called only for methods whose spec hash changed.
+ * Drives the build pipeline for one already-checked module (guide §12): resolve each method body and
+ * view from the freeze store or the model, stage the target project, verify it, then freeze the
+ * newly-synthesized units. The model is called only for units whose spec hash changed. Method bodies
+ * are verified by the target toolchain; views are verified against their structural expectations.
  */
 public final class Pipeline {
 
     private final Llm client;
     private final Verifier verifier;
     private final PromptBuilder prompts = new PromptBuilder();
+    private final UiPromptBuilder uiPrompts = new UiPromptBuilder();
     private final ProjectStager stager = new ProjectStager();
+    private final FacesViewStager facesViewStager = new FacesViewStager();
+    private final ViewVerifier viewVerifier = new ViewVerifier();
     private final int maxRegenerations;
 
     public Pipeline(Llm client, Verifier verifier) {
@@ -78,11 +85,27 @@ public final class Pipeline {
         }
     }
 
+    /** One unit of work: a view plus its synthesized markup and backing bean. */
+    private static final class ViewUnit {
+        final Ast.View view;
+        final String key;
+        final String specHash;
+        UiPromptBuilder.UiArtifact artifact;
+        boolean fresh;
+
+        ViewUnit(Ast.View view, String key, String specHash) {
+            this.view = view;
+            this.key = key;
+            this.specHash = specHash;
+        }
+    }
+
     /** @return 0 on success, non-zero on a verification/synthesis failure. */
     public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err) {
         Lock lock = Lock.load(lockPath);
         lock.setProfile(JvmProfile.ID, JvmProfile.VERSION);
 
+        // Resolve method bodies: reuse a frozen body when its hash matches, else synthesize.
         List<Unit> units = new ArrayList<>();
         for (Ast.Service s : module.services()) {
             for (Ast.Method m : s.methods()) {
@@ -90,8 +113,6 @@ public final class Pipeline {
                 units.add(new Unit(s, m, key, Hashing.sha256(specString(module, m))));
             }
         }
-
-        // Resolve bodies: reuse a frozen body when its hash matches, else synthesize.
         boolean anyFresh = false;
         for (Unit u : units) {
             var frozen = lock.get(u.key);
@@ -104,8 +125,32 @@ public final class Pipeline {
             }
         }
 
-        // Stage the project. If nothing changed, everything is already verified — skip the test run.
+        // Resolve views: reuse frozen markup, else synthesize and dispose against its expectations.
+        List<ViewUnit> viewUnits = new ArrayList<>();
+        for (Ast.View v : module.views()) {
+            String key = ProjectStager.viewKey(module.name(), v.name());
+            viewUnits.add(new ViewUnit(v, key, Hashing.sha256(viewSpecString(module, v))));
+        }
+        boolean anyViewFresh = false;
+        for (ViewUnit u : viewUnits) {
+            var frozen = lock.getView(u.key);
+            if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
+                u.artifact = new UiPromptBuilder.UiArtifact(frozen.get().markup(), frozen.get().bean());
+            } else if (resolveView(module, u, out)) {
+                u.fresh = true;
+                anyViewFresh = true;
+            } else {
+                err.println("build failed: view " + u.view.name()
+                        + " did not satisfy its expectations after " + (maxRegenerations + 1) + " attempt(s).");
+                return 1;
+            }
+        }
+
+        // Stage the project. If no method changed, everything is already verified — skip the test run.
         stager.stage(module, bodyMap(units), buildDir);
+        if (!module.views().isEmpty()) {
+            facesViewStager.stage(module, viewArtifacts(viewUnits), buildDir);
+        }
         if (anyFresh) {
             int attempts = 0;
             VerificationResult result = verifier.verify(buildDir);
@@ -125,16 +170,25 @@ public final class Pipeline {
                 err.println(result.output());
                 return 1;
             }
-            // Verified: freeze the fresh bodies.
             for (Unit u : units) {
                 if (u.fresh) {
                     lock.put(u.key, new Lock.Entry(u.specHash, u.body));
                 }
             }
+        }
+
+        // Freeze the fresh views — they were already disposed against their expectations above.
+        for (ViewUnit u : viewUnits) {
+            if (u.fresh) {
+                lock.putView(u.key, new Lock.ViewEntry(u.specHash, u.artifact.markup(), u.artifact.bean()));
+            }
+        }
+
+        if (anyFresh || anyViewFresh) {
             lock.save(lockPath);
         }
 
-        report(units, out);
+        report(units, viewUnits, out);
         out.println("staged: " + buildDir);
         return 0;
     }
@@ -142,6 +196,25 @@ public final class Pipeline {
     private String synthesize(Ast.Module module, Unit u) {
         String reply = client.complete(prompts.system(), prompts.user(module, u.service, u.method));
         return prompts.extractBody(reply);
+    }
+
+    /** Synthesize a view and re-synthesize until its expectations hold or the attempts run out. */
+    private boolean resolveView(Ast.Module module, ViewUnit u, PrintStream out) {
+        u.artifact = synthesizeView(module, u.view);
+        List<String> unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup());
+        int attempts = 0;
+        while (!unmet.isEmpty() && attempts < maxRegenerations) {
+            attempts++;
+            out.println("  view " + u.view.name() + " unmet " + unmet + " — regenerating (attempt " + attempts + ")");
+            u.artifact = synthesizeView(module, u.view);
+            unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup());
+        }
+        return unmet.isEmpty();
+    }
+
+    private UiPromptBuilder.UiArtifact synthesizeView(Ast.Module module, Ast.View view) {
+        String reply = client.complete(uiPrompts.system(UiPromptBuilder.STANDARD), uiPrompts.user(module, view));
+        return uiPrompts.extractArtifacts(reply);
     }
 
     private static Map<String, String> bodyMap(List<Unit> units) {
@@ -152,9 +225,25 @@ public final class Pipeline {
         return map;
     }
 
-    private void report(List<Unit> units, PrintStream out) {
+    private static Map<String, UiPromptBuilder.UiArtifact> viewArtifacts(List<ViewUnit> viewUnits) {
+        Map<String, UiPromptBuilder.UiArtifact> map = new LinkedHashMap<>();
+        for (ViewUnit u : viewUnits) {
+            map.put(u.view.name(), u.artifact);
+        }
+        return map;
+    }
+
+    private void report(List<Unit> units, List<ViewUnit> viewUnits, PrintStream out) {
         for (Unit u : units) {
             String label = u.service.name() + "." + u.method.name();
+            if (u.fresh) {
+                out.printf("  %-28s regenerated   (verified)%n", label);
+            } else {
+                out.printf("  %-28s frozen @ %s%n", label, Hashing.shortHash(u.specHash));
+            }
+        }
+        for (ViewUnit u : viewUnits) {
+            String label = "view " + u.view.name();
             if (u.fresh) {
                 out.printf("  %-28s regenerated   (verified)%n", label);
             } else {
@@ -174,6 +263,23 @@ public final class Pipeline {
             sb.append("entity ").append(e).append('\n');
         }
         sb.append("method ").append(method).append('\n');
+        return sb.toString();
+    }
+
+    /**
+     * Canonical text whose hash freezes a view. Includes the profile, every entity, and every service
+     * signature the view may reference, so a change to the data it renders re-triggers synthesis.
+     */
+    private static String viewSpecString(Ast.Module module, Ast.View view) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("profile=").append(JvmProfile.ID).append('@').append(JvmProfile.VERSION).append('\n');
+        for (Ast.Entity e : module.entities()) {
+            sb.append("entity ").append(e).append('\n');
+        }
+        for (Ast.Service s : module.services()) {
+            sb.append("service ").append(s).append('\n');
+        }
+        sb.append("view ").append(view).append('\n');
         return sb.toString();
     }
 }

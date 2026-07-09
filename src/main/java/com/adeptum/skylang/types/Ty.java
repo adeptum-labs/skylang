@@ -23,16 +23,26 @@ package com.adeptum.skylang.types;
 
 /**
  * A resolved SkyLang type in the thin slice: the primitives {@code Int}/{@code Text},
- * the contract-only {@code Bool}, or an entity type carrying its name. Identity is by name.
+ * the contract-only {@code Bool}, an entity type carrying its name, or a {@code list} of one
+ * of those (e.g. {@code [Product]}). Identity is by ({@code name}, {@code list}).
  */
-public record Ty(String name) {
+public record Ty(String name, boolean list) {
 
-    public static final Ty INT = new Ty("Int");
-    public static final Ty TEXT = new Ty("Text");
-    public static final Ty BOOL = new Ty("Bool");
+    public static final Ty INT = new Ty("Int", false);
+    public static final Ty TEXT = new Ty("Text", false);
+    public static final Ty BOOL = new Ty("Bool", false);
+
+    public Ty(String name) {
+        this(name, false);
+    }
 
     public static Ty entity(String name) {
-        return new Ty(name);
+        return new Ty(name, false);
+    }
+
+    /** A list whose element type has the given name, e.g. {@code list("Product")} is {@code [Product]}. */
+    public static Ty list(String element) {
+        return new Ty(element, true);
     }
 
     public boolean isInt() {
@@ -49,6 +59,6 @@ public record Ty(String name) {
 
     @Override
     public String toString() {
-        return name;
+        return list ? "[" + name + "]" : name;
     }
 }

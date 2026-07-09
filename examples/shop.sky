@@ -8,9 +8,19 @@ entity Product {
 
 service Catalog {
 
+  all() -> [Product]
+    intent "List every product in the catalog."
+
   restock(p Product, units Int) -> Product
     intent  "Return a copy of the product with its stock increased by units."
     requires units > 0
     ensures  result.stock == p.stock + units
     example  restock(Product(1, "Notebook", 5), 3) -> a Product with stock 8
+}
+
+view ProductList at "/products" {
+  shows  Catalog.all() as a table of (name, stock)
+  action "Restock" on row -> Catalog.restock(row, ask Int)
+  expect table has columns (name, stock)
+  expect action "Restock" is button
 }

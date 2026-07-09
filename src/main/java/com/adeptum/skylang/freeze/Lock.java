@@ -42,9 +42,14 @@ public final class Lock {
     public record Entry(String specHash, String body) {
     }
 
+    /** A frozen view: the hash of its spec and the accepted Facelets markup plus backing bean. */
+    public record ViewEntry(String specHash, String markup, String bean) {
+    }
+
     private String profileId = "";
     private String profileVersion = "";
     private final Map<String, Entry> methods = new LinkedHashMap<>();
+    private final Map<String, ViewEntry> views = new LinkedHashMap<>();
 
     public static Lock load(Path path) {
         Lock lock = new Lock();
@@ -64,6 +69,16 @@ public final class Lock {
                             lock.methods.put(String.valueOf(e.getKey()), new Entry(
                                     String.valueOf(m.get("specHash")),
                                     String.valueOf(m.get("body"))));
+                        }
+                    }
+                }
+                if (map.get("views") instanceof Map<?, ?> viewMap) {
+                    for (Map.Entry<?, ?> e : viewMap.entrySet()) {
+                        if (e.getValue() instanceof Map<?, ?> v) {
+                            lock.views.put(String.valueOf(e.getKey()), new ViewEntry(
+                                    String.valueOf(v.get("specHash")),
+                                    String.valueOf(v.get("markup")),
+                                    String.valueOf(v.get("bean"))));
                         }
                     }
                 }
@@ -87,9 +102,19 @@ public final class Lock {
             methodMap.put(key, m);
         });
 
+        Map<String, Object> viewMap = new LinkedHashMap<>();
+        views.forEach((key, entry) -> {
+            Map<String, Object> v = new LinkedHashMap<>();
+            v.put("specHash", entry.specHash());
+            v.put("markup", entry.markup());
+            v.put("bean", entry.bean());
+            viewMap.put(key, v);
+        });
+
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("profile", profile);
         root.put("methods", methodMap);
+        root.put("views", viewMap);
 
         try {
             Files.writeString(path, Json.write(root) + "\n");
@@ -113,5 +138,13 @@ public final class Lock {
 
     public void put(String key, Entry entry) {
         methods.put(key, entry);
+    }
+
+    public Optional<ViewEntry> getView(String key) {
+        return Optional.ofNullable(views.get(key));
+    }
+
+    public void putView(String key, ViewEntry entry) {
+        views.put(key, entry);
     }
 }

@@ -35,7 +35,7 @@ public final class Ast {
     private Ast() {
     }
 
-    public record Module(String name, List<Entity> entities, List<Service> services) {
+    public record Module(String name, List<Entity> entities, List<Service> services, List<View> views) {
     }
 
     public record Entity(String name, List<Field> fields) {
@@ -51,8 +51,11 @@ public final class Ast {
     public record Param(String name, TypeRef type) {
     }
 
-    /** A reference to a type by name: {@code Int}, {@code Text}, or an entity name. */
-    public record TypeRef(String name) {
+    /** A reference to a type by name: {@code Int}, {@code Text}, or an entity name; {@code list} marks {@code [E]}. */
+    public record TypeRef(String name, boolean list) {
+        public TypeRef(String name) {
+            this(name, false);
+        }
     }
 
     public record Method(String name,
@@ -83,6 +86,49 @@ public final class Ast {
 
     /** {@code stock 8} — the named field of the result is expected to equal {@code expected}. */
     public record FieldExpect(String field, Expr expected) {
+    }
+
+    // ----- views -------------------------------------------------------------
+
+    public record View(String name, Optional<String> route, Shows shows,
+                       List<Action> actions, List<Expect> expects) {
+    }
+
+    /** A qualified query call like {@code Catalog.all()}. */
+    public record QualifiedCall(String service, String method, List<Expr> args) {
+    }
+
+    public record Shows(QualifiedCall query, Optional<Projection> projection) {
+    }
+
+    /** {@code a table of (name, stock)} — {@code kind} is "table" or "form". */
+    public record Projection(String kind, List<String> columns) {
+    }
+
+    /** {@code action "Restock" on row -> Catalog.restock(row.id, ask Int)}. */
+    public record Action(String label, String rowVar, String service, String method, List<ActionArg> args) {
+    }
+
+    public sealed interface ActionArg permits ExprArg, AskArg {
+    }
+
+    /** An action argument that is an expression over the row, e.g. {@code row.id}. */
+    public record ExprArg(Expr value) implements ActionArg {
+    }
+
+    /** An action argument the user is prompted for, e.g. {@code ask Int}. */
+    public record AskArg(TypeRef type) implements ActionArg {
+    }
+
+    public sealed interface Expect permits ExpectColumns, ExpectActionKind {
+    }
+
+    /** {@code table has columns (name, stock)}. */
+    public record ExpectColumns(String subject, List<String> columns) implements Expect {
+    }
+
+    /** {@code action "Restock" is button}. */
+    public record ExpectActionKind(String label, String kind) implements Expect {
     }
 
     // ----- expressions -------------------------------------------------------

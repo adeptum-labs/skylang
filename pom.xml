@@ -63,6 +63,12 @@
       <artifactId>picocli</artifactId>
       <version>${picocli.version}</version>
     </dependency>
+    <!-- HTML/XHTML parsing for offline structural checks of generated Faces views. -->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>1.19.1</version>
+    </dependency>
 
     <dependency>
       <groupId>org.junit.jupiter</groupId>
