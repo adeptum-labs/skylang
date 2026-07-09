@@ -120,6 +120,19 @@
     background:rgba(39,95,103,.16); transform:rotate(3deg)}
   .stamp--bad{color:var(--brick-bright); border:1px solid var(--brick);
     background:rgba(139,46,46,.14); transform:rotate(-3deg)}
+  /* language tabs on a generated panel */
+  .code .cap{flex-wrap:wrap}
+  .capnote{color:var(--muted-dark)}
+  .tabs{display:flex; gap:.15rem; margin-left:auto}
+  .tab{font-family:var(--mono); font-size:.7rem; font-weight:600; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--muted-dark); background:transparent;
+    border:1px solid transparent; padding:.24rem .6rem; line-height:1; cursor:pointer;
+    transition:color .15s ease, border-color .15s ease, background .15s ease}
+  .tab:hover{color:var(--on-dark)}
+  .tab[aria-selected="true"]{color:var(--petrol-bright);
+    border-color:var(--petrol-bright); background:rgba(39,95,103,.14)}
+  .tab:focus-visible{outline:2px solid var(--petrol-bright); outline-offset:1px}
+  .pane[hidden]{display:none}
 
   /* ---- asterisk divider ---- */
   .rule{display:flex; align-items:center; gap:1.2rem; color:var(--petrol);
@@ -279,9 +292,19 @@
           <span class="m">synthesise</span><span class="a">→</span><span class="m">verify · freeze</span>
         </div>
 
-        <div class="code">
+        <div class="code" data-langpanel>
           <span class="stamp stamp--ok">frozen&nbsp;✓&nbsp;a17be0</span>
-          <div class="cap"><span class="dot"></span> AccountService.java · the compiler writes this</div>
+          <div class="cap">
+            <span class="dot"></span>
+            <span class="fname">AccountService.java</span>
+            <span class="capnote">· the compiler writes this</span>
+            <div class="tabs" role="tablist" aria-label="Target language">
+              <button type="button" class="tab" role="tab" aria-selected="true" data-lang="java" data-fname="AccountService.java">Java</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" data-lang="ts" data-fname="AccountService.ts">TypeScript</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" data-lang="py" data-fname="account_service.py">Python</button>
+            </div>
+          </div>
+          <div class="pane" data-lang="java">
 <pre><span class="c">// 4 contracts ✓   1 example ✓</span>
 <span class="k">public</span> <span class="t">User</span> <span class="n">register</span>(<span class="t">Email</span> email, <span class="t">Password</span> pw) {
   <span class="k">if</span> (users.existsByEmail(email))
@@ -291,6 +314,30 @@
   <span class="k">return</span> users.save(
       <span class="k">new</span> <span class="t">User</span>(email, <span class="t">Secret</span>.of(hash)));
 }</pre>
+          </div>
+          <div class="pane" data-lang="ts" hidden>
+<pre><span class="c">// 4 contracts ✓   1 example ✓</span>
+<span class="k">async</span> <span class="n">register</span>(
+    email: <span class="t">Email</span>, pw: <span class="t">Password</span>): <span class="t">Promise</span>&lt;<span class="t">User</span>&gt; {
+  <span class="k">if</span> (<span class="k">await</span> <span class="k">this</span>.users.existsByEmail(email))
+    <span class="k">throw new</span> <span class="t">DuplicateEmail</span>(email);
+  <span class="k">const</span> hash = <span class="k">await</span> bcrypt.hash(pw.value, 12);
+  <span class="k">return</span> <span class="k">this</span>.users.save(
+    <span class="k">new</span> <span class="t">User</span>(email, <span class="t">Secret</span>.of(hash)));
+}</pre>
+          </div>
+          <div class="pane" data-lang="py" hidden>
+<pre><span class="c"># 4 contracts ✓   1 example ✓</span>
+<span class="k">def</span> <span class="n">register</span>(
+    <span class="k">self</span>, email: <span class="t">Email</span>, pw: <span class="t">Password</span>
+) -&gt; <span class="t">User</span>:
+    <span class="k">if</span> <span class="k">self</span>.users.exists_by_email(email):
+        <span class="k">raise</span> <span class="t">DuplicateEmail</span>(email)
+    hashed = bcrypt.hashpw(
+        pw.value, bcrypt.gensalt())
+    <span class="k">return</span> <span class="k">self</span>.users.save(
+        <span class="t">User</span>(email, <span class="t">Secret</span>.of(hashed)))</pre>
+          </div>
         </div>
       </div>
     </div>
@@ -359,11 +406,12 @@
   <section class="band" id="tests">
     <div class="wrap">
       <p class="eyebrow">The tests write themselves</p>
-      <h2>Every example and contract becomes a real JUnit test.</h2>
+      <h2>Every example and contract becomes a real unit test.</h2>
       <p class="lede">
         You never write test scaffolding. Each <code>example</code> compiles to a
-        <code>@Test</code> that builds the arguments, calls the method, and asserts the expected
-        result — and every <code>ensures</code> clause rides along as an assertion inside it. This
+        unit test in your target's framework that builds the arguments, calls the method, and
+        asserts the expected result — and every <code>ensures</code> clause rides along as an
+        assertion inside it. This
         generated suite is exactly what the compiler runs to accept or reject a synthesized body,
         and it ships in the emitted project for you to keep and re-run.
       </p>
@@ -386,9 +434,19 @@
           <span class="m">generate</span><span class="a">→</span><span class="m">run · verify</span>
         </div>
 
-        <div class="code">
+        <div class="code" data-langpanel>
           <span class="stamp stamp--ok">green&nbsp;✓</span>
-          <div class="cap"><span class="dot"></span> CatalogTest.java · the compiler writes and runs this</div>
+          <div class="cap">
+            <span class="dot"></span>
+            <span class="fname">CatalogTest.java</span>
+            <span class="capnote">· the compiler writes and runs this</span>
+            <div class="tabs" role="tablist" aria-label="Target language">
+              <button type="button" class="tab" role="tab" aria-selected="true" data-lang="java" data-fname="CatalogTest.java">Java</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" data-lang="ts" data-fname="catalog.test.ts">TypeScript</button>
+              <button type="button" class="tab" role="tab" aria-selected="false" tabindex="-1" data-lang="py" data-fname="test_catalog.py">Python</button>
+            </div>
+          </div>
+          <div class="pane" data-lang="java">
 <pre><span class="k">package</span> shop;
 
 <span class="k">import</span> org.junit.jupiter.api.Test;
@@ -409,6 +467,38 @@
         <span class="s">"example: stock"</span>);
   }
 }</pre>
+          </div>
+          <div class="pane" data-lang="ts" hidden>
+<pre><span class="k">import</span> { test, expect } <span class="k">from</span> <span class="s">"vitest"</span>;
+<span class="k">import</span> { <span class="t">Catalog</span> } <span class="k">from</span> <span class="s">"./catalog"</span>;
+<span class="k">import</span> { <span class="t">Product</span> } <span class="k">from</span> <span class="s">"./product"</span>;
+
+<span class="n">test</span>(<span class="s">"restock example 1"</span>, () =&gt; {
+  <span class="k">const</span> svc = <span class="k">new</span> <span class="t">Catalog</span>();
+  <span class="k">const</span> p = <span class="k">new</span> <span class="t">Product</span>(1n, <span class="s">"Notebook"</span>, 5n);
+  <span class="k">const</span> units = 3n;
+  <span class="k">const</span> result = svc.<span class="n">restock</span>(p, units);
+  <span class="c">// ensures: result.stock == p.stock + units</span>
+  <span class="n">expect</span>(result.stock).<span class="n">toBe</span>(p.stock + units);
+  <span class="c">// example: stock</span>
+  <span class="n">expect</span>(result.stock).<span class="n">toBe</span>(8n);
+});</pre>
+          </div>
+          <div class="pane" data-lang="py" hidden>
+<pre><span class="k">from</span> catalog <span class="k">import</span> <span class="t">Catalog</span>
+<span class="k">from</span> product <span class="k">import</span> <span class="t">Product</span>
+
+
+<span class="k">def</span> <span class="n">test_restock_example_1</span>():
+    svc = <span class="t">Catalog</span>()
+    p = <span class="t">Product</span>(1, <span class="s">"Notebook"</span>, 5)
+    units = 3
+    result = svc.restock(p, units)
+    <span class="c"># ensures: result.stock == p.stock + units</span>
+    <span class="k">assert</span> result.stock == p.stock + units
+    <span class="c"># example: stock</span>
+    <span class="k">assert</span> result.stock == 8</pre>
+          </div>
         </div>
       </div>
     </div>
@@ -600,6 +690,39 @@
       if(raf) cancelAnimationFrame(raf);
       last = 0; size();
       if(reduce){ draw(0); } else { raf = requestAnimationFrame(frame); }
+    });
+  })();
+
+  // Language tabs: swap the visible target-language pane on a generated panel.
+  (function(){
+    var panels = document.querySelectorAll('[data-langpanel]');
+    Array.prototype.forEach.call(panels, function(panel){
+      var tabs = Array.prototype.slice.call(panel.querySelectorAll('.tab'));
+      var panes = panel.querySelectorAll('.pane');
+      var fname = panel.querySelector('.fname');
+      function select(lang, focus){
+        tabs.forEach(function(t){
+          var on = t.getAttribute('data-lang') === lang;
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+          t.tabIndex = on ? 0 : -1;
+          if(on){
+            if(fname && t.getAttribute('data-fname')) fname.textContent = t.getAttribute('data-fname');
+            if(focus) t.focus();
+          }
+        });
+        Array.prototype.forEach.call(panes, function(p){
+          p.hidden = p.getAttribute('data-lang') !== lang;
+        });
+      }
+      tabs.forEach(function(t, i){
+        t.addEventListener('click', function(){ select(t.getAttribute('data-lang')); });
+        t.addEventListener('keydown', function(e){
+          var d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+          if(!d) return;
+          e.preventDefault();
+          select(tabs[(i + d + tabs.length) % tabs.length].getAttribute('data-lang'), true);
+        });
+      });
     });
   })();
 
