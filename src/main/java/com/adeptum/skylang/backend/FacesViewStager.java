@@ -86,10 +86,113 @@ public final class FacesViewStager {
                 Files.writeString(webapp.resolve(view.name() + ".xhtml"), page(view, artifact.markup()));
                 Files.writeString(java.resolve(view.name() + "Bean.java"), bean(pkg, artifact.bean()));
             }
+
+            Path test = buildDir.resolve("src/test/java").resolve(pkg);
+            Files.createDirectories(test);
+            Files.writeString(test.resolve("ViewsRenderTest.java"), renderTest(pkg, module));
         } catch (IOException e) {
             throw new UncheckedIOException("cannot stage web layer under " + buildDir, e);
         }
     }
+
+    /**
+     * Generate the staged project's render test: each view is deployed to an embedded TomEE, fetched
+     * over HTTP, and checked against its expectations. A render error (e.g. a bad EL binding) surfaces
+     * as a non-200 response, so the view is disposed exactly like a method body that fails its tests.
+     */
+    private static String renderTest(String pkg, Ast.Module module) {
+        StringBuilder methods = new StringBuilder();
+        for (Ast.View view : module.views()) {
+            String lower = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1);
+            methods.append("\n    @Test\n    void ").append(lower).append("Renders() throws Exception {\n");
+            methods.append("        String html = render(\"").append(view.name()).append(".xhtml\");\n");
+            methods.append("        Document doc = Jsoup.parse(html);\n");
+            methods.append("        assertNotNull(doc.selectFirst(\"table\"), () -> \"view ")
+                    .append(view.name()).append(" did not render a table:\\n\" + html);\n");
+            for (Ast.Action action : view.actions()) {
+                methods.append("        assertTrue(html.contains(\"").append(escape(action.label()))
+                        .append("\"), \"action \\\"").append(escape(action.label())).append("\\\" should render\");\n");
+            }
+            methods.append("    }\n");
+        }
+        return RENDER_TEST.formatted(pkg, methods.toString());
+    }
+
+    private static String escape(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static final String RENDER_TEST = """
+            package %s;
+
+            import org.apache.tomee.embedded.Configuration;
+            import org.apache.tomee.embedded.Container;
+            import org.jsoup.Jsoup;
+            import org.jsoup.nodes.Document;
+            import org.junit.jupiter.api.Test;
+
+            import java.io.IOException;
+            import java.io.UncheckedIOException;
+            import java.net.ServerSocket;
+            import java.net.URI;
+            import java.net.http.HttpClient;
+            import java.net.http.HttpRequest;
+            import java.net.http.HttpResponse;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+
+            import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
+            import static org.junit.jupiter.api.Assertions.assertEquals;
+            import static org.junit.jupiter.api.Assertions.assertNotNull;
+            import static org.junit.jupiter.api.Assertions.assertTrue;
+
+            /** Deploys each view to an embedded TomEE and verifies its rendered structure — no pixels. */
+            class ViewsRenderTest {
+            %s
+                private static String render(String view) throws Exception {
+                    Path webapp = Files.createTempDirectory("sky-render").resolve("app");
+                    Files.createDirectories(webapp);
+                    copyTree(Path.of("src/main/webapp"), webapp);
+                    copyTree(Path.of("target/classes"), webapp.resolve("WEB-INF/classes"));
+
+                    int port;
+                    try (ServerSocket probe = new ServerSocket(0)) {
+                        port = probe.getLocalPort();
+                    }
+                    Configuration configuration = new Configuration();
+                    configuration.setHttpPort(port);
+                    try (Container container = new Container(configuration)) {
+                        container.deploy("/app", webapp.toFile());
+                        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                                HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/app/" + view)).build(),
+                                HttpResponse.BodyHandlers.ofString());
+                        assertEquals(200, response.statusCode(), () -> "render failed:\\n" + response.body());
+                        return response.body();
+                    }
+                }
+
+                private static void copyTree(Path src, Path dest) throws IOException {
+                    if (!Files.exists(src)) {
+                        return;
+                    }
+                    try (var walk = Files.walk(src)) {
+                        walk.forEach(p -> {
+                            try {
+                                Path target = dest.resolve(src.relativize(p).toString());
+                                if (Files.isDirectory(p)) {
+                                    Files.createDirectories(target);
+                                } else {
+                                    Files.createDirectories(target.getParent());
+                                    Files.copy(p, target, REPLACE_EXISTING);
+                                }
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        });
+                    }
+                }
+            }
+            """;
 
     /** Wrap the synthesized fragment in a full Facelets page with the standard component namespaces. */
     private static String page(Ast.View view, String markup) {
