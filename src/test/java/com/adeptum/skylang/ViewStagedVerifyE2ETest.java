@@ -58,6 +58,8 @@ class ViewStagedVerifyE2ETest {
               action "Restock" on row -> Catalog.restock(row.id, ask Int)
               expect table has columns (name, stock)
               expect action "Restock" is button
+              appears action "Restock" in toolbar
+              appears rows is compact
             }
             """;
 
@@ -68,10 +70,10 @@ class ViewStagedVerifyE2ETest {
     private static final String VIEW_REPLY = """
             ```xhtml
             <h:form id="f">
-              <h:dataTable id="products" value="#{productListBean.rows}" var="row">
+              <h:dataTable id="products" styleClass="compact" value="#{productListBean.rows}" var="row">
                 <h:column id="c_name"><f:facet name="header"><h:outputText value="Name"/></f:facet><h:outputText value="#{row.name}"/></h:column>
                 <h:column id="c_stock"><f:facet name="header"><h:outputText value="Stock"/></f:facet><h:outputText value="#{row.stock}"/></h:column>
-                <h:column id="c_act"><h:commandButton id="restock" value="Restock" action="#{productListBean.restock(row.id)}"/></h:column>
+                <h:column id="c_act"><h:panelGroup styleClass="toolbar"><h:commandButton id="restock" value="Restock" action="#{productListBean.restock(row.id)}"/></h:panelGroup></h:column>
               </h:dataTable>
             </h:form>
             ```

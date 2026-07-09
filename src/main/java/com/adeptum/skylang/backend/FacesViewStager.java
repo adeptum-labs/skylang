@@ -113,6 +113,18 @@ public final class FacesViewStager {
                 methods.append("        assertTrue(html.contains(\"").append(escape(action.label()))
                         .append("\"), \"action \\\"").append(escape(action.label())).append("\\\" should render\");\n");
             }
+            for (Ast.Appears a : view.appears()) {
+                if (a instanceof Ast.AppearsPlacement p) {
+                    methods.append("        assertTrue(doc.select(\".").append(escape(p.region()))
+                            .append("\").stream().anyMatch(e -> e.html().contains(\"").append(escape(p.label()))
+                            .append("\")), \"\\\"").append(escape(p.label())).append("\\\" should render in region ")
+                            .append(escape(p.region())).append("\");\n");
+                } else if (a instanceof Ast.AppearsStyle s) {
+                    methods.append("        assertFalse(doc.select(\"table.").append(escape(s.value()))
+                            .append("\").isEmpty(), \"the table should render with style ")
+                            .append(escape(s.value())).append("\");\n");
+                }
+            }
             methods.append("    }\n");
         }
         return RENDER_TEST.formatted(pkg, methods.toString());
@@ -143,6 +155,7 @@ public final class FacesViewStager {
 
             import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
             import static org.junit.jupiter.api.Assertions.assertEquals;
+            import static org.junit.jupiter.api.Assertions.assertFalse;
             import static org.junit.jupiter.api.Assertions.assertNotNull;
             import static org.junit.jupiter.api.Assertions.assertTrue;
 
