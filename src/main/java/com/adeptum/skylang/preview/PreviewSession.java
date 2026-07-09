@@ -23,7 +23,9 @@ package com.adeptum.skylang.preview;
 
 import com.adeptum.skylang.Pipeline;
 import com.adeptum.skylang.front.Parsing;
+import com.adeptum.skylang.front.SourceEditor;
 import com.adeptum.skylang.front.ast.Ast;
+import com.adeptum.skylang.synth.AppearsCompiler;
 import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.types.TypeChecker;
 import com.adeptum.skylang.verify.VerificationResult;
@@ -32,6 +34,7 @@ import com.adeptum.skylang.verify.Verifier;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchKey;
@@ -40,82 +43,163 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Orchestrates a {@code sky preview} session: stage the module's views, launch the long-lived
- * preview container, serve a browser studio, and hot-reload on save. Frozen views are staged with
- * no model call; the container compiles and serves the project.
+ * Orchestrates a {@code sky preview} session and its edit loop. It stages the module's views, serves
+ * them from a long-lived container, and lets the studio reshape a view in natural language: an edit
+ * compiles into {@code appears} predicates, re-synthesizes the view, and relaunches to show it;
+ * Accept freezes and writes the predicates back into the source; Reject reverts. Frozen views stage
+ * with no model call; the model runs only while editing.
  */
-public final class PreviewSession {
+public final class PreviewSession implements EditHandler, AutoCloseable {
 
     /** Staging skips the Maven verifier — the preview server compiles and serves the project itself. */
     private static final Verifier STAGE_ONLY = dir -> VerificationResult.pass();
 
     private final Llm llm;
+    private final AppearsCompiler appearsCompiler;
+    private final Object lock = new Object();
+
+    // Running-session state, established by run() and mutated by the edit loop under `lock`.
+    private Path sourceFile;
+    private Path lockPath;
+    private Path buildDir;
+    private String mavenCommand;
+    private PrintStream out;
+    private PrintStream err;
+    private String activeSource;        // the .sky text the container currently reflects
+    private String savedSource;         // the .sky text on disk (last accepted)
+    private String lastAppliedSource;   // suppresses the watcher's echo of our own writes
+    private PreviewProcess container;
+    private StudioServer studio;
 
     public PreviewSession(Llm llm) {
         this.llm = llm;
+        this.appearsCompiler = new AppearsCompiler(llm);
     }
 
-    /** A running preview: the container subprocess and the studio server. Close to tear both down. */
-    public record Handle(PreviewProcess preview, StudioServer studio) implements AutoCloseable {
+    /** The bound ports of a running preview: the studio control port and the container app port. */
+    public record Handle(int studioPort, int appPort) {
+    }
 
-        public int studioPort() {
-            return studio.port();
-        }
-
-        public int appPort() {
-            return preview.appPort();
-        }
-
-        @Override
-        public void close() {
-            studio.close();
-            preview.close();
+    /** Stage the views, launch the container, and start the studio with the edit loop — non-blocking. */
+    public Handle open(Ast.Module module, Path sourceFile, Path lockPath, Path buildDir, int controlPort,
+                       String mavenCommand, PrintStream out, PrintStream err) throws IOException {
+        synchronized (lock) {
+            this.sourceFile = sourceFile;
+            this.lockPath = lockPath;
+            this.buildDir = buildDir;
+            this.mavenCommand = mavenCommand;
+            this.out = out;
+            this.err = err;
+            this.activeSource = Files.readString(sourceFile);
+            this.savedSource = activeSource;
+            this.lastAppliedSource = activeSource;
+            this.container = stageAndLaunch(module, out, err);
+            this.studio = new StudioServer(controlPort, container.appPort(), viewNames(module), this);
+            return new Handle(studio.port(), container.appPort());
         }
     }
 
-    /** Stage the views, launch the container, and start the studio — non-blocking. */
-    public Handle start(Ast.Module module, Path lockPath, Path buildDir, int controlPort,
-                        String mavenCommand, PrintStream out, PrintStream err) throws IOException {
-        PreviewProcess preview = stageAndLaunch(module, lockPath, buildDir, mavenCommand, out, err);
-        StudioServer studio = new StudioServer(controlPort, preview.appPort(), viewNames(module));
-        return new Handle(preview, studio);
+    /** The port the current container bound (it changes across edits/reloads). */
+    public int appPort() {
+        synchronized (lock) {
+            return container.appPort();
+        }
     }
 
-    /** Serve the views, hot-reloading on every save, until interrupted (Ctrl-C). */
+    @Override
+    public void close() {
+        studio.close();
+        synchronized (lock) {
+            container.close();
+        }
+    }
+
+    /** Serve the views with the edit loop, hot-reloading on save, until interrupted (Ctrl-C). */
     public int run(Ast.Module module, Path sourceFile, Path lockPath, Path buildDir, int controlPort,
                    String mavenCommand, PrintStream out, PrintStream err) {
         if (module.views().isEmpty()) {
             err.println("error: " + module.name() + " has no views to preview");
             return 1;
         }
-
         out.println("staging and starting the preview container (the first run may take a moment)...");
-        PreviewProcess preview;
-        StudioServer studio;
+        Handle handle;
         try {
-            preview = stageAndLaunch(module, lockPath, buildDir, mavenCommand, out, err);
-            studio = new StudioServer(controlPort, preview.appPort(), viewNames(module));
+            handle = open(module, sourceFile, lockPath, buildDir, controlPort, mavenCommand, out, err);
         } catch (IOException e) {
             err.println("error: could not start the preview server: " + e.getMessage());
             return 1;
         }
+        Runtime.getRuntime().addShutdownHook(new Thread(this::close));
 
-        PreviewProcess[] container = {preview};
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            studio.close();
-            container[0].close();
-        }));
-
-        String url = "http://localhost:" + studio.port() + "/";
-        out.println("preview ready — " + url + "  (edit " + sourceFile.getFileName() + " to reload; Ctrl-C to stop)");
+        String url = "http://localhost:" + handle.studioPort() + "/";
+        out.println("preview ready — " + url + "  (edit in the browser or the file; Ctrl-C to stop)");
         openBrowser(url, out);
-
-        watch(sourceFile, lockPath, buildDir, mavenCommand, container, studio, out, err);
+        watch(sourceFile);
         return 0;
     }
 
-    private PreviewProcess stageAndLaunch(Ast.Module module, Path lockPath, Path buildDir,
-                                          String mavenCommand, PrintStream out, PrintStream err) throws IOException {
+    // ----- edit loop ---------------------------------------------------------
+
+    @Override
+    public EditResult edit(String viewName, String instruction) {
+        synchronized (lock) {
+            try {
+                Ast.Module base = checked(activeSource);
+                Ast.View view = base.views().stream()
+                        .filter(v -> v.name().equals(viewName)).findFirst().orElse(null);
+                if (view == null) {
+                    return EditResult.error("no view named " + viewName);
+                }
+                List<String> lines = appearsCompiler.compile(view, instruction);
+                if (lines.isEmpty()) {
+                    return EditResult.error("couldn't express that as a structural change");
+                }
+                String next = SourceEditor.addAppears(activeSource, viewName, lines);
+                relaunch(checked(next));   // re-synthesizes the view and gates it before showing
+                activeSource = next;
+                return EditResult.ok("applied: " + String.join("; ", lines));
+            } catch (Exception e) {
+                return EditResult.error("edit failed: " + e.getMessage());
+            }
+        }
+    }
+
+    @Override
+    public EditResult accept() {
+        synchronized (lock) {
+            if (activeSource.equals(savedSource)) {
+                return EditResult.error("nothing to accept");
+            }
+            try {
+                lastAppliedSource = activeSource;   // suppress the watcher echo of this write
+                Files.writeString(sourceFile, activeSource);
+                savedSource = activeSource;
+                return EditResult.ok("saved to " + sourceFile.getFileName());
+            } catch (IOException e) {
+                return EditResult.error("could not write " + sourceFile.getFileName() + ": " + e.getMessage());
+            }
+        }
+    }
+
+    @Override
+    public EditResult reject() {
+        synchronized (lock) {
+            if (activeSource.equals(savedSource)) {
+                return EditResult.error("nothing to revert");
+            }
+            try {
+                relaunch(checked(savedSource));
+                activeSource = savedSource;
+                return EditResult.ok("reverted");
+            } catch (Exception e) {
+                return EditResult.error("revert failed: " + e.getMessage());
+            }
+        }
+    }
+
+    // ----- machinery ---------------------------------------------------------
+
+    private PreviewProcess stageAndLaunch(Ast.Module module, PrintStream out, PrintStream err) throws IOException {
         int staged = new Pipeline(llm, STAGE_ONLY).build(module, lockPath, buildDir, out, err);
         if (staged != 0) {
             throw new IOException("could not stage the views for preview");
@@ -123,9 +207,15 @@ public final class PreviewSession {
         return PreviewProcess.launch(buildDir, mavenCommand, module.name(), Duration.ofMinutes(5));
     }
 
-    /** Watch the source file and relaunch the container on each change; the studio stays up. */
-    private void watch(Path sourceFile, Path lockPath, Path buildDir, String mavenCommand,
-                       PreviewProcess[] container, StudioServer studio, PrintStream out, PrintStream err) {
+    /** Launch a fresh container for {@code module}, swap it in, and re-frame the studio. */
+    private void relaunch(Ast.Module module) throws IOException {
+        PreviewProcess next = stageAndLaunch(module, out, err);
+        container.close();
+        container = next;
+        studio.setAppPort(next.appPort());
+    }
+
+    private void watch(Path sourceFile) {
         Path dir = sourceFile.toAbsolutePath().getParent();
         String name = sourceFile.getFileName().toString();
         try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
@@ -137,7 +227,7 @@ public final class PreviewSession {
                 key.reset();
                 if (touched) {
                     Thread.sleep(150);   // debounce an editor's write burst
-                    reload(sourceFile, lockPath, buildDir, mavenCommand, container, studio, out, err);
+                    reloadFromFile();
                 }
             }
         } catch (IOException e) {
@@ -147,19 +237,28 @@ public final class PreviewSession {
         }
     }
 
-    private void reload(Path sourceFile, Path lockPath, Path buildDir, String mavenCommand,
-                        PreviewProcess[] container, StudioServer studio, PrintStream out, PrintStream err) {
-        try {
-            Ast.Module updated = Parsing.parseFile(sourceFile);
-            new TypeChecker().check(updated);
-            PreviewProcess next = stageAndLaunch(updated, lockPath, buildDir, mavenCommand, out, err);
-            container[0].close();
-            container[0] = next;
-            studio.setAppPort(next.appPort());
-            out.println("preview: reloaded " + sourceFile.getFileName());
-        } catch (Exception e) {
-            err.println("preview: reload failed (keeping the last good view): " + e.getMessage());
+    private void reloadFromFile() {
+        synchronized (lock) {
+            try {
+                String text = Files.readString(sourceFile);
+                if (text.equals(lastAppliedSource)) {
+                    return;   // our own accept-write; the container already reflects it
+                }
+                relaunch(checked(text));
+                activeSource = text;
+                savedSource = text;
+                lastAppliedSource = text;
+                out.println("preview: reloaded " + sourceFile.getFileName());
+            } catch (Exception e) {
+                err.println("preview: reload failed (keeping the last good view): " + e.getMessage());
+            }
         }
+    }
+
+    private static Ast.Module checked(String source) {
+        Ast.Module module = Parsing.parse(source, "preview.sky");
+        new TypeChecker().check(module);
+        return module;
     }
 
     private static List<String> viewNames(Ast.Module module) {
