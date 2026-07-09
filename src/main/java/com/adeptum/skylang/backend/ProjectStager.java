@@ -60,7 +60,7 @@ public final class ProjectStager {
         try {
             Files.createDirectories(main);
             Files.createDirectories(test);
-            Files.writeString(buildDir.resolve("pom.xml"), pom());
+            Files.writeString(buildDir.resolve("pom.xml"), module.views().isEmpty() ? pom() : webPom());
 
             for (Ast.Entity e : module.entities()) {
                 Files.writeString(main.resolve(e.name() + ".java"), entitySource(pkg, e));
@@ -103,9 +103,16 @@ public final class ProjectStager {
     // ----- service -----------------------------------------------------------
 
     private String serviceSource(String pkg, Ast.Module module, Ast.Service service, Map<String, String> bodies) {
+        boolean web = !module.views().isEmpty();
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(pkg).append(";\n\n");
-        sb.append("public final class ").append(service.name()).append(" {\n");
+        if (web) {
+            // A view's backing bean injects the service, so under the web profile it is a CDI bean.
+            sb.append("@jakarta.enterprise.context.ApplicationScoped\n");
+            sb.append("public class ").append(service.name()).append(" {\n");
+        } else {
+            sb.append("public final class ").append(service.name()).append(" {\n");
+        }
         for (Ast.Method m : service.methods()) {
             String key = methodKey(module.name(), service.name(), m.name());
             String body = bodies.get(key);
@@ -220,6 +227,82 @@ public final class ProjectStager {
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <version>3.2.5</version>
+                      </plugin>
+                    </plugins>
+                  </build>
+                </project>
+                """;
+    }
+
+    /**
+     * The staged web project's POM: Jakarta EE (Web Profile) on an embedded TomEE with Eclipse
+     * Mojarra as the sole Faces implementation, so a generated view renders in-container for
+     * verification. TomEE provides the APIs, so the aggregate api jar stays off the runtime classpath.
+     */
+    private static String webPom() {
+        return """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <project xmlns="http://maven.apache.org/POM/4.0.0"
+                         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>com.adeptum.skylang.staged</groupId>
+                  <artifactId>staged</artifactId>
+                  <version>0.0.0</version>
+                  <packaging>war</packaging>
+                  <properties>
+                    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+                    <maven.compiler.release>17</maven.compiler.release>
+                    <failOnMissingWebXml>false</failOnMissingWebXml>
+                  </properties>
+                  <dependencies>
+                    <dependency>
+                      <groupId>jakarta.platform</groupId>
+                      <artifactId>jakarta.jakartaee-api</artifactId>
+                      <version>10.0.0</version>
+                      <scope>provided</scope>
+                    </dependency>
+                    <dependency>
+                      <groupId>org.junit.jupiter</groupId>
+                      <artifactId>junit-jupiter</artifactId>
+                      <version>5.10.2</version>
+                      <scope>test</scope>
+                    </dependency>
+                    <dependency>
+                      <groupId>org.apache.tomee</groupId>
+                      <artifactId>tomee-embedded</artifactId>
+                      <version>10.0.0</version>
+                      <scope>test</scope>
+                      <exclusions>
+                        <exclusion><groupId>org.apache.myfaces.core</groupId><artifactId>myfaces-api</artifactId></exclusion>
+                        <exclusion><groupId>org.apache.myfaces.core</groupId><artifactId>myfaces-impl</artifactId></exclusion>
+                        <exclusion><groupId>org.apache.tomee</groupId><artifactId>tomee-myfaces</artifactId></exclusion>
+                      </exclusions>
+                    </dependency>
+                    <dependency>
+                      <groupId>org.glassfish</groupId>
+                      <artifactId>jakarta.faces</artifactId>
+                      <version>4.0.7</version>
+                      <scope>test</scope>
+                    </dependency>
+                    <dependency>
+                      <groupId>org.jsoup</groupId>
+                      <artifactId>jsoup</artifactId>
+                      <version>1.19.1</version>
+                      <scope>test</scope>
+                    </dependency>
+                  </dependencies>
+                  <build>
+                    <plugins>
+                      <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.2.5</version>
+                        <configuration>
+                          <classpathDependencyExcludes>
+                            <classpathDependencyExclude>jakarta.platform:jakarta.jakartaee-api</classpathDependencyExclude>
+                          </classpathDependencyExcludes>
+                        </configuration>
                       </plugin>
                     </plugins>
                   </build>

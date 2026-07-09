@@ -181,6 +181,14 @@ class PipelineTest {
         String frozen = Files.readString(lock);
         assertTrue(frozen.contains("shop.ProductList"), "the view should be frozen in sky.lock");
         assertTrue(frozen.contains("h:dataTable"), "the frozen view should carry its markup");
+
+        assertTrue(Files.exists(buildDir.resolve("src/main/webapp/ProductList.xhtml")), "the view page should be staged");
+        assertTrue(Files.exists(buildDir.resolve("src/main/webapp/WEB-INF/web.xml")), "web.xml should be staged");
+        assertTrue(Files.exists(buildDir.resolve("src/main/webapp/WEB-INF/beans.xml")), "beans.xml should be staged");
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/shop/ProductListBean.java")), "the backing bean should be staged");
+        assertTrue(Files.readString(buildDir.resolve("src/main/java/shop/Catalog.java"))
+                .contains("@jakarta.enterprise.context.ApplicationScoped"), "the service should be a CDI bean");
+        assertTrue(Files.readString(buildDir.resolve("pom.xml")).contains("tomee-embedded"), "a web POM should be staged");
     }
 
     @Test

@@ -21,6 +21,7 @@
 
 package com.adeptum.skylang;
 
+import com.adeptum.skylang.backend.FacesViewStager;
 import com.adeptum.skylang.backend.JvmProfile;
 import com.adeptum.skylang.backend.ProjectStager;
 import com.adeptum.skylang.freeze.Hashing;
@@ -53,6 +54,7 @@ public final class Pipeline {
     private final PromptBuilder prompts = new PromptBuilder();
     private final UiPromptBuilder uiPrompts = new UiPromptBuilder();
     private final ProjectStager stager = new ProjectStager();
+    private final FacesViewStager facesViewStager = new FacesViewStager();
     private final ViewVerifier viewVerifier = new ViewVerifier();
     private final int maxRegenerations;
 
@@ -146,6 +148,9 @@ public final class Pipeline {
 
         // Stage the project. If no method changed, everything is already verified — skip the test run.
         stager.stage(module, bodyMap(units), buildDir);
+        if (!module.views().isEmpty()) {
+            facesViewStager.stage(module, viewArtifacts(viewUnits), buildDir);
+        }
         if (anyFresh) {
             int attempts = 0;
             VerificationResult result = verifier.verify(buildDir);
@@ -216,6 +221,14 @@ public final class Pipeline {
         Map<String, String> map = new LinkedHashMap<>();
         for (Unit u : units) {
             map.put(u.key, u.body);
+        }
+        return map;
+    }
+
+    private static Map<String, UiPromptBuilder.UiArtifact> viewArtifacts(List<ViewUnit> viewUnits) {
+        Map<String, UiPromptBuilder.UiArtifact> map = new LinkedHashMap<>();
+        for (ViewUnit u : viewUnits) {
+            map.put(u.view.name(), u.artifact);
         }
         return map;
     }
