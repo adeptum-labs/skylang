@@ -23,7 +23,8 @@ package com.adeptum.skylang;
 
 import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.ast.Ast;
-import com.adeptum.skylang.preview.PreviewProcess;
+import com.adeptum.skylang.preview.PreviewSession;
+import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.synth.StubLlm;
 import com.adeptum.skylang.types.TypeChecker;
 import com.adeptum.skylang.verify.VerificationResult;
@@ -39,18 +40,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
-import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end proof that {@code sky preview}'s server serves a live view: the project is staged and
- * the generated {@code PreviewServer} is launched in a Maven subprocess that boots a long-lived
- * embedded TomEE. Opt-in (needs Maven + the TomEE stack): run with {@code SKY_E2E=1}.
+ * End-to-end proof of {@code sky preview}: a frozen view is staged with no model call, the preview
+ * container serves it live, and the studio shell frames it. Opt-in (needs Maven + the TomEE stack):
+ * run with {@code SKY_E2E=1}.
  */
 @EnabledIfEnvironmentVariable(named = "SKY_E2E", matches = "1")
-class PreviewServerE2ETest {
+class PreviewSessionE2ETest {
 
     private static final String SHOP_VIEW = """
             module shop
@@ -91,7 +91,7 @@ class PreviewServerE2ETest {
     private static final String RESTOCK_BODY = "return new Product(id, \"Item\", units);";
     private static final Verifier ALWAYS_PASS = dir -> VerificationResult.pass();
 
-    private static StubLlm stub() {
+    private static StubLlm freezingStub() {
         return new StubLlm((system, user) -> {
             if (system.contains("UI-synthesis")) {
                 return VIEW_REPLY;
@@ -101,24 +101,38 @@ class PreviewServerE2ETest {
     }
 
     @Test
-    void servesViewLive(@TempDir Path root) throws Exception {
+    void servesFrozenViewsWithoutModelCalls(@TempDir Path root) throws Exception {
         Ast.Module module = Parsing.parse(SHOP_VIEW, "shop.sky");
         new TypeChecker().check(module);
+        Path lock = root.resolve("sky.lock");
         Path buildDir = root.resolve("build/jvm-jakarta");
 
-        // Stage the web project without running Maven; PreviewProcess compiles and runs it.
-        new Pipeline(stub(), ALWAYS_PASS).build(module, root.resolve("sky.lock"), buildDir,
-                new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()));
+        // Freeze the view (the stub synthesizes it; ALWAYS_PASS skips Maven).
+        new Pipeline(freezingStub(), ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
 
-        try (PreviewProcess preview = PreviewProcess.launch(buildDir, "mvn", "shop", Duration.ofMinutes(4))) {
-            HttpResponse<String> response = HttpClient.newHttpClient().send(
-                    HttpRequest.newBuilder(URI.create("http://localhost:" + preview.appPort()
-                            + "/app/ProductList.xhtml")).build(),
+        // Preview with a model that fails if called — a frozen view must need none.
+        Llm forbidden = (system, user) -> {
+            throw new AssertionError("the model was called for a frozen view");
+        };
+        try (PreviewSession.Handle handle = new PreviewSession(forbidden)
+                .start(module, lock, buildDir, 0, "mvn", quiet(), quiet())) {
+            HttpClient http = HttpClient.newHttpClient();
+
+            HttpResponse<String> shell = http.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + handle.studioPort() + "/")).build(),
                     HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, shell.statusCode());
+            assertTrue(shell.body().contains("ProductList"), "the studio should list the view");
 
-            assertEquals(200, response.statusCode(), () -> "preview did not serve the view:\n" + response.body());
-            assertTrue(response.body().contains("Notebook"),
-                    () -> "the live view should render bean data:\n" + response.body());
+            HttpResponse<String> view = http.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + handle.appPort() + "/app/ProductList.xhtml")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, view.statusCode(), () -> "preview did not serve the view:\n" + view.body());
+            assertTrue(view.body().contains("Notebook"), () -> "the live view should render bean data:\n" + view.body());
         }
+    }
+
+    private static PrintStream quiet() {
+        return new PrintStream(new ByteArrayOutputStream());
     }
 }

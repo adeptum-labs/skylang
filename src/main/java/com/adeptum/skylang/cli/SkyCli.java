@@ -30,7 +30,7 @@ import picocli.CommandLine.Command;
         mixinStandardHelpOptions = true,
         version = "sky 0.1.0",
         description = "SkyLang compiler: declare the contract, the model writes the body.",
-        subcommands = {OnboardCommand.class, CheckCommand.class, BuildCommand.class})
+        subcommands = {OnboardCommand.class, CheckCommand.class, BuildCommand.class, PreviewCommand.class})
 public final class SkyCli implements Runnable {
 
     @Override
