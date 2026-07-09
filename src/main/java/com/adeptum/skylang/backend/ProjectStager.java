@@ -45,6 +45,11 @@ public final class ProjectStager {
         return module + "." + service + "." + method;
     }
 
+    /** The canonical key for a view across the lock. */
+    public static String viewKey(String module, String view) {
+        return module + "." + view;
+    }
+
     /**
      * @param bodies map from {@link #methodKey} to the Java statements for that method body
      */

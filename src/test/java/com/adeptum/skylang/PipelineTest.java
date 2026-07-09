@@ -61,6 +61,57 @@ class PipelineTest {
 
     private static final Verifier ALWAYS_PASS = dir -> VerificationResult.pass();
 
+    private static final String SHOP_VIEW = """
+            module shop
+            entity Product { id Int  name Text  stock Int @min(0) }
+            service Catalog {
+              all() -> [Product]  intent "Every product."
+              restock(id Int, units Int) -> Product
+                intent "Increase stock."
+            }
+            view ProductList at "/products" {
+              shows  Catalog.all() as a table of (name, stock)
+              action "Restock" on row -> Catalog.restock(row.id, ask Int)
+              expect table has columns (name, stock)
+              expect action "Restock" is button
+            }
+            """;
+
+    private static final String VIEW_REPLY = """
+            ```xhtml
+            <h:dataTable id="products" value="#{bean.rows}" var="row">
+              <h:column id="c_name"><f:facet name="header"><h:outputText value="Name"/></f:facet><h:outputText value="#{row.name}"/></h:column>
+              <h:column id="c_stock"><f:facet name="header"><h:outputText value="Stock"/></f:facet><h:outputText value="#{row.stock}"/></h:column>
+              <h:column id="c_act"><h:commandButton id="restock" value="Restock" action="#{bean.restock(row.id)}"/></h:column>
+            </h:dataTable>
+            ```
+            ```java
+            public class ProductListBean {}
+            ```
+            """;
+
+    private static final String VIEW_REPLY_BAD = """
+            ```xhtml
+            <h:dataTable id="products" value="#{bean.rows}" var="row">
+              <h:column id="c_name"><h:outputText value="#{row.name}"/></h:column>
+            </h:dataTable>
+            ```
+            ```java
+            public class ProductListBean {}
+            ```
+            """;
+
+    /** Routes UI-synthesis calls to a canned view reply and every other call to a throwaway body. */
+    private static StubLlm routingStub(String viewReply) {
+        return new StubLlm((system, user) -> system.contains("UI-synthesis") ? viewReply : "return null;");
+    }
+
+    private static Ast.Module checkedViewModule() {
+        Ast.Module m = Parsing.parse(SHOP_VIEW, "shop.sky");
+        new TypeChecker().check(m);
+        return m;
+    }
+
     private Ast.Module checkedModule() {
         Ast.Module m = Parsing.parse(SHOP, "shop.sky");
         new TypeChecker().check(m);
@@ -114,6 +165,50 @@ class PipelineTest {
         new Pipeline(after, ALWAYS_PASS).build(changed, lock, buildDir, quiet(), quiet());
 
         assertEquals(1, after.calls(), "changing the intent should re-synthesize that method");
+    }
+
+    @Test
+    void firstBuildSynthesizesAndFreezesView(@TempDir Path root) throws Exception {
+        Ast.Module module = checkedViewModule();
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        StubLlm stub = routingStub(VIEW_REPLY);
+
+        int code = new Pipeline(stub, ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertEquals(3, stub.calls(), "two methods plus one view should each be synthesized once");
+        String frozen = Files.readString(lock);
+        assertTrue(frozen.contains("shop.ProductList"), "the view should be frozen in sky.lock");
+        assertTrue(frozen.contains("h:dataTable"), "the frozen view should carry its markup");
+    }
+
+    @Test
+    void secondBuildReusesFrozenView(@TempDir Path root) {
+        Ast.Module module = checkedViewModule();
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
+
+        StubLlm second = routingStub(VIEW_REPLY);
+        int code = new Pipeline(second, ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertEquals(0, second.calls(), "an unchanged view and methods must not call the model");
+    }
+
+    @Test
+    void viewFailingItsExpectationsFailsTheBuild(@TempDir Path root) {
+        Ast.Module module = checkedViewModule();
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        // The bad reply omits the stock column, so `expect ... columns (name, stock)` cannot hold.
+        int code = new Pipeline(routingStub(VIEW_REPLY_BAD), ALWAYS_PASS)
+                .build(module, lock, buildDir, quiet(), quiet());
+
+        assertEquals(1, code);
     }
 
     private static PrintStream quiet() {
