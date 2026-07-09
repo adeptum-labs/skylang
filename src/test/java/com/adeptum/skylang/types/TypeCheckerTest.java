@@ -25,7 +25,10 @@ import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.ast.Ast;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -160,6 +163,13 @@ class TypeCheckerTest {
                 }
                 """)));
         assertTrue(e.getMessage().contains("Int"));
+    }
+
+    @Test
+    void shippedShopExampleParsesAndChecks() throws Exception {
+        Ast.Module module = Parsing.parseFile(Path.of("examples/shop.sky"));
+        assertEquals(1, module.views().size(), "the example should carry the ProductList view");
+        assertDoesNotThrow(() -> new TypeChecker().check(module));
     }
 
     @Test
