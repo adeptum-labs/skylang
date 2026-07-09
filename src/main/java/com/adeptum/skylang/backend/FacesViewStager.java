@@ -90,6 +90,7 @@ public final class FacesViewStager {
             Path test = buildDir.resolve("src/test/java").resolve(pkg);
             Files.createDirectories(test);
             Files.writeString(test.resolve("ViewsRenderTest.java"), renderTest(pkg, module));
+            Files.writeString(test.resolve("PreviewServer.java"), PREVIEW_SERVER.formatted(pkg));
         } catch (IOException e) {
             throw new UncheckedIOException("cannot stage web layer under " + buildDir, e);
         }
@@ -133,6 +134,75 @@ public final class FacesViewStager {
     private static String escape(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
+
+    /** A long-lived embedded TomEE that serves every staged view at {@code /app/<View>.xhtml}. */
+    private static final String PREVIEW_SERVER = """
+            package %s;
+
+            import org.apache.tomee.embedded.Configuration;
+            import org.apache.tomee.embedded.Container;
+
+            import java.io.IOException;
+            import java.io.UncheckedIOException;
+            import java.net.ServerSocket;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.concurrent.CountDownLatch;
+
+            import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
+
+            /** Long-lived embedded TomEE serving the staged views for `sky preview`. */
+            public final class PreviewServer {
+
+                public static void main(String[] args) throws Exception {
+                    int port;
+                    try (ServerSocket probe = new ServerSocket(0)) {
+                        port = probe.getLocalPort();
+                    }
+
+                    Path webapp = Files.createTempDirectory("sky-preview").resolve("app");
+                    Files.createDirectories(webapp);
+                    copyTree(Path.of("src/main/webapp"), webapp);
+                    copyTree(Path.of("target/classes"), webapp.resolve("WEB-INF/classes"));
+
+                    Configuration configuration = new Configuration();
+                    configuration.setHttpPort(port);
+                    Container container = new Container(configuration);
+                    container.deploy("/app", webapp.toFile());
+                    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                        try {
+                            container.close();
+                        } catch (Exception ignored) {
+                        }
+                    }));
+
+                    System.out.println("PREVIEW READY app=" + port);
+                    System.out.flush();
+                    new CountDownLatch(1).await();
+                }
+
+                private static void copyTree(Path src, Path dest) throws IOException {
+                    if (!Files.exists(src)) {
+                        return;
+                    }
+                    try (var walk = Files.walk(src)) {
+                        walk.forEach(p -> {
+                            try {
+                                Path target = dest.resolve(src.relativize(p).toString());
+                                if (Files.isDirectory(p)) {
+                                    Files.createDirectories(target);
+                                } else {
+                                    Files.createDirectories(target.getParent());
+                                    Files.copy(p, target, REPLACE_EXISTING);
+                                }
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        });
+                    }
+                }
+            }
+            """;
 
     private static final String RENDER_TEST = """
             package %s;
