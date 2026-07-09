@@ -316,6 +316,11 @@ public final class ProjectStager {
                           </classpathDependencyExcludes>
                         </configuration>
                       </plugin>
+                      <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                      </plugin>
                     </plugins>
                   </build>
                 </project>

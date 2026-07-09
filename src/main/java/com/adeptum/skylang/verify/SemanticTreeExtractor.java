@@ -27,7 +27,9 @@ import org.jsoup.nodes.Element;
 import org.jsoup.parser.Parser;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -45,7 +47,9 @@ public final class SemanticTreeExtractor {
         Document doc = Jsoup.parse(markup, "", Parser.xmlParser());
 
         List<SemanticTree.Column> columns = new ArrayList<>();
+        Set<String> tableClasses = new LinkedHashSet<>();
         for (Element table : doc.getElementsByTag("h:dataTable")) {
+            tableClasses.addAll(classesOf(table));
             String var = table.attr("var");
             for (Element column : table.getElementsByTag("h:column")) {
                 String field = boundField(column, var);
@@ -57,16 +61,37 @@ public final class SemanticTreeExtractor {
 
         List<SemanticTree.Control> controls = new ArrayList<>();
         for (Element button : doc.getElementsByTag("h:commandButton")) {
-            controls.add(new SemanticTree.Control("button", label(button)));
+            controls.add(new SemanticTree.Control("button", label(button), regionsOf(button)));
         }
         for (Element link : doc.getElementsByTag("h:commandLink")) {
-            controls.add(new SemanticTree.Control("button", label(link)));
+            controls.add(new SemanticTree.Control("button", label(link), regionsOf(link)));
         }
         for (Element input : doc.getElementsByTag("h:inputText")) {
-            controls.add(new SemanticTree.Control("textbox", label(input)));
+            controls.add(new SemanticTree.Control("textbox", label(input), regionsOf(input)));
         }
 
-        return new SemanticTree(columns, controls);
+        return new SemanticTree(columns, controls, tableClasses);
+    }
+
+    /** The style-class tokens directly on an element — both {@code class} and Faces {@code styleClass}. */
+    private static Set<String> classesOf(Element el) {
+        Set<String> classes = new LinkedHashSet<>();
+        for (String attr : new String[]{"class", "styleClass"}) {
+            String value = el.attr(attr);
+            if (!value.isBlank()) {
+                classes.addAll(List.of(value.trim().split("\\s+")));
+            }
+        }
+        return classes;
+    }
+
+    /** The union of style classes on an element and all its ancestors — the regions it renders within. */
+    private static Set<String> regionsOf(Element el) {
+        Set<String> regions = new LinkedHashSet<>(classesOf(el));
+        for (Element parent : el.parents()) {
+            regions.addAll(classesOf(parent));
+        }
+        return regions;
     }
 
     /** The first row field bound by a {@code value} expression inside this column, or null. */

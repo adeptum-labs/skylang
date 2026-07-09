@@ -43,6 +43,8 @@ class UiPromptBuilderTest {
               shows  Catalog.all() as a table of (name, stock)
               action "Restock" on row -> Catalog.restock(row.id, ask Int)
               expect table has columns (name, stock)
+              appears action "Restock" in toolbar
+              appears rows is compact
             }
             """;
 
@@ -87,5 +89,20 @@ class UiPromptBuilderTest {
         assertTrue(user.contains("name"));
         assertTrue(user.contains("stock"));
         assertTrue(user.contains("Restock"));
+    }
+
+    @Test
+    void userPromptDescribesAppearance() {
+        Ast.Module m = Parsing.parse(SRC, "shop.sky");
+        Ast.View view = m.views().get(0);
+        String user = prompts.user(m, view);
+        assertTrue(user.contains("toolbar"));
+        assertTrue(user.contains("compact"));
+    }
+
+    @Test
+    void systemPromptStatesTheRenderConvention() {
+        String system = prompts.system(UiPromptBuilder.STANDARD);
+        assertTrue(system.contains("styleClass"));
     }
 }

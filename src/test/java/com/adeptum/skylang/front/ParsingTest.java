@@ -110,6 +110,9 @@ class ParsingTest {
               shows  Catalog.all() as a table of (name, stock)
               action "Restock" on row -> Catalog.restock(row.id, ask Int)
               expect table has columns (name, stock)
+              appears action "Restock" in toolbar
+              appears rows is compact
+              appears columns (name, stock)
             }
             """;
 
@@ -155,5 +158,21 @@ class ParsingTest {
         Ast.Method all = m.services().get(0).methods().get(0);
         assertTrue(all.returnType().list());
         assertEquals("Product", all.returnType().name());
+    }
+
+    @Test
+    void parsesAppears() {
+        Ast.Module m = Parsing.parse(SHOP_VIEW, "shop.sky");
+        Ast.View view = m.views().get(0);
+
+        assertEquals(3, view.appears().size());
+        Ast.AppearsPlacement placement = assertInstanceOf(Ast.AppearsPlacement.class, view.appears().get(0));
+        assertEquals("Restock", placement.label());
+        assertEquals("toolbar", placement.region());
+        Ast.AppearsStyle style = assertInstanceOf(Ast.AppearsStyle.class, view.appears().get(1));
+        assertEquals("rows", style.subject());
+        assertEquals("compact", style.value());
+        Ast.AppearsColumnOrder order = assertInstanceOf(Ast.AppearsColumnOrder.class, view.appears().get(2));
+        assertEquals(List.of("name", "stock"), order.columns());
     }
 }

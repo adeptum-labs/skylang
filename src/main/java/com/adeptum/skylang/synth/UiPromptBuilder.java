@@ -55,6 +55,9 @@ public final class UiPromptBuilder {
             - Render only the fields named by the projection and the actions — nothing else.
             - Bind only to properties that exist on the backing bean.
             - Use only the components listed under "Component vocabulary".
+            - To place a control in a region, wrap it in <h:panelGroup styleClass="REGION">.
+            - To give a table a style (e.g. a density), set styleClass="STYLE" on the h:dataTable.
+            - Render the table columns in the order requested under "Appearance".
             """;
 
     public String system(List<String> vocabulary) {
@@ -97,6 +100,13 @@ public final class UiPromptBuilder {
             sb.append("Must satisfy:\n");
             for (Ast.Expect e : view.expects()) {
                 sb.append("  ").append(renderExpect(e)).append('\n');
+            }
+        }
+
+        if (!view.appears().isEmpty()) {
+            sb.append("Appearance:\n");
+            for (Ast.Appears a : view.appears()) {
+                sb.append("  ").append(renderAppears(a)).append('\n');
             }
         }
 
@@ -144,6 +154,15 @@ public final class UiPromptBuilder {
         return switch (e) {
             case Ast.ExpectColumns c -> "the " + c.subject() + " shows columns " + String.join(", ", c.columns());
             case Ast.ExpectActionKind a -> "the action \"" + a.label() + "\" is a " + a.kind();
+        };
+    }
+
+    private String renderAppears(Ast.Appears a) {
+        return switch (a) {
+            case Ast.AppearsPlacement p -> "place the \"" + p.label()
+                    + "\" control in a region with styleClass \"" + p.region() + "\"";
+            case Ast.AppearsStyle s -> "give the " + s.subject() + " the styleClass \"" + s.value() + "\"";
+            case Ast.AppearsColumnOrder co -> "order the columns as " + String.join(", ", co.columns());
         };
     }
 }
