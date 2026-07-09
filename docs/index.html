@@ -75,7 +75,12 @@
       radial-gradient(120% 80% at 85% -10%, rgba(39,95,103,.30), transparent 60%),
       radial-gradient(90% 70% at 0% 110%, rgba(39,95,103,.16), transparent 55%);
     pointer-events:none}
-  .hero .wrap{position:relative}
+  .hero .wrap{position:relative; z-index:2}
+  /* ambient 1/0 field receding to a vanishing point at the top of the hero */
+  .binfield{position:absolute; inset:0; z-index:1; width:100%; height:100%;
+    pointer-events:none; opacity:.9;
+    -webkit-mask:linear-gradient(104deg, transparent 6%, #000 47%, #000);
+            mask:linear-gradient(104deg, transparent 6%, #000 47%, #000)}
   .hero h1{font-size:clamp(2.15rem,5.6vw,4rem); max-width:16ch; margin:0 0 1.5rem}
   .hero .lede{margin:0 0 2rem}
   .cta{display:flex; flex-wrap:wrap; gap:.9rem; margin:2.2rem 0 0}
@@ -231,6 +236,7 @@
 
   <!-- HERO -->
   <section class="band hero">
+    <canvas class="binfield" aria-hidden="true"></canvas>
     <div class="wrap">
       <p class="eyebrow">Specification language · JVM-first</p>
       <h1>You write the contract. The compiler writes the code.</h1>
@@ -396,9 +402,11 @@
     <span class="k">var</span> p = <span class="k">new</span> <span class="t">Product</span>(1L, <span class="s">"Notebook"</span>, 5L);
     <span class="k">var</span> units = 3L;
     <span class="k">var</span> result = svc.<span class="n">restock</span>(p, units);
-    <span class="n">assertTrue</span>(((result).stock() == ((p).stock() + units)),
-        <span class="s">"ensures: ((result).stock() == ((p).stock() + units))"</span>);
-    <span class="n">assertEquals</span>(8L, result.stock(), <span class="s">"example: stock"</span>);
+    <span class="n">assertTrue</span>(
+        result.stock() == p.stock() + units,
+        <span class="s">"ensures: result.stock == p.stock + units"</span>);
+    <span class="n">assertEquals</span>(8L, result.stock(),
+        <span class="s">"example: stock"</span>);
   }
 }</pre>
         </div>
@@ -507,6 +515,94 @@
 </footer>
 
 <script>
+  // Binary field: 1s and 0s projected in perspective, flowing away from the
+  // viewer toward a vanishing point near the top-right of the hero — the same
+  // spot the petrol glow radiates from — so it reads as depth, not decoration.
+  (function(){
+    var hero = document.querySelector('.hero');
+    var canvas = document.querySelector('.binfield');
+    if(!hero || !canvas) return;
+    var ctx = canvas.getContext('2d');
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    var W=0, H=0, dpr=1, f=0;
+    var vp={x:0,y:0};
+    var camH=100, Xmax=95, zNear=40, zFar=900, kFont=960;
+    var parts=[], raf, last=0;
+
+    function rnd(a,b){ return a + (b-a)*Math.random(); }
+    function glyph(){ return Math.random()<0.5 ? '0' : '1'; }
+
+    // spread: seed z across the whole corridor on init; otherwise respawn near
+    function reset(p, spread){
+      p.X = rnd(-Xmax, Xmax);
+      p.z = spread ? rnd(zNear, zFar) : rnd(zNear, zNear+120);
+      p.g = glyph();
+      p.v = rnd(90, 170);        // world units per second
+      p.bright = Math.random()<0.12;
+      p.flip = rnd(0.6, 2.4);    // seconds between 0<->1 flips
+      p.t = 0;
+    }
+
+    function build(){
+      parts = [];
+      var n = Math.round(140 * Math.min(1.4, Math.max(0.5, W/1000)));
+      for(var i=0;i<n;i++){ var p={}; reset(p, true); parts.push(p); }
+    }
+
+    function size(){
+      var r = hero.getBoundingClientRect();
+      W = r.width; H = r.height;
+      dpr = Math.min(2, window.devicePixelRatio||1);
+      canvas.width = Math.max(1, Math.round(W*dpr));
+      canvas.height = Math.max(1, Math.round(H*dpr));
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      vp.x = W*0.72; vp.y = H*0.05;
+      f = 260 * (H/700);
+      build();
+    }
+
+    function draw(dt){
+      ctx.clearRect(0,0,W,H);
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      for(var i=0;i<parts.length;i++){
+        var p=parts[i];
+        if(dt>0){
+          p.z += p.v*dt; p.t += dt;
+          if(p.t > p.flip){ p.g = glyph(); p.t = 0; p.flip = rnd(0.6,2.4); }
+          if(p.z > zFar){ reset(p, false); }
+        }
+        var s  = f/p.z;
+        var sx = vp.x + p.X*s;
+        var sy = vp.y + camH*s;
+        var fs = Math.max(5, kFont/p.z);
+        var fin  = Math.min(1, (p.z - zNear)/70);
+        var fout = Math.min(1, (zFar - p.z)/380);
+        var a = 0.5 * Math.max(0,fin) * Math.max(0,fout);
+        if(a<=0.01) continue;
+        ctx.font = '600 '+fs.toFixed(1)+'px "JetBrains Mono",monospace';
+        ctx.fillStyle = p.bright
+          ? 'rgba(183,201,172,'+Math.min(1,a*1.35)+')'
+          : 'rgba(115,160,170,'+a+')';
+        ctx.fillText(p.g, sx, sy);
+      }
+    }
+
+    function frame(now){
+      var dt = last ? Math.min(0.05,(now-last)/1000) : 0;
+      last = now; draw(dt); raf = requestAnimationFrame(frame);
+    }
+
+    size();
+    if(reduce){ draw(0); }
+    else { raf = requestAnimationFrame(frame); }
+    window.addEventListener('resize', function(){
+      if(raf) cancelAnimationFrame(raf);
+      last = 0; size();
+      if(reduce){ draw(0); } else { raf = requestAnimationFrame(frame); }
+    });
+  })();
+
   (function(){
     var els = document.querySelectorAll('[data-reveal]');
     if (!('IntersectionObserver' in window) ||
