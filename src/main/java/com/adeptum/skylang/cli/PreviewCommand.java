@@ -77,7 +77,7 @@ public final class PreviewCommand implements Callable<Integer> {
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);   // resolved lazily; frozen views need no key
 
         try {
-            return new PreviewSession(llm).run(module, lockPath, buildDir, port, "mvn", System.out, System.err);
+            return new PreviewSession(llm).run(module, file, lockPath, buildDir, port, "mvn", System.out, System.err);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());
             return 1;

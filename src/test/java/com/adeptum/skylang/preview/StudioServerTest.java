@@ -44,11 +44,11 @@ class StudioServerTest {
                     HttpRequest.newBuilder(URI.create(base + "/")).build(), HttpResponse.BodyHandlers.ofString());
             assertEquals(200, shell.statusCode());
             assertTrue(shell.body().contains("ProductList"), "the shell should list the view");
-            assertTrue(shell.body().contains("12345"), "the shell should frame the container port");
 
+            // /health reports the live container port so the shell can frame (and re-frame) it.
             HttpResponse<String> health = http.send(
                     HttpRequest.newBuilder(URI.create(base + "/health")).build(), HttpResponse.BodyHandlers.ofString());
-            assertEquals("ok", health.body().strip());
+            assertEquals("12345", health.body().strip());
         }
     }
 }

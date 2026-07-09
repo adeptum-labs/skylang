@@ -37,11 +37,14 @@ import java.util.List;
 public final class StudioServer implements AutoCloseable {
 
     private final HttpServer server;
+    private volatile int appPort;
 
     public StudioServer(int controlPort, int appPort, List<String> views) throws IOException {
+        this.appPort = appPort;
         server = HttpServer.create(new InetSocketAddress("localhost", controlPort), 0);
-        String shell = shell(appPort, views);
-        server.createContext("/health", exchange -> respond(exchange, "ok", "text/plain; charset=utf-8"));
+        String shell = shell(views);
+        // /health reports the live container port so the shell can re-frame after a hot reload.
+        server.createContext("/health", exchange -> respond(exchange, Integer.toString(this.appPort), "text/plain; charset=utf-8"));
         server.createContext("/", exchange -> respond(exchange, shell, "text/html; charset=utf-8"));
         server.setExecutor(null);
         server.start();
@@ -50,6 +53,11 @@ public final class StudioServer implements AutoCloseable {
     /** The bound control port (useful when constructed with port 0). */
     public int port() {
         return server.getAddress().getPort();
+    }
+
+    /** Point the studio at a freshly launched container (after a hot reload); the shell re-frames it. */
+    public void setAppPort(int appPort) {
+        this.appPort = appPort;
     }
 
     @Override
@@ -66,16 +74,13 @@ public final class StudioServer implements AutoCloseable {
         }
     }
 
-    private static String shell(int appPort, List<String> views) {
+    private static String shell(List<String> views) {
         String first = views.isEmpty() ? "" : views.get(0);
         StringBuilder nav = new StringBuilder();
         for (String view : views) {
-            nav.append("<a onclick=\"show('").append(view).append("')\">").append(view).append("</a>\n");
+            nav.append("<a onclick=\"select('").append(view).append("')\">").append(view).append("</a>\n");
         }
-        return TEMPLATE
-                .replace("%APP%", Integer.toString(appPort))
-                .replace("%NAV%", nav.toString())
-                .replace("%FIRST%", first);
+        return TEMPLATE.replace("%NAV%", nav.toString()).replace("%FIRST%", first);
     }
 
     private static final String TEMPLATE = """
@@ -98,11 +103,24 @@ public final class StudioServer implements AutoCloseable {
                 <h3>Views</h3>
                 %NAV%
               </nav>
-              <iframe id="view" src="http://localhost:%APP%/app/%FIRST%.xhtml"></iframe>
+              <iframe id="view"></iframe>
               <script>
-                function show(view) {
-                  document.getElementById('view').src = 'http://localhost:%APP%/app/' + view + '.xhtml';
+                let view = "%FIRST%";
+                let shownPort = 0;
+                function select(next) { view = next; shownPort = 0; }
+                async function refresh() {
+                  try {
+                    const port = parseInt(await (await fetch('/health')).text(), 10);
+                    if (port && port !== shownPort) {
+                      shownPort = port;
+                      document.getElementById('view').src = 'http://localhost:' + port + '/app/' + view + '.xhtml';
+                    }
+                  } catch (e) {
+                    shownPort = 0;
+                  }
+                  setTimeout(refresh, 1000);
                 }
+                refresh();
               </script>
             </body>
             </html>
