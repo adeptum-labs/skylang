@@ -24,6 +24,8 @@ package com.adeptum.skylang.front;
 import com.adeptum.skylang.front.ast.Ast;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -88,5 +90,70 @@ class ParsingTest {
     @Test
     void rejectsGarbage() {
         assertThrows(SkyParseException.class, () -> Parsing.parse("module 123 entity", "bad.sky"));
+    }
+
+    private static final String SHOP_VIEW = """
+            module shop
+
+            entity Product {
+              id    Int
+              name  Text
+              stock Int @min(0)
+            }
+
+            service Catalog {
+              all() -> [Product]
+                intent "Every product."
+            }
+
+            view ProductList at "/products" {
+              shows  Catalog.all() as a table of (name, stock)
+              action "Restock" on row -> Catalog.restock(row.id, ask Int)
+              expect table has columns (name, stock)
+            }
+            """;
+
+    @Test
+    void parsesViewShape() {
+        Ast.Module m = Parsing.parse(SHOP_VIEW, "shop.sky");
+
+        assertEquals(1, m.views().size());
+        Ast.View view = m.views().get(0);
+        assertEquals("ProductList", view.name());
+        assertTrue(view.route().isPresent());
+        assertEquals("/products", view.route().get());
+
+        Ast.Shows shows = view.shows();
+        assertEquals("Catalog", shows.query().service());
+        assertEquals("all", shows.query().method());
+        assertTrue(shows.query().args().isEmpty());
+        assertTrue(shows.projection().isPresent());
+        assertEquals("table", shows.projection().get().kind());
+        assertEquals(List.of("name", "stock"), shows.projection().get().columns());
+
+        assertEquals(1, view.actions().size());
+        Ast.Action action = view.actions().get(0);
+        assertEquals("Restock", action.label());
+        assertEquals("row", action.rowVar());
+        assertEquals("Catalog", action.service());
+        assertEquals("restock", action.method());
+        assertEquals(2, action.args().size());
+        Ast.ExprArg first = assertInstanceOf(Ast.ExprArg.class, action.args().get(0));
+        assertInstanceOf(Ast.MemberExpr.class, first.value());
+        Ast.AskArg second = assertInstanceOf(Ast.AskArg.class, action.args().get(1));
+        assertEquals("Int", second.type().name());
+
+        assertEquals(1, view.expects().size());
+        Ast.ExpectColumns cols = assertInstanceOf(Ast.ExpectColumns.class, view.expects().get(0));
+        assertEquals("table", cols.subject());
+        assertEquals(List.of("name", "stock"), cols.columns());
+    }
+
+    @Test
+    void parsesListReturnType() {
+        Ast.Module m = Parsing.parse(SHOP_VIEW, "shop.sky");
+        Ast.Method all = m.services().get(0).methods().get(0);
+        assertTrue(all.returnType().list());
+        assertEquals("Product", all.returnType().name());
     }
 }

@@ -38,14 +38,17 @@ public final class AstBuilder {
     public Ast.Module build(SkyLangParser.Module_Context ctx) {
         List<Ast.Entity> entities = new ArrayList<>();
         List<Ast.Service> services = new ArrayList<>();
+        List<Ast.View> views = new ArrayList<>();
         for (SkyLangParser.DeclContext decl : ctx.decl()) {
             if (decl.entity() != null) {
                 entities.add(entity(decl.entity()));
-            } else {
+            } else if (decl.service() != null) {
                 services.add(service(decl.service()));
+            } else {
+                views.add(view(decl.view()));
             }
         }
-        return new Ast.Module(ctx.ID().getText(), entities, services);
+        return new Ast.Module(ctx.ID().getText(), entities, services, views);
     }
 
     // ----- entities ----------------------------------------------------------
@@ -117,7 +120,82 @@ public final class AstBuilder {
     }
 
     private Ast.TypeRef type(SkyLangParser.TypeContext ctx) {
-        return new Ast.TypeRef(ctx.ID().getText());
+        if (ctx instanceof SkyLangParser.ListTypeContext list) {
+            return new Ast.TypeRef(list.ID().getText(), true);
+        }
+        return new Ast.TypeRef(((SkyLangParser.NamedTypeContext) ctx).ID().getText());
+    }
+
+    // ----- views -------------------------------------------------------------
+
+    private Ast.View view(SkyLangParser.ViewContext ctx) {
+        Optional<String> route = ctx.route() == null
+                ? Optional.empty()
+                : Optional.of(unquote(ctx.route().STRING().getText()));
+
+        Ast.Shows shows = null;
+        List<Ast.Action> actions = new ArrayList<>();
+        List<Ast.Expect> expects = new ArrayList<>();
+
+        for (SkyLangParser.ViewClauseContext c : ctx.viewClause()) {
+            if (c instanceof SkyLangParser.ShowsClauseContext sc) {
+                shows = shows(sc);
+            } else if (c instanceof SkyLangParser.ActionClauseContext ac) {
+                actions.add(action(ac));
+            } else if (c instanceof SkyLangParser.ExpectClauseContext ec) {
+                expects.add(expect(ec.expectPred()));
+            }
+        }
+        return new Ast.View(ctx.ID().getText(), route, shows, actions, expects);
+    }
+
+    private Ast.Shows shows(SkyLangParser.ShowsClauseContext ctx) {
+        SkyLangParser.ViewQueryContext q = ctx.viewQuery();
+        Ast.QualifiedCall query = new Ast.QualifiedCall(q.ID(0).getText(), q.ID(1).getText(), args(q.args()));
+        Optional<Ast.Projection> projection = ctx.projection() == null
+                ? Optional.empty()
+                : Optional.of(projection(ctx.projection()));
+        return new Ast.Shows(query, projection);
+    }
+
+    private Ast.Projection projection(SkyLangParser.ProjectionContext ctx) {
+        // ID(0) is the article ("a"); ID(1) is the kind ("table"/"form"); the rest are the columns.
+        String kind = ctx.ID(1).getText();
+        List<String> columns = new ArrayList<>();
+        for (int i = 2; i < ctx.ID().size(); i++) {
+            columns.add(ctx.ID(i).getText());
+        }
+        return new Ast.Projection(kind, columns);
+    }
+
+    private Ast.Action action(SkyLangParser.ActionClauseContext ctx) {
+        SkyLangParser.ActionTargetContext t = ctx.actionTarget();
+        List<Ast.ActionArg> args = new ArrayList<>();
+        for (SkyLangParser.ActionArgContext a : t.actionArg()) {
+            args.add(actionArg(a));
+        }
+        return new Ast.Action(unquote(ctx.STRING().getText()), ctx.ID().getText(),
+                t.ID(0).getText(), t.ID(1).getText(), args);
+    }
+
+    private Ast.ActionArg actionArg(SkyLangParser.ActionArgContext ctx) {
+        if (ctx.ASK() != null) {
+            return new Ast.AskArg(type(ctx.type()));
+        }
+        return new Ast.ExprArg(expr(ctx.expr()));
+    }
+
+    private Ast.Expect expect(SkyLangParser.ExpectPredContext ctx) {
+        if (ctx instanceof SkyLangParser.ExpectColumnsContext ec) {
+            String subject = ec.ID(0).getText();
+            List<String> columns = new ArrayList<>();
+            for (int i = 1; i < ec.ID().size(); i++) {
+                columns.add(ec.ID(i).getText());
+            }
+            return new Ast.ExpectColumns(subject, columns);
+        }
+        SkyLangParser.ExpectActionKindContext ak = (SkyLangParser.ExpectActionKindContext) ctx;
+        return new Ast.ExpectActionKind(unquote(ak.STRING().getText()), ak.ID().getText());
     }
 
     // ----- examples ----------------------------------------------------------
