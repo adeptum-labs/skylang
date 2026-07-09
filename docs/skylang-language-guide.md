@@ -15,7 +15,8 @@ signatures, its guarantees — and you specify each behavior as **intent** (plai
 as **tests** (concrete examples), or as both. A language model synthesizes the
 implementation; the compiler proves that implementation against the tests and contracts you
 wrote and then emits ordinary, verified code for your chosen target platform. Targets are
-supplied by *profiles* (§10); the JVM is the first and reference profile.
+supplied by *profiles* (§10): the JVM / Jakarta profile is the reference, with TypeScript /
+Node and Python profiles alongside it — the same specification retargets to each.
 
 The model proposes. The compiler disposes. Code that cannot be proven against its
 specification never ships.
@@ -411,10 +412,11 @@ flow Checkout {
 The same two-layer rule holds: you declare the shape and the guarantees; the generator fills
 the wiring; the contracts verify it.
 
-### 10.3 Sketch: a TypeScript / Node profile
+### 10.3 The TypeScript / Node profile
 
-*Illustrative only — this profile exists to show that the profile boundary holds; it is not
-a committed target.*
+The same core lowered onto modern TypeScript for a Node runtime. Every type, effect, and
+contract retargets unchanged; only the framework constructs (`page`/`flow`) are absent,
+since those stay optional per profile.
 
 | Core type      | TypeScript lowering                      |
 |----------------|-------------------------------------------|
@@ -442,6 +444,44 @@ hash(input Bytes) -> Bytes
   the npm `bcrypt` package at a pinned version.
 - `uses db` binds to a database client; effects the profile does not bind are a compile
   error to declare.
+- The verification harness compiles each `example` and `ensures` clause into a Vitest test
+  and runs the suite inside the staged project.
+- No `page`/`flow` here — framework constructs are optional per profile.
+
+### 10.4 The Python profile
+
+The same core lowered onto typed Python 3 for a CPython runtime. Like the Node profile it
+carries the full type, effect, and contract semantics but no `page`/`flow` constructs.
+
+| Core type      | Python lowering                          |
+|----------------|-------------------------------------------|
+| `Int`          | `int` (arbitrary precision)               |
+| `Text`         | `str`                                     |
+| `Money`        | `Decimal` + a currency tag                |
+| `Instant`      | timezone-aware `datetime` (UTC)           |
+| `Bytes`        | `bytes`                                   |
+| `Maybe<T>`     | `T \| None`; a bare `None` never escapes  |
+| `Secret<T>`    | a wrapper kept out of `repr` and logs     |
+
+The native-block keyword is `py`:
+
+```sky
+hash(input Bytes) -> Bytes
+  ensures result.length == 32
+  py {
+    return hashlib.sha256(input).digest()
+  }
+```
+
+- `sky.lock` stores frozen bodies as Python source, canonically formatted with black.
+- The backend stages a `pyproject.toml` project and delegates to the CPython toolchain;
+  the emitted type hints are checked under mypy.
+- The dependency registry maps logical names onto PyPI packages — `bcrypt ^4.0` resolves to
+  the PyPI `bcrypt` package at a pinned version.
+- `uses db` binds to a database client; effects the profile does not bind are a compile
+  error to declare.
+- The verification harness compiles each `example` and `ensures` clause into a pytest test
+  and runs the suite inside the staged project.
 - No `page`/`flow` here — framework constructs are optional per profile.
 
 ---
@@ -476,8 +516,9 @@ Like effects (§5), dependencies are a declared budget: synthesized bodies and n
 blocks alike may only use what `requires` lists, and because resolution is registry-only,
 even a native block cannot pull in an arbitrary native package.
 
-Retargeting is the payoff: switch the `profile` line, and the same `requires` block
-resolves to that profile's packages — nothing else in `sky.project` changes.
+Retargeting is the payoff: switch the `profile` line — `jvm-jakarta`, `ts-node`, or
+`python` — and the same `requires` block resolves to that profile's packages. Nothing else
+in `sky.project` changes.
 
 ---
 
