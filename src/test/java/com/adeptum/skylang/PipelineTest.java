@@ -188,6 +188,8 @@ class PipelineTest {
         assertTrue(Files.exists(buildDir.resolve("src/main/java/shop/ProductListBean.java")), "the backing bean should be staged");
         assertTrue(Files.readString(buildDir.resolve("src/main/java/shop/Catalog.java"))
                 .contains("@jakarta.enterprise.context.ApplicationScoped"), "the service should be a CDI bean");
+        assertTrue(Files.readString(buildDir.resolve("src/main/java/shop/Product.java")).contains("getName"),
+                "web-profile entities need JavaBean getters so Faces EL can read them");
         assertTrue(Files.readString(buildDir.resolve("pom.xml")).contains("tomee-embedded"), "a web POM should be staged");
     }
 

@@ -62,8 +62,9 @@ public final class ProjectStager {
             Files.createDirectories(test);
             Files.writeString(buildDir.resolve("pom.xml"), module.views().isEmpty() ? pom() : webPom());
 
+            boolean web = !module.views().isEmpty();
             for (Ast.Entity e : module.entities()) {
-                Files.writeString(main.resolve(e.name() + ".java"), entitySource(pkg, e));
+                Files.writeString(main.resolve(e.name() + ".java"), entitySource(pkg, e, web));
             }
             for (Ast.Service s : module.services()) {
                 Files.writeString(main.resolve(s.name() + ".java"), serviceSource(pkg, module, s, bodies));
@@ -76,7 +77,7 @@ public final class ProjectStager {
 
     // ----- entity ------------------------------------------------------------
 
-    private String entitySource(String pkg, Ast.Entity entity) {
+    private String entitySource(String pkg, Ast.Entity entity, boolean web) {
         String components = entity.fields().stream()
                 .map(f -> Lowering.javaType(f.type()) + " " + f.name())
                 .collect(Collectors.joining(", "));
@@ -94,9 +95,20 @@ public final class ProjectStager {
         String compact = checks.isEmpty() ? "" :
                 "\n    public " + entity.name() + " {\n" + checks + "    }\n";
 
+        // Faces EL reads properties through getX() getters, which records lack; add them for the web profile.
+        StringBuilder getters = new StringBuilder();
+        if (web) {
+            for (Ast.Field f : entity.fields()) {
+                String cap = Character.toUpperCase(f.name().charAt(0)) + f.name().substring(1);
+                getters.append("\n    public ").append(Lowering.javaType(f.type())).append(" get").append(cap)
+                        .append("() {\n        return ").append(f.name()).append(";\n    }\n");
+            }
+        }
+
         return "package " + pkg + ";\n\n"
                 + "public record " + entity.name() + "(" + components + ") {\n"
                 + compact
+                + getters
                 + "}\n";
     }
 
