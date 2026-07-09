@@ -23,6 +23,7 @@ package com.adeptum.skylang;
 
 import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.ast.Ast;
+import com.adeptum.skylang.preview.EditResult;
 import com.adeptum.skylang.preview.PreviewSession;
 import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.synth.StubLlm;
@@ -39,15 +40,17 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end proof of {@code sky preview}: a frozen view is staged with no model call, the preview
- * container serves it live, and the studio shell frames it. Opt-in (needs Maven + the TomEE stack):
- * run with {@code SKY_E2E=1}.
+ * End-to-end proof of {@code sky preview}: a frozen view serves live with no model call, and a
+ * natural-language edit reshapes the view and, on accept, writes the appears predicate back into
+ * the source. Opt-in (needs Maven + the TomEE stack): run with {@code SKY_E2E=1}.
  */
 @EnabledIfEnvironmentVariable(named = "SKY_E2E", matches = "1")
 class PreviewSessionE2ETest {
@@ -65,10 +68,11 @@ class PreviewSessionE2ETest {
             }
             """;
 
+    // The synthesized markup carries styleClass="compact", so an `appears rows is compact` edit verifies.
     private static final String VIEW_REPLY = """
             ```xhtml
             <h:form id="f">
-              <h:dataTable id="products" value="#{productListBean.rows}" var="row">
+              <h:dataTable id="products" styleClass="compact" value="#{productListBean.rows}" var="row">
                 <h:column id="c_name"><h:outputText value="#{row.name}"/></h:column>
                 <h:column id="c_stock"><h:outputText value="#{row.stock}"/></h:column>
               </h:dataTable>
@@ -91,8 +95,12 @@ class PreviewSessionE2ETest {
     private static final String RESTOCK_BODY = "return new Product(id, \"Item\", units);";
     private static final Verifier ALWAYS_PASS = dir -> VerificationResult.pass();
 
-    private static StubLlm freezingStub() {
+    /** Serves method bodies, view markup, and — for an edit — an appears predicate. */
+    private static StubLlm studioStub() {
         return new StubLlm((system, user) -> {
+            if (system.contains("translate a natural-language")) {
+                return "appears rows is compact";
+            }
             if (system.contains("UI-synthesis")) {
                 return VIEW_REPLY;
             }
@@ -100,36 +108,63 @@ class PreviewSessionE2ETest {
         });
     }
 
-    @Test
-    void servesFrozenViewsWithoutModelCalls(@TempDir Path root) throws Exception {
+    private static Ast.Module checked() {
         Ast.Module module = Parsing.parse(SHOP_VIEW, "shop.sky");
         new TypeChecker().check(module);
+        return module;
+    }
+
+    @Test
+    void servesFrozenViewWithoutModelCalls(@TempDir Path root) throws Exception {
+        Ast.Module module = checked();
+        Path sky = root.resolve("shop.sky");
+        Files.writeString(sky, SHOP_VIEW);
         Path lock = root.resolve("sky.lock");
         Path buildDir = root.resolve("build/jvm-jakarta");
 
-        // Freeze the view (the stub synthesizes it; ALWAYS_PASS skips Maven).
-        new Pipeline(freezingStub(), ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
+        // Freeze the view first.
+        new Pipeline(studioStub(), ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
 
-        // Preview with a model that fails if called — a frozen view must need none.
+        // Open with a model that fails if called — a frozen view must need none.
         Llm forbidden = (system, user) -> {
             throw new AssertionError("the model was called for a frozen view");
         };
-        try (PreviewSession.Handle handle = new PreviewSession(forbidden)
-                .start(module, lock, buildDir, 0, "mvn", quiet(), quiet())) {
-            HttpClient http = HttpClient.newHttpClient();
-
-            HttpResponse<String> shell = http.send(HttpRequest.newBuilder(
-                    URI.create("http://localhost:" + handle.studioPort() + "/")).build(),
-                    HttpResponse.BodyHandlers.ofString());
-            assertEquals(200, shell.statusCode());
-            assertTrue(shell.body().contains("ProductList"), "the studio should list the view");
-
-            HttpResponse<String> view = http.send(HttpRequest.newBuilder(
-                    URI.create("http://localhost:" + handle.appPort() + "/app/ProductList.xhtml")).build(),
-                    HttpResponse.BodyHandlers.ofString());
-            assertEquals(200, view.statusCode(), () -> "preview did not serve the view:\n" + view.body());
-            assertTrue(view.body().contains("Notebook"), () -> "the live view should render bean data:\n" + view.body());
+        try (PreviewSession session = new PreviewSession(forbidden)) {
+            PreviewSession.Handle handle = session.open(module, sky, lock, buildDir, 0, "mvn", quiet(), quiet());
+            HttpResponse<String> view = get("http://localhost:" + handle.appPort() + "/app/ProductList.xhtml");
+            assertEquals(200, view.statusCode(), () -> view.body());
+            assertTrue(view.body().contains("Notebook"), () -> view.body());
         }
+    }
+
+    @Test
+    void editThenAcceptWritesAppearsBack(@TempDir Path root) throws Exception {
+        Ast.Module module = checked();
+        Path sky = root.resolve("shop.sky");
+        Files.writeString(sky, SHOP_VIEW);
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(studioStub(), ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
+
+        try (PreviewSession session = new PreviewSession(studioStub())) {
+            session.open(module, sky, lock, buildDir, 0, "mvn", quiet(), quiet());
+
+            EditResult edit = session.edit("ProductList", "make the rows compact");
+            assertTrue(edit.ok(), edit.message());
+            assertFalse(Files.readString(sky).contains("appears rows is compact"),
+                    "an unaccepted edit must not touch the source");
+
+            EditResult accept = session.accept();
+            assertTrue(accept.ok(), accept.message());
+            assertTrue(Files.readString(sky).contains("appears rows is compact"),
+                    "accept should write the appears predicate back into the source");
+        }
+    }
+
+    private static HttpResponse<String> get(String url) throws Exception {
+        return HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create(url)).build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private static PrintStream quiet() {
