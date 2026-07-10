@@ -346,6 +346,59 @@ class ParsingTest {
                 legacy.toString());
     }
 
+    // ----- the chapter-4 surface: effects and values ---------------------------
+
+    @Test
+    void parsesTheEffectsBudget() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                service S uses db, clock, mail {
+                  f() -> Int  intent "x"
+                }
+                service T {
+                  g() -> Int  intent "x"
+                }
+                """, "t.sky");
+        assertEquals(List.of("db", "clock", "mail"), m.services().get(0).uses());
+        assertTrue(m.services().get(1).uses().isEmpty());
+    }
+
+    @Test
+    void parsesEntityValues() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Role {
+                  name Text @id
+                  values Member, Admin
+                }
+                """, "t.sky");
+        Ast.Entity role = m.entities().get(0);
+        assertEquals(List.of("Member", "Admin"), role.values());
+        assertEquals(1, role.fields().size());
+    }
+
+    @Test
+    void parsesMemberDefaults() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity User {
+                  role Role = Role.Member
+                }
+                """, "t.sky");
+        Ast.MemberExpr def = assertInstanceOf(Ast.MemberExpr.class,
+                m.entities().get(0).fields().get(0).defaultValue().orElseThrow());
+        assertEquals("Role", assertInstanceOf(Ast.NameExpr.class, def.target()).name());
+        assertEquals("Member", def.field());
+    }
+
+    @Test
+    void legacyEntityAndServiceToStringAreUnchanged() {
+        assertEquals("Entity[name=E, fields=[]]",
+                new Ast.Entity("E", List.of()).toString());
+        assertEquals("Service[name=S, methods=[]]",
+                new Ast.Service("S", List.of()).toString());
+    }
+
     @Test
     void rejectsUnknownAnnotationAndMalformedTypeDecl() {
         assertThrows(IllegalArgumentException.class, () -> Parsing.parse("""

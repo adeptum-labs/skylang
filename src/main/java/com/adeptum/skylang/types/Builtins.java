@@ -23,6 +23,7 @@ package com.adeptum.skylang.types;
 
 import com.adeptum.skylang.front.ast.Ast;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -32,6 +33,9 @@ import java.util.Optional;
  * container kinds with their arities.
  */
 public final class Builtins {
+
+    /** The effects a service may declare with {@code uses}; all four bound by the JVM profile. */
+    public static final List<String> EFFECTS = List.of("db", "http", "clock", "mail");
 
     /** The shape {@code Email} enforces at construction; pragmatic rather than full RFC 5322. */
     public static final String EMAIL_REGEX = "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$";

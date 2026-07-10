@@ -57,6 +57,8 @@ WHERE    : 'where' ;
 MATCHING : 'matching' -> pushMode(RE) ;
 TRUE     : 'true' ;
 FALSE    : 'false' ;
+USES     : 'uses' ;
+VALUES   : 'values' ;
 
 ARROW  : '->' ;
 AT     : '@' ;

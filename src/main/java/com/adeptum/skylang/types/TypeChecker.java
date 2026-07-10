@@ -51,13 +51,26 @@ public final class TypeChecker {
     /** declared refined types ({@code type Slug = ...}), in declaration order. */
     private final Map<String, Ty.NamedTy> typeDecls = new LinkedHashMap<>();
 
+    /** entity name -> its closed value set, for entities declared with {@code values}. */
+    private final Map<String, List<String>> valueSets = new HashMap<>();
+
+    /** entity name -> how many leading fields a constructor must supply (the rest have defaults). */
+    private final Map<String, Integer> requiredFields = new HashMap<>();
+
+    /** the entities that carry an @id field — store roots and relation targets. */
+    private final java.util.Set<String> identified = new java.util.HashSet<>();
+
     public void check(Ast.Module module) {
         registerTypeDecls(module);
         registerEntities(module);
+        if (module.services().stream().anyMatch(s -> s.uses().contains("db"))) {
+            validatePersistability(module);
+        }
 
         // Check every method and index its signature for view resolution.
         Map<String, Map<String, MethodSig>> services = new HashMap<>();
         for (Ast.Service s : module.services()) {
+            checkEffects(s);
             Map<String, MethodSig> methods = services.computeIfAbsent(s.name(), k -> new HashMap<>());
             for (Ast.Method m : s.methods()) {
                 checkMethod(s.name(), m);
@@ -173,15 +186,153 @@ public final class TypeChecker {
                     throw new CheckException("duplicate field '" + e.name() + "." + f.name() + "'");
                 }
             }
+            if (!e.values().isEmpty()) {
+                registerValueSet(e, fields);
+            }
+            int required = e.fields().size();
+            while (required > 0 && e.fields().get(required - 1).defaultValue().isPresent()) {
+                required--;
+            }
+            requiredFields.put(e.name(), required);
+            if (e.fields().stream().anyMatch(Ast.Field::id)) {
+                identified.add(e.name());
+            }
+        }
+    }
+
+    // ----- persistability (a db-using module maps its entities to storage) ------
+
+    /**
+     * With the db effect in play every entity must map to the profile's storage: @id
+     * entities become rows, entities without one become components embedded in their
+     * owner, and each field shape must have a column form.
+     */
+    private void validatePersistability(Ast.Module module) {
+        for (Ast.Entity e : module.entities()) {
+            if (!e.values().isEmpty()) {
+                continue;   // a closed value set persists as its carrier text
+            }
+            boolean component = !identified.contains(e.name());
+            for (Ast.Field f : e.fields()) {
+                checkPersistable("entity '" + e.name() + "." + f.name() + "'",
+                        entities.get(e.name()).get(f.name()), component);
+            }
+        }
+    }
+
+    private void checkPersistable(String where, Ty ty, boolean insideComponent) {
+        if (ty.erased() instanceof Ty.Prim) {
+            return;
+        }
+        switch (ty) {
+            case Ty.EntityTy et -> {
+                if (valueSets.containsKey(et.name()) || identified.contains(et.name())) {
+                    return;   // a text column or a relation — both fine anywhere
+                }
+                if (insideComponent) {
+                    throw new CheckException(where + ": a component entity cannot embed another component ("
+                            + et.name() + ")");
+                }
+            }
+            case Ty.GenericTy g -> {
+                switch (g.kind()) {
+                    case "Secret" -> {
+                        Ty arg = g.args().get(0).erased();
+                        if (!arg.equals(Ty.TEXT) && !arg.equals(Ty.BYTES)) {
+                            throw new CheckException(where + ": " + ty + " is not persistable yet");
+                        }
+                    }
+                    case "Maybe" -> {
+                        if (insideComponent || !maybePersistable(g.args().get(0))) {
+                            throw new CheckException(where + ": " + ty + " is not persistable yet");
+                        }
+                    }
+                    case "List", "Set" -> {
+                        if (insideComponent) {
+                            throw new CheckException(where
+                                    + ": component entities hold basic fields and references only");
+                        }
+                        checkPersistableElement(where, g.args().get(0));
+                    }
+                    default -> throw new CheckException(where + ": Map fields are not persistable yet");
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    private boolean maybePersistable(Ty arg) {
+        Ty e = arg.erased();
+        if (e.equals(Ty.INT) || e.equals(Ty.TEXT) || e.equals(Ty.BOOL) || e.equals(Ty.INSTANT)) {
+            return true;
+        }
+        return arg instanceof Ty.EntityTy et
+                && (identified.contains(et.name()) || valueSets.containsKey(et.name()));
+    }
+
+    private void checkPersistableElement(String where, Ty element) {
+        Ty e = element.erased();
+        if (e.equals(Ty.INT) || e.equals(Ty.TEXT) || e.equals(Ty.BOOL)) {
+            return;
+        }
+        if (element instanceof Ty.EntityTy et) {
+            if (valueSets.containsKey(et.name())) {
+                return;
+            }
+            if (identified.contains(et.name())) {
+                throw new CheckException(where + ": lists of identified entities are not persistable yet");
+            }
+            return;   // a component element; its own fields are checked as a component
+        }
+        throw new CheckException(where + ": " + element + " elements are not persistable yet");
+    }
+
+    /** {@code values Member, Admin} seeds and closes the instance set of an enum-like entity. */
+    private void registerValueSet(Ast.Entity e, Map<String, Ty> fields) {
+        if (e.fields().size() != 1 || !e.fields().get(0).id()) {
+            throw new CheckException("entity '" + e.name()
+                    + "': a values entity carries exactly one @id field naming each value");
+        }
+        Ty carrier = fields.get(e.fields().get(0).name());
+        if (!carrier.equals(Ty.TEXT)) {
+            throw new CheckException("entity '" + e.name() + "': the values carrier field must be Text, not "
+                    + carrier);
+        }
+        if (e.values().size() != e.values().stream().distinct().count()) {
+            throw new CheckException("entity '" + e.name() + "' declares a duplicate value");
+        }
+        valueSets.put(e.name(), e.values());
+    }
+
+    private static void checkEffects(Ast.Service s) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String effect : s.uses()) {
+            if (!Builtins.EFFECTS.contains(effect)) {
+                throw new CheckException("service '" + s.name() + "': unknown effect '" + effect
+                        + "' (the jvm-jakarta profile binds " + String.join(", ", Builtins.EFFECTS) + ")");
+            }
+            if (!seen.add(effect)) {
+                throw new CheckException("service '" + s.name() + "': duplicate effect '" + effect + "'");
+            }
         }
     }
 
     private void checkDefault(String where, Ast.Expr value, Ty fieldTy) {
         if (value instanceof Ast.NameExpr n && n.name().equals("now")) {
-            throw new CheckException(where + ": '= now' requires the clock effect, which is not yet implemented");
+            if (!fieldTy.equals(Ty.INSTANT)) {
+                throw new CheckException(where + ": '= now' needs an Instant field, not " + fieldTy);
+            }
+            return;
+        }
+        if (value instanceof Ast.MemberExpr) {
+            // A declared-value constant like Role.Member; infer resolves and validates it.
+            Ty vt = infer(value, Map.of(), where + " default");
+            fits(where + " default", null, vt, fieldTy);
+            return;
         }
         if (!isLiteral(value)) {
-            throw new CheckException(where + ": only literal defaults are supported");
+            throw new CheckException(where + ": only literal or declared-value defaults are supported");
         }
         Ty vt = infer(value, Map.of(), where + " default");
         fits(where + " default", value, vt, fieldTy);
@@ -425,14 +576,22 @@ public final class TypeChecker {
                 Ty t = env.get(n.name());
                 if (t == null) {
                     if (n.name().equals("now")) {
-                        throw new CheckException(where
-                                + ": 'now' requires the clock effect, which is not yet implemented");
+                        throw new CheckException(where + ": 'now' cannot appear here — contracts and examples"
+                                + " must stay deterministic; read the clock inside the body instead");
                     }
                     throw new CheckException(where + ": unknown name '" + n.name() + "'");
                 }
                 yield t;
             }
             case Ast.MemberExpr me -> {
+                // Role.Member — a constant of a closed value set (unless a variable shadows the name).
+                if (me.target() instanceof Ast.NameExpr n && !env.containsKey(n.name())
+                        && valueSets.containsKey(n.name())) {
+                    if (!valueSets.get(n.name()).contains(me.field())) {
+                        throw new CheckException(where + ": " + n.name() + " has no value '" + me.field() + "'");
+                    }
+                    yield Ty.entity(n.name());
+                }
                 Ty target = infer(me.target(), env, where);
                 if (!(target instanceof Ty.EntityTy et)) {
                     throw new CheckException(where + ": cannot read field '" + me.field() + "' of non-entity " + target);
@@ -450,14 +609,21 @@ public final class TypeChecker {
 
     /** A call inside an expression is an entity constructor: {@code Product(1, "Notebook", 5)}. */
     private Ty inferConstructor(Ast.CallExpr ce, Map<String, Ty> env, String where) {
+        if (valueSets.containsKey(ce.callee())) {
+            throw new CheckException(where + ": the value set of " + ce.callee() + " is closed; use its"
+                    + " declared constants (" + ce.callee() + "." + valueSets.get(ce.callee()).get(0) + ", ...)");
+        }
         LinkedHashMap<String, Ty> fields = entities.get(ce.callee());
         if (fields == null) {
             throw new CheckException(where + ": '" + ce.callee()
                     + "' is not an entity; only entity constructors are allowed in expressions");
         }
         List<Ty> fieldTypes = List.copyOf(fields.values());
-        if (ce.args().size() != fieldTypes.size()) {
-            throw new CheckException(where + ": " + ce.callee() + " takes " + fieldTypes.size()
+        int required = requiredFields.getOrDefault(ce.callee(), fieldTypes.size());
+        if (ce.args().size() < required || ce.args().size() > fieldTypes.size()) {
+            String arity = required == fieldTypes.size()
+                    ? String.valueOf(fieldTypes.size()) : required + ".." + fieldTypes.size();
+            throw new CheckException(where + ": " + ce.callee() + " takes " + arity
                     + " field(s) but got " + ce.args().size());
         }
         for (int i = 0; i < ce.args().size(); i++) {

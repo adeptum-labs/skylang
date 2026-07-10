@@ -44,7 +44,10 @@ range : lo=INT? DOTDOT hi=INT? ;
 
 // ----- entities -------------------------------------------------------------
 
-entity : ENTITY ID LBRACE field* RBRACE ;
+entity : ENTITY ID LBRACE field* valuesClause? RBRACE ;
+
+// values Member, Admin — seeds and closes an enum-like entity's instance set
+valuesClause : VALUES ID (COMMA ID)* ;
 
 field : ID type annotation* (ASSIGN expr)? ;
 
@@ -52,7 +55,7 @@ annotation : AT ID (LPAREN INT RPAREN)? ;   // @id  |  @unique  |  @min(0)
 
 // ----- services & methods ---------------------------------------------------
 
-service : SERVICE ID LBRACE method* RBRACE ;
+service : SERVICE ID (USES ID (COMMA ID)*)? LBRACE method* RBRACE ;   // uses db, clock
 
 method : ID LPAREN params? RPAREN ARROW type clause+ ;
 

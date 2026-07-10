@@ -510,17 +510,220 @@ class TypeCheckerTest {
                 entity E { role Text = Role.Member }
                 service S { f() -> Int  intent "x" }
                 """));
-        assertTrue(member.getMessage().contains("literal"), member.getMessage());
+        assertTrue(member.getMessage().contains("Role"), member.getMessage());
+        CheckException call = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { note Text = pick("a") }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(call.getMessage().contains("literal"), call.getMessage());
     }
 
     @Test
-    void rejectsNowUntilTheClockEffectExists() {
-        CheckException e = assertThrows(CheckException.class, () -> check("""
+    void acceptsNowDefaultOnInstantFields() {
+        assertDoesNotThrow(() -> check("""
                 module m
                 entity E { createdAt Instant = now }
                 service S { f() -> Int  intent "x" }
                 """));
-        assertTrue(e.getMessage().contains("clock"), e.getMessage());
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { x Int = now }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("Instant"), e.getMessage());
+    }
+
+    @Test
+    void rejectsNowInContracts() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(a Instant) -> Bool  intent "x"  requires a < now
+                }
+                """));
+        assertTrue(e.getMessage().contains("deterministic"), e.getMessage());
+    }
+
+    // ----- the chapter-4 surface: effects and values ---------------------------
+
+    @Test
+    void acceptsTheFullEffectsBudget() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                service S uses db, http, clock, mail {
+                  f() -> Int  intent "x"
+                }
+                """));
+    }
+
+    @Test
+    void rejectsUnknownAndDuplicateEffects() {
+        CheckException unknown = assertThrows(CheckException.class, () -> check("""
+                module m
+                service S uses payments {
+                  f() -> Int  intent "x"
+                }
+                """));
+        assertTrue(unknown.getMessage().contains("payments"), unknown.getMessage());
+        CheckException duplicate = assertThrows(CheckException.class, () -> check("""
+                module m
+                service S uses db, db {
+                  f() -> Int  intent "x"
+                }
+                """));
+        assertTrue(duplicate.getMessage().contains("duplicate"), duplicate.getMessage());
+    }
+
+    private static final String ROLES = """
+            module m
+            entity Role {
+              name Text @id
+              values Member, Admin
+            }
+            entity User {
+              id   Int  @id
+              role Role = Role.Member
+            }
+            service Users {
+              promote(u User) -> User
+                intent   "Return a copy with the admin role."
+                ensures  result.role == Role.Admin
+            %s
+            }
+            """;
+
+    @Test
+    void acceptsValuesEntitiesAndMemberReferences() {
+        assertDoesNotThrow(() -> check(ROLES.formatted("")));
+    }
+
+    @Test
+    void rejectsUnknownValueMember() {
+        CheckException e = assertThrows(CheckException.class, () -> check(ROLES.formatted("""
+              demote(u User) -> User
+                intent  "x"
+                ensures result.role == Role.Bogus
+            """)));
+        assertTrue(e.getMessage().contains("Bogus"), e.getMessage());
+    }
+
+    @Test
+    void rejectsConstructingAClosedValueSet() {
+        CheckException e = assertThrows(CheckException.class, () -> check(ROLES.formatted("""
+              f(r Role) -> Bool
+                intent  "x"
+                example f(Role("Member")) -> true
+            """)));
+        assertTrue(e.getMessage().contains("closed"), e.getMessage());
+    }
+
+    @Test
+    void valuesEntitiesNeedASingleTextIdField() {
+        CheckException shape = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Role { name Text @id  rank Int  values Member }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(shape.getMessage().contains("values"), shape.getMessage());
+        CheckException base = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Role { code Int @id  values Member }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(base.getMessage().contains("Text"), base.getMessage());
+    }
+
+    @Test
+    void constructorsMayOmitTrailingDefaultedFields() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Note { id Int @id  text Text  createdAt Instant = now  active Bool = true }
+                service S {
+                  f(n Note) -> Int
+                    intent  "x"
+                    example f(Note(1, "hello")) -> 1
+                }
+                """));
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Note { id Int @id  text Text  createdAt Instant = now }
+                service S {
+                  f(n Note) -> Int
+                    intent  "x"
+                    example f(Note(1)) -> 1
+                }
+                """));
+        assertTrue(e.getMessage().contains("field"), e.getMessage());
+    }
+
+    @Test
+    void persistedModulesAcceptTheSupportedFieldShapes() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity Status { name Text @id  values Open, Closed }
+                entity User { id Int @id  email Email @unique  pin Secret<Text> }
+                entity LineItem { product User  quantity Int(1..) }
+                entity Order {
+                  id       Int @id
+                  customer User
+                  approved Maybe<User>
+                  status   Status
+                  items    [LineItem]
+                  tags     [Text]
+                  placed   Instant
+                  total    Money
+                }
+                service Orders uses db {
+                  all() -> [Order]  intent "all"
+                }
+                """));
+    }
+
+    @Test
+    void persistedModulesRejectUnsupportedFieldShapes() {
+        CheckException map = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { id Int @id  extras Map<Text, Text> }
+                service S uses db { f() -> Int  intent "x" }
+                """));
+        assertTrue(map.getMessage().contains("Map"), map.getMessage());
+        CheckException refList = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity User { id Int @id  name Text }
+                entity Team { id Int @id  members [User] }
+                service S uses db { f() -> Int  intent "x" }
+                """));
+        assertTrue(refList.getMessage().contains("members"), refList.getMessage());
+        CheckException nested = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Inner { note Text }
+                entity Part  { inner Inner  n Int }
+                entity Whole { id Int @id  parts [Part] }
+                service S uses db { f() -> Int  intent "x" }
+                """));
+        assertTrue(nested.getMessage().contains("Part"), nested.getMessage());
+    }
+
+    @Test
+    void unpersistedModulesKeepTheirFreedom() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity E { id Int @id  extras Map<Text, Text> }
+                service S { f() -> Int  intent "x" }
+                """));
+    }
+
+    @Test
+    void memberDefaultsMustMatchTheFieldType() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Role   { name Text @id  values Member }
+                entity Status { name Text @id  values Open }
+                entity User   { role Role = Status.Open }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("Role"), e.getMessage());
     }
 
     @Test

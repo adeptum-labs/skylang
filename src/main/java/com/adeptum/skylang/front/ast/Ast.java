@@ -43,7 +43,21 @@ public final class Ast {
         }
     }
 
-    public record Entity(String name, List<Field> fields) {
+    /**
+     * Data with identity and invariants; {@code values} seeds and closes an enum-like
+     * instance set. The freeze hash covers this record's string form, so {@code toString}
+     * is pinned: byte-identical to the original record format unless {@code values} is set.
+     */
+    public record Entity(String name, List<Field> fields, List<String> values) {
+        public Entity(String name, List<Field> fields) {
+            this(name, fields, List.of());
+        }
+
+        @Override
+        public String toString() {
+            return "Entity[name=" + name + ", fields=" + fields
+                    + (values.isEmpty() ? "" : ", values=" + values) + "]";
+        }
     }
 
     /**
@@ -71,7 +85,21 @@ public final class Ast {
         }
     }
 
-    public record Service(String name, List<Method> methods) {
+    /**
+     * Behaviour with no state of its own; {@code uses} is the effects budget. The freeze
+     * hash covers this record's string form, so {@code toString} is pinned: byte-identical
+     * to the original record format unless a budget is declared.
+     */
+    public record Service(String name, List<Method> methods, List<String> uses) {
+        public Service(String name, List<Method> methods) {
+            this(name, methods, List.of());
+        }
+
+        @Override
+        public String toString() {
+            return "Service[name=" + name + ", methods=" + methods
+                    + (uses.isEmpty() ? "" : ", uses=" + uses) + "]";
+        }
     }
 
     public record Param(String name, Type type) {

@@ -87,7 +87,13 @@ public final class AstBuilder {
         for (SkyLangParser.FieldContext f : ctx.field()) {
             fields.add(field(f));
         }
-        return new Ast.Entity(ctx.ID().getText(), fields);
+        List<String> values = new ArrayList<>();
+        if (ctx.valuesClause() != null) {
+            for (var v : ctx.valuesClause().ID()) {
+                values.add(v.getText());
+            }
+        }
+        return new Ast.Entity(ctx.ID().getText(), fields, values);
     }
 
     private Ast.Field field(SkyLangParser.FieldContext ctx) {
@@ -119,7 +125,12 @@ public final class AstBuilder {
         for (SkyLangParser.MethodContext m : ctx.method()) {
             methods.add(method(m));
         }
-        return new Ast.Service(ctx.ID().getText(), methods);
+        // ID(0) is the service name; any further IDs are the declared effects.
+        List<String> uses = new ArrayList<>();
+        for (int i = 1; i < ctx.ID().size(); i++) {
+            uses.add(ctx.ID(i).getText());
+        }
+        return new Ast.Service(ctx.ID(0).getText(), methods, uses);
     }
 
     private Ast.Method method(SkyLangParser.MethodContext ctx) {
