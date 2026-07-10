@@ -158,6 +158,17 @@ each literal pins the unique field of its type, ambiguity and underivable fields
 errors naming what to pin. And a failing clause reports its counterexample: generated
 assertions print the input values alongside the violated `ensures`/`then` line.
 
+The freeze model is a first-class artifact, not a cache. `sky.lock` stores every accepted
+body as a pretty-printed array of lines in a canonical form (LF endings, four-space indents,
+no trailing whitespace), so `git diff sky.lock` reads line-by-line and review happens at the
+lock. The build transcript narrates the same economics: an untouched method prints `frozen @
+b04c91 (unchanged)` and costs nothing, a changed one prints `regenerated ▸ verified ▸ frozen
+@ 7d1e08 ✓ 3 contracts ✓ 1 example`. `sky why shop.sky Catalog.restock` answers the audit
+question offline — the method's full specification, its freeze status (frozen, stale or
+unfrozen) and the exact body it was proven against. `sky freeze` is the deliberate expensive
+build: discard the lock and regenerate, re-verify and re-freeze everything (say, to adopt a
+better model); native bodies are re-verified but never rewritten.
+
 Not yet implemented (deferred): `page`/`flow`, the dependency `requires` registry, further
 whenever-forms (audited deletes, money conservation, layer boundaries), the `ts`/`py`
 native keywords (they arrive with their profiles), property-based `ensures`, article-form

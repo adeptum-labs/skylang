@@ -387,6 +387,11 @@ public final class Pipeline {
         return n == 0 ? "" : "   \u2713 " + n + " " + noun + (n == 1 ? "" : "s");
     }
 
+    /** The spec hash a method freezes under \u2014 the key auditing tools look up in the lock. */
+    public static String methodSpecHash(Ast.Module module, Ast.Method method) {
+        return Hashing.sha256(specString(module, method));
+    }
+
     /**
      * Canonical text whose hash freezes a method. Includes the profile and every entity, so any
      * change that could affect the staged/verified code re-triggers synthesis (conservative).
