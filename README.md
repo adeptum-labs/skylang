@@ -180,9 +180,24 @@ two examples as unsatisfiable together when they demand different outcomes for t
 arguments; `error [backend]` is the staged project failing to compile, with a pointer back
 to the `java` block when a native body is the culprit.
 
+The core is platform-independent; a **profile** binds it to one target. A build activates
+exactly one, declared in the `sky.project` manifest (`project shop` / `profile jvm-jakarta`;
+`--profile` overrides for experiments), and retargeting is editing that line: the profile is
+part of every spec hash, so a switch prints `profile ts-node (changed from jvm-jakarta;
+regenerating all bodies)`, regenerates everything for the new target and re-verifies it
+against the same contracts. `jvm-jakarta` is the reference; `ts-node` ships as a first cut —
+Int as `bigint`, entities as immutable validated classes, frozen bodies as TypeScript, a
+staged tsconfig project verified by `tsc` plus `node --test`, the db effect as an in-memory
+store and clock as a pinnable source. Its envelope is Int/Text/Bool, entities, lists,
+contracts and examples; everything beyond it is an honest `error [frontend]` naming what the
+profile does not lower yet. Native blocks are the visible portability boundary: a `java`
+block under ts-node (or a `ts` block under the JVM) is a hard error naming the method, so
+lock-in stays greppable and a migration is priced by counting native blocks.
+
 Not yet implemented (deferred): `page`/`flow`, the dependency `requires` registry, further
-whenever-forms (audited deletes, money conservation, layer boundaries), the `ts`/`py`
-native keywords (they arrive with their profiles), property-based `ensures`, article-form
+whenever-forms (audited deletes, money conservation, layer boundaries), the python profile
+and its `py` native keyword, the rest of the ts-node envelope (Money/Instant/Bytes/Secret,
+refined types, policies, specs, seeding, views), property-based `ensures`, article-form
 example arguments (`a Gold member`), a Jakarta Mail binding for the `mail` effect, and
 persistence for `Map` fields and lists of identified entities.
 
