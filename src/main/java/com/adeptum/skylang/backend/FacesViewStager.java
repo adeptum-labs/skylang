@@ -90,6 +90,7 @@ public final class FacesViewStager {
             Path test = buildDir.resolve("src/test/java").resolve(pkg);
             Files.createDirectories(test);
             Files.writeString(test.resolve("ViewsRenderTest.java"), renderTest(pkg, module));
+            Files.writeString(test.resolve("ViewsInteractionTest.java"), interactionTest(pkg, module));
             Files.writeString(test.resolve("PreviewServer.java"), PREVIEW_SERVER.formatted(pkg));
         } catch (IOException e) {
             throw new UncheckedIOException("cannot stage web layer under " + buildDir, e);
@@ -134,6 +135,105 @@ public final class FacesViewStager {
     private static String escape(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
+
+    /**
+     * Generate the interaction lane: each view is driven in a real (headless) browser — it must render
+     * a table, and its first action, when clicked, must not error the JSF postback. Opt-in via SKY_UI,
+     * so it stays out of the default build.
+     */
+    private static String interactionTest(String pkg, Ast.Module module) {
+        StringBuilder methods = new StringBuilder();
+        for (Ast.View view : module.views()) {
+            String lower = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1);
+            methods.append("\n    @Test\n    void ").append(lower).append("Interacts() throws Exception {\n");
+            methods.append("        int port = freePort();\n");
+            methods.append("        Configuration configuration = new Configuration();\n");
+            methods.append("        configuration.setHttpPort(port);\n");
+            methods.append("        try (Container container = new Container(configuration)) {\n");
+            methods.append("            container.deploy(\"/app\", webapp().toFile());\n");
+            methods.append("            HtmlUnitDriver driver = new HtmlUnitDriver(true);\n");
+            methods.append("            try {\n");
+            methods.append("                driver.get(\"http://localhost:\" + port + \"/app/")
+                    .append(view.name()).append(".xhtml\");\n");
+            methods.append("                assertNotNull(driver.findElement(By.tagName(\"table\")), \"view ")
+                    .append(view.name()).append(" should render a table in a real browser\");\n");
+            methods.append("                for (WebElement input : driver.findElements(By.cssSelector(\"input[type='text']\"))) {\n");
+            methods.append("                    input.sendKeys(\"1\");\n                }\n");
+            if (!view.actions().isEmpty()) {
+                String label = escape(view.actions().get(0).label());
+                methods.append("                driver.findElement(By.xpath(\"(//input[@value='").append(label)
+                        .append("'] | //button[normalize-space()='").append(label).append("'])[1]\")).click();\n");
+                methods.append("                String page = driver.getPageSource().toLowerCase();\n");
+                methods.append("                assertFalse(page.contains(\"http status 5\") || page.contains(\"exception\"), \"action \\\"")
+                        .append(label).append("\\\" errored on click\");\n");
+            }
+            methods.append("            } finally {\n                driver.quit();\n            }\n");
+            methods.append("        }\n    }\n");
+        }
+        return INTERACTION_TEST.formatted(pkg, methods.toString());
+    }
+
+    private static final String INTERACTION_TEST = """
+            package %s;
+
+            import org.apache.tomee.embedded.Configuration;
+            import org.apache.tomee.embedded.Container;
+            import org.junit.jupiter.api.Test;
+            import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+            import org.openqa.selenium.By;
+            import org.openqa.selenium.WebElement;
+            import org.openqa.selenium.htmlunit.HtmlUnitDriver;
+
+            import java.io.IOException;
+            import java.io.UncheckedIOException;
+            import java.net.ServerSocket;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+
+            import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
+            import static org.junit.jupiter.api.Assertions.assertFalse;
+            import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+            /** Drives each view in a real (headless) browser and clicks its actions. Opt-in: run with SKY_UI=1. */
+            @EnabledIfEnvironmentVariable(named = "SKY_UI", matches = "1")
+            class ViewsInteractionTest {
+            %s
+                private static Path webapp() throws IOException {
+                    Path webapp = Files.createTempDirectory("sky-ui").resolve("app");
+                    Files.createDirectories(webapp);
+                    copyTree(Path.of("src/main/webapp"), webapp);
+                    copyTree(Path.of("target/classes"), webapp.resolve("WEB-INF/classes"));
+                    return webapp;
+                }
+
+                private static int freePort() throws IOException {
+                    try (ServerSocket probe = new ServerSocket(0)) {
+                        return probe.getLocalPort();
+                    }
+                }
+
+                private static void copyTree(Path src, Path dest) throws IOException {
+                    if (!Files.exists(src)) {
+                        return;
+                    }
+                    try (var walk = Files.walk(src)) {
+                        walk.forEach(p -> {
+                            try {
+                                Path target = dest.resolve(src.relativize(p).toString());
+                                if (Files.isDirectory(p)) {
+                                    Files.createDirectories(target);
+                                } else {
+                                    Files.createDirectories(target.getParent());
+                                    Files.copy(p, target, REPLACE_EXISTING);
+                                }
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        });
+                    }
+                }
+            }
+            """;
 
     /** A long-lived embedded TomEE that serves every staged view at {@code /app/<View>.xhtml}. */
     private static final String PREVIEW_SERVER = """

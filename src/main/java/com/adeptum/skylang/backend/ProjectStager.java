@@ -303,6 +303,18 @@ public final class ProjectStager {
                       <version>1.19.1</version>
                       <scope>test</scope>
                     </dependency>
+                    <dependency>
+                      <groupId>org.seleniumhq.selenium</groupId>
+                      <artifactId>selenium-java</artifactId>
+                      <version>4.40.0</version>
+                      <scope>test</scope>
+                    </dependency>
+                    <dependency>
+                      <groupId>org.seleniumhq.selenium</groupId>
+                      <artifactId>htmlunit3-driver</artifactId>
+                      <version>4.40.0</version>
+                      <scope>test</scope>
+                    </dependency>
                   </dependencies>
                   <build>
                     <plugins>
