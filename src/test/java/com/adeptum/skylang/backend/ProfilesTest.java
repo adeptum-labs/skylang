@@ -40,6 +40,19 @@ class ProfilesTest {
     }
 
     @Test
+    void theReferenceProfileRejectsAForeignNativeBlock() {
+        var module = com.adeptum.skylang.front.Parsing.parse("""
+                module t
+                service Ids { next(seed Int) -> Int  intent "x"  ts { return seed + 1n; } }
+                """, "t.sky");
+        var e = assertThrows(com.adeptum.skylang.types.CheckException.class,
+                () -> Profiles.byId("jvm-jakarta").validate(module));
+        assertTrue(e.getMessage().contains("Ids.next"), e.getMessage());
+        assertTrue(e.getMessage().contains("ts block has no meaning under profile 'jvm-jakarta'"),
+                e.getMessage());
+    }
+
+    @Test
     void aDesignedButUnshippedProfileSaysSo() {
         ConfigException e = assertThrows(ConfigException.class, () -> Profiles.byId("python"));
         assertTrue(e.getMessage().contains("not shipped"), e.getMessage());

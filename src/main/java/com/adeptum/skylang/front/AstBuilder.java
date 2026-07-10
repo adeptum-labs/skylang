@@ -203,6 +203,7 @@ public final class AstBuilder {
         List<Ast.Raise> raises = new ArrayList<>();
         List<Ast.Spec> specs = new ArrayList<>();
         Optional<String> nativeBody = Optional.empty();
+        String nativeKeyword = "java";
 
         for (SkyLangParser.ClauseContext c : ctx.clause()) {
             if (c instanceof SkyLangParser.IntentClauseContext ic) {
@@ -219,12 +220,13 @@ public final class AstBuilder {
                 specs.add(spec(sc));
             } else if (c instanceof SkyLangParser.NativeClauseContext nc) {
                 String raw = nc.NATIVE_BLOCK().getText();
+                nativeKeyword = raw.substring(0, raw.indexOf('{')).strip();
                 nativeBody = Optional.of(raw.substring(raw.indexOf('{') + 1, raw.lastIndexOf('}')).strip());
             }
         }
 
         return new Ast.Method(ctx.ID().getText(), params, type(ctx.type()),
-                intent, requires, ensures, examples, raises, specs, nativeBody);
+                intent, requires, ensures, examples, raises, specs, nativeBody, nativeKeyword);
     }
 
     private Ast.Spec spec(SkyLangParser.SpecClauseContext ctx) {

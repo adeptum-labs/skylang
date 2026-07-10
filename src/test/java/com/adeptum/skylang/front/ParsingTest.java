@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -635,6 +636,51 @@ class ParsingTest {
         assertTrue(body.contains("nested braces"), "nested braces must stay inside the block");
         assertEquals(1, hash.ensures().size(), "contracts ride along with the native body");
         assertTrue(m.services().get(0).methods().get(1).nativeBody().isEmpty());
+    }
+
+    @Test
+    void parsesNativeTsBlocksWithTheirKeyword() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                service Ids {
+                  next(seed Int) -> Int
+                    intent "Advance the seed."
+                    ts {
+                      return seed + 1n;
+                    }
+                }
+                """, "t.sky");
+        Ast.Method next = m.services().get(0).methods().get(0);
+        assertEquals("ts", next.nativeKeyword());
+        assertTrue(next.nativeBody().orElseThrow().contains("seed + 1n"));
+    }
+
+    @Test
+    void javaBlocksCarryTheJavaKeyword() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                service Crypto {
+                  hash(x Int) -> Int
+                    intent "x"
+                    java { return x; }
+                }
+                """, "t.sky");
+        assertEquals("java", m.services().get(0).methods().get(0).nativeKeyword());
+    }
+
+    @Test
+    void nativeMethodToStringOnlyNamesAForeignKeyword() {
+        Ast.Module ts = Parsing.parse("""
+                module t
+                service S { f(x Int) -> Int  intent "x"  ts { return x; } }
+                """, "t.sky");
+        Ast.Module java = Parsing.parse("""
+                module t
+                service S { f(x Int) -> Int  intent "x"  java { return x; } }
+                """, "t.sky");
+        assertTrue(ts.services().get(0).methods().get(0).toString().contains("nativeKeyword=ts"));
+        assertFalse(java.services().get(0).methods().get(0).toString().contains("nativeKeyword"),
+                "a java block must print exactly as it always has — frozen hashes depend on it");
     }
 
     @Test
