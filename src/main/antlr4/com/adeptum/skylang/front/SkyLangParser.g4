@@ -28,7 +28,25 @@ options { tokenVocab = SkyLangLexer; }
 
 module_ : MODULE ID decl* EOF ;
 
-decl : entity | service | view | typeDecl ;
+decl : entity | service | view | typeDecl | policy ;
+
+// ----- policies: cross-cutting contracts -------------------------------------
+
+policy : POLICY ID LBRACE WHENEVER wheneverPhrase policyRule RBRACE ;
+
+// "a Password is constructed" | "a Secret is passed to a logger" — phrase words
+// stay soft identifiers, validated in the builder.
+wheneverPhrase : ID ID IS ID (ID ID ID)? ;
+
+policyRule
+    : REQUIRE requireTerm (AND requireTerm)* (ELSE RAISE ID)?  # requireRule
+    | FORBID                                                    # forbidRule
+    ;
+
+requireTerm
+    : CONTAINS ID ID   # containsTerm    // contains a symbol
+    | expr             # exprTerm        // length >= 12
+    ;
 
 // ----- named refined types ---------------------------------------------------
 

@@ -36,11 +36,54 @@ public final class Ast {
     private Ast() {
     }
 
-    public record Module(String name, List<TypeDecl> types, List<Entity> entities,
-                         List<Service> services, List<View> views) {
+    public record Module(String name, List<TypeDecl> types, List<Policy> policies,
+                         List<Entity> entities, List<Service> services, List<View> views) {
         public Module(String name, List<Entity> entities, List<Service> services, List<View> views) {
-            this(name, List.of(), entities, services, views);
+            this(name, List.of(), List.of(), entities, services, views);
         }
+
+        public Module(String name, List<TypeDecl> types, List<Entity> entities,
+                      List<Service> services, List<View> views) {
+            this(name, types, List.of(), entities, services, views);
+        }
+    }
+
+    // ----- policies -------------------------------------------------------------
+
+    /** {@code policy Name { whenever ... require ... | forbid }} — a module-wide rule. */
+    public record Policy(String name, Whenever whenever, PolicyRule rule) {
+    }
+
+    public sealed interface Whenever permits Constructed, PassedToLogger {
+    }
+
+    /** {@code whenever a Password is constructed}. */
+    public record Constructed(String typeWord) implements Whenever {
+    }
+
+    /** {@code whenever a Secret is passed to a logger}. */
+    public record PassedToLogger(String typeWord) implements Whenever {
+    }
+
+    public sealed interface PolicyRule permits RequireRule, ForbidRule {
+    }
+
+    /** {@code require <terms> else raise Error}. */
+    public record RequireRule(List<ReqTerm> terms, Optional<String> raise) implements PolicyRule {
+    }
+
+    /** {@code forbid} — the whenever must never happen. */
+    public record ForbidRule() implements PolicyRule {
+    }
+
+    public sealed interface ReqTerm permits TermExpr, Contains {
+    }
+
+    public record TermExpr(Expr expr) implements ReqTerm {
+    }
+
+    /** {@code contains a symbol}. */
+    public record Contains(String what) implements ReqTerm {
     }
 
     /**

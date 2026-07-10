@@ -67,6 +67,13 @@ FOR      : 'for' ;
 SPEC     : 'spec' ;
 GIVEN    : 'given' ;
 THEN     : 'then' ;
+POLICY   : 'policy' ;
+WHENEVER : 'whenever' ;
+REQUIRE  : 'require' ;
+FORBID   : 'forbid' ;
+ELSE     : 'else' ;
+RAISE    : 'raise' ;
+CONTAINS : 'contains' ;
 
 ARROW  : '->' ;
 AT     : '@' ;

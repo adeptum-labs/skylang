@@ -562,6 +562,55 @@ class ParsingTest {
         assertEquals("BadInput", raised.error());
     }
 
+    // ----- the chapter-7 surface: policies --------------------------------------
+
+    @Test
+    void parsesPolicies() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                type Password = Text(12..128)
+                entity WeakPassword { }
+                policy StrongPasswords {
+                  whenever a Password is constructed
+                  require  length >= 12 and contains a symbol
+                  else     raise WeakPassword
+                }
+                policy NoSecretsInLogs {
+                  whenever a Secret is passed to a logger
+                  forbid
+                }
+                """, "t.sky");
+        assertEquals(2, m.policies().size());
+
+        Ast.Policy strong = m.policies().get(0);
+        assertEquals("StrongPasswords", strong.name());
+        Ast.Constructed constructed = assertInstanceOf(Ast.Constructed.class, strong.whenever());
+        assertEquals("Password", constructed.typeWord());
+        Ast.RequireRule rule = assertInstanceOf(Ast.RequireRule.class, strong.rule());
+        assertEquals(2, rule.terms().size());
+        Ast.TermExpr length = assertInstanceOf(Ast.TermExpr.class, rule.terms().get(0));
+        assertInstanceOf(Ast.BinExpr.class, length.expr());
+        Ast.Contains contains = assertInstanceOf(Ast.Contains.class, rule.terms().get(1));
+        assertEquals("symbol", contains.what());
+        assertEquals("WeakPassword", rule.raise().orElseThrow());
+
+        Ast.Policy noLogs = m.policies().get(1);
+        Ast.PassedToLogger passed = assertInstanceOf(Ast.PassedToLogger.class, noLogs.whenever());
+        assertEquals("Secret", passed.typeWord());
+        assertInstanceOf(Ast.ForbidRule.class, noLogs.rule());
+    }
+
+    @Test
+    void rejectsMalformedPolicyPhrases() {
+        assertThrows(IllegalArgumentException.class, () -> Parsing.parse("""
+                module t
+                policy Vague {
+                  whenever a Thing is misplaced
+                  forbid
+                }
+                """, "t.sky"));
+    }
+
     @Test
     void legacyExampleToStringIsUnchanged() {
         Ast.Example legacy = new Ast.Example(new Ast.CallExpr("f", List.of()),

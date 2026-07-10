@@ -37,6 +37,7 @@ public final class AstBuilder {
 
     public Ast.Module build(SkyLangParser.Module_Context ctx) {
         List<Ast.TypeDecl> types = new ArrayList<>();
+        List<Ast.Policy> policies = new ArrayList<>();
         List<Ast.Entity> entities = new ArrayList<>();
         List<Ast.Service> services = new ArrayList<>();
         List<Ast.View> views = new ArrayList<>();
@@ -47,11 +48,65 @@ public final class AstBuilder {
                 services.add(service(decl.service()));
             } else if (decl.typeDecl() != null) {
                 types.add(typeDecl(decl.typeDecl()));
+            } else if (decl.policy() != null) {
+                policies.add(policy(decl.policy()));
             } else {
                 views.add(view(decl.view()));
             }
         }
-        return new Ast.Module(ctx.ID().getText(), types, entities, services, views);
+        return new Ast.Module(ctx.ID().getText(), types, policies, entities, services, views);
+    }
+
+    // ----- policies --------------------------------------------------------------
+
+    private Ast.Policy policy(SkyLangParser.PolicyContext ctx) {
+        return new Ast.Policy(ctx.ID().getText(), whenever(ctx.wheneverPhrase()), policyRule(ctx.policyRule()));
+    }
+
+    private Ast.Whenever whenever(SkyLangParser.WheneverPhraseContext ctx) {
+        String article = ctx.ID(0).getText();
+        String type = ctx.ID(1).getText();
+        String verb = ctx.ID(2).getText();
+        if (!article.equals("a") && !article.equals("an")) {
+            throw new IllegalArgumentException(badWhenever());
+        }
+        if (verb.equals("constructed") && ctx.ID().size() == 3) {
+            return new Ast.Constructed(type);
+        }
+        if (verb.equals("passed") && ctx.ID().size() == 6
+                && ctx.ID(3).getText().equals("to")
+                && (ctx.ID(4).getText().equals("a") || ctx.ID(4).getText().equals("an"))
+                && ctx.ID(5).getText().equals("logger")) {
+            return new Ast.PassedToLogger(type);
+        }
+        throw new IllegalArgumentException(badWhenever());
+    }
+
+    private static String badWhenever() {
+        return "unrecognized whenever phrase; say 'whenever a Password is constructed'"
+                + " or 'whenever a Secret is passed to a logger'";
+    }
+
+    private Ast.PolicyRule policyRule(SkyLangParser.PolicyRuleContext ctx) {
+        if (ctx instanceof SkyLangParser.ForbidRuleContext) {
+            return new Ast.ForbidRule();
+        }
+        SkyLangParser.RequireRuleContext rr = (SkyLangParser.RequireRuleContext) ctx;
+        List<Ast.ReqTerm> terms = new ArrayList<>();
+        for (SkyLangParser.RequireTermContext t : rr.requireTerm()) {
+            terms.add(switch (t) {
+                case SkyLangParser.ContainsTermContext c -> {
+                    if (!c.ID(0).getText().equals("a") && !c.ID(0).getText().equals("an")) {
+                        throw new IllegalArgumentException("say e.g. 'contains a symbol'");
+                    }
+                    yield new Ast.Contains(c.ID(1).getText());
+                }
+                case SkyLangParser.ExprTermContext e -> new Ast.TermExpr(expr(e.expr()));
+                default -> throw new IllegalStateException("unhandled require term");
+            });
+        }
+        Optional<String> raise = rr.RAISE() == null ? Optional.empty() : Optional.of(rr.ID().getText());
+        return new Ast.RequireRule(terms, raise);
     }
 
     // ----- named refined types -------------------------------------------------
