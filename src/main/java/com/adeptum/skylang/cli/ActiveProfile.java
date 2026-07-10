@@ -21,7 +21,11 @@
 
 package com.adeptum.skylang.cli;
 
+import com.adeptum.skylang.backend.Profile;
+import com.adeptum.skylang.backend.Profiles;
 import com.adeptum.skylang.config.Manifest;
+import com.adeptum.skylang.front.ast.Ast;
+import com.adeptum.skylang.types.CheckException;
 
 import java.nio.file.Path;
 
@@ -41,5 +45,20 @@ final class ActiveProfile {
         return Manifest.load(sourceFile.toAbsolutePath().getParent())
                 .map(Manifest::profile)
                 .orElse("jvm-jakarta");
+    }
+
+    /**
+     * Resolve and hold the module against its target: the portability boundary (native blocks
+     * in another profile's language) and the profile's feature envelope are frontend errors,
+     * raised before any body is synthesized.
+     */
+    static Profile activate(String flag, Path sourceFile, Ast.Module module) {
+        Profile profile = Profiles.byId(resolve(flag, sourceFile));
+        profile.validate(module);
+        if (!module.views().isEmpty() && !profile.supportsViews()) {
+            throw new CheckException("views are not supported by profile '" + profile.id()
+                    + "' — the interface library is optional per profile");
+        }
+        return profile;
     }
 }

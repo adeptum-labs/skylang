@@ -185,6 +185,11 @@ public final class Lock {
         this.profileVersion = version;
     }
 
+    /** The profile the lock was frozen under — {@code ""} for a fresh lock. */
+    public String profileId() {
+        return profileId;
+    }
+
     public Optional<Entry> get(String key) {
         return Optional.ofNullable(methods.get(key));
     }

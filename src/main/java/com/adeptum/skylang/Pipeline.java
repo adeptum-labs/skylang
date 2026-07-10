@@ -24,6 +24,7 @@ package com.adeptum.skylang;
 import com.adeptum.skylang.backend.FacesViewStager;
 import com.adeptum.skylang.backend.JvmProfile;
 import com.adeptum.skylang.backend.Lowering;
+import com.adeptum.skylang.backend.Profile;
 import com.adeptum.skylang.backend.ProjectStager;
 import com.adeptum.skylang.freeze.Hashing;
 import com.adeptum.skylang.freeze.Lock;
@@ -59,9 +60,8 @@ public final class Pipeline {
 
     private final Llm client;
     private final Verifier verifier;
-    private final PromptBuilder prompts = new PromptBuilder();
+    private final Profile profile;
     private final UiPromptBuilder uiPrompts = new UiPromptBuilder();
-    private final ProjectStager stager = new ProjectStager();
     private final FacesViewStager facesViewStager = new FacesViewStager();
     private final ViewVerifier viewVerifier = new ViewVerifier();
     private final int maxRegenerations;
@@ -72,9 +72,14 @@ public final class Pipeline {
     }
 
     public Pipeline(Llm client, Verifier verifier, int maxRegenerations) {
+        this(client, verifier, maxRegenerations, JvmProfile.INSTANCE);
+    }
+
+    public Pipeline(Llm client, Verifier verifier, int maxRegenerations, Profile profile) {
         this.client = client;
         this.verifier = verifier;
         this.maxRegenerations = maxRegenerations;
+        this.profile = profile;
     }
 
     /** One unit of work: a method plus everything needed to freeze it. */
@@ -125,19 +130,27 @@ public final class Pipeline {
     public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err,
                      boolean recheck) {
         Lock lock = Lock.load(lockPath);
-        lock.setProfile(JvmProfile.ID, JvmProfile.VERSION);
+
+        // A body frozen as one profile's language has no meaning under another: switching the
+        // profile invalidates the whole lock, and every method regenerates for the new target.
+        boolean retarget = !lock.profileId().isEmpty() && !lock.profileId().equals(profile.id());
+        if (retarget) {
+            out.printf("  profile %s   (changed from %s; regenerating all bodies)%n%n",
+                    profile.id(), lock.profileId());
+        }
+        lock.setProfile(profile.id(), profile.version());
 
         // Resolve method bodies: reuse a frozen body when its hash matches, else synthesize.
         List<Unit> units = new ArrayList<>();
         for (Ast.Service s : module.services()) {
             for (Ast.Method m : s.methods()) {
                 String key = ProjectStager.methodKey(module.name(), s.name(), m.name());
-                units.add(new Unit(s, m, key, Hashing.sha256(specString(module, m))));
+                units.add(new Unit(s, m, key, Hashing.sha256(specString(module, m, profile))));
             }
         }
         boolean anyFresh = false;
         for (Unit u : units) {
-            var frozen = lock.get(u.key);
+            var frozen = retarget ? java.util.Optional.<Lock.Entry>empty() : lock.get(u.key);
             if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
                 u.body = frozen.get().body();
             } else if (u.method.nativeBody().isPresent()) {
@@ -167,11 +180,11 @@ public final class Pipeline {
         List<ViewUnit> viewUnits = new ArrayList<>();
         for (Ast.View v : module.views()) {
             String key = ProjectStager.viewKey(module.name(), v.name());
-            viewUnits.add(new ViewUnit(v, key, Hashing.sha256(viewSpecString(module, v))));
+            viewUnits.add(new ViewUnit(v, key, Hashing.sha256(viewSpecString(module, v, profile))));
         }
         boolean anyViewFresh = false;
         for (ViewUnit u : viewUnits) {
-            var frozen = lock.getView(u.key);
+            var frozen = retarget ? java.util.Optional.<Lock.ViewEntry>empty() : lock.getView(u.key);
             if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
                 u.artifact = new UiPromptBuilder.UiArtifact(frozen.get().markup(), frozen.get().bean());
             } else if (resolveView(module, u, out)) {
@@ -185,7 +198,7 @@ public final class Pipeline {
         }
 
         // Stage the project. If nothing changed, everything is already verified — skip the test run.
-        stager.stage(module, bodyMap(units), buildDir);
+        profile.stage(module, bodyMap(units), buildDir);
         if (!module.views().isEmpty()) {
             facesViewStager.stage(module, viewArtifacts(viewUnits), baselines(viewUnits, lock), buildDir);
             clearCaptures(buildDir);   // a stale rasterization must never be adopted as a baseline
@@ -198,7 +211,7 @@ public final class Pipeline {
             while (!result.passed() && regenerable && attempts < maxRegenerations) {
                 attempts++;
                 regenerateFailing(module, units, result.output(), attempts, out);
-                stager.stage(module, bodyMap(units), buildDir);
+                profile.stage(module, bodyMap(units), buildDir);
                 result = verifier.verify(buildDir);
             }
             if (!result.passed()) {
@@ -234,8 +247,9 @@ public final class Pipeline {
     }
 
     private String synthesize(Ast.Module module, Unit u) {
-        String reply = client.complete(prompts.system(), prompts.user(module, u.service, u.method));
-        return prompts.extractBody(reply);
+        String reply = client.complete(profile.systemPrompt(),
+                profile.userPrompt(module, u.service, u.method));
+        return profile.extractBody(reply);
     }
 
     /**
@@ -363,6 +377,9 @@ public final class Pipeline {
             }
             String how = u.method.nativeBody().isPresent() ? "native"
                     : u.stale ? "regenerated" : "synthesized";
+            if (!profile.tag().isEmpty()) {
+                how += " (" + profile.tag() + ")";
+            }
             int contracts = u.method.requires().size() + u.method.ensures().size()
                     + u.method.raises().size();
             int examples = u.method.examples().size() + u.method.specs().size();
@@ -514,7 +531,11 @@ public final class Pipeline {
 
     /** The spec hash a method freezes under \u2014 the key auditing tools look up in the lock. */
     public static String methodSpecHash(Ast.Module module, Ast.Method method) {
-        return Hashing.sha256(specString(module, method));
+        return methodSpecHash(module, method, JvmProfile.INSTANCE);
+    }
+
+    public static String methodSpecHash(Ast.Module module, Ast.Method method, Profile profile) {
+        return Hashing.sha256(specString(module, method, profile));
     }
 
     /**
@@ -522,8 +543,12 @@ public final class Pipeline {
      * change that could affect the staged/verified code re-triggers synthesis (conservative).
      */
     static String specString(Ast.Module module, Ast.Method method) {
+        return specString(module, method, JvmProfile.INSTANCE);
+    }
+
+    static String specString(Ast.Module module, Ast.Method method, Profile profile) {
         StringBuilder sb = new StringBuilder();
-        sb.append("profile=").append(JvmProfile.ID).append('@').append(JvmProfile.VERSION).append('\n');
+        sb.append("profile=").append(profile.id()).append('@').append(profile.version()).append('\n');
         appendTypes(sb, module);
         for (Ast.Entity e : module.entities()) {
             sb.append("entity ").append(e).append('\n');
@@ -551,8 +576,12 @@ public final class Pipeline {
      * signature the view may reference, so a change to the data it renders re-triggers synthesis.
      */
     static String viewSpecString(Ast.Module module, Ast.View view) {
+        return viewSpecString(module, view, JvmProfile.INSTANCE);
+    }
+
+    static String viewSpecString(Ast.Module module, Ast.View view, Profile profile) {
         StringBuilder sb = new StringBuilder();
-        sb.append("profile=").append(JvmProfile.ID).append('@').append(JvmProfile.VERSION).append('\n');
+        sb.append("profile=").append(profile.id()).append('@').append(profile.version()).append('\n');
         appendTypes(sb, module);
         for (Ast.Entity e : module.entities()) {
             sb.append("entity ").append(e).append('\n');

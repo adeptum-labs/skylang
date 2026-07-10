@@ -255,6 +255,55 @@ class PipelineTest {
         assertTrue(report.contains("-> these two examples contradict each other."), report);
     }
 
+    /** A second target with its own id: staging and prompts borrowed from the reference profile. */
+    private static com.adeptum.skylang.backend.Profile fakeTarget() {
+        var stager = new com.adeptum.skylang.backend.ProjectStager();
+        var prompts = new com.adeptum.skylang.synth.PromptBuilder();
+        return new com.adeptum.skylang.backend.Profile() {
+            public String id() { return "fake-target"; }
+            public String version() { return "0.0.1"; }
+            public String nativeKeyword() { return "java"; }
+            public String tag() { return "fk"; }
+            public void validate(Ast.Module module) { }
+            public boolean supportsViews() { return false; }
+            public void stage(Ast.Module module, java.util.Map<String, String> bodies, Path dir) {
+                stager.stage(module, bodies, dir);
+            }
+            public String systemPrompt() { return prompts.system(); }
+            public String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method) {
+                return prompts.user(module, service, method);
+            }
+            public String extractBody(String reply) { return prompts.extractBody(reply); }
+        };
+    }
+
+    @Test
+    void retargetingRegeneratesEveryBody(@TempDir Path root) {
+        Ast.Module module = checkedModule();
+        Path lock = root.resolve("sky.lock");
+        new Pipeline(new StubLlm(BODY), ALWAYS_PASS)
+                .build(module, lock, root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        StubLlm retargeted = new StubLlm(BODY);
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(retargeted, ALWAYS_PASS, 4, fakeTarget())
+                .build(module, lock, root.resolve("build/fake-target"), new PrintStream(out), quiet());
+
+        assertEquals(0, code);
+        assertEquals(1, retargeted.calls(),
+                "switching the profile invalidates the freeze; the unchanged spec regenerates");
+        String transcript = out.toString();
+        assertTrue(transcript.contains("profile fake-target   (changed from jvm-jakarta; regenerating all bodies)"),
+                transcript);
+        assertTrue(transcript.contains("▸ synthesized (fk) ▸ verified ▸ frozen @"),
+                "the transcript should carry the new target's tag:\n" + transcript);
+
+        StubLlm settled = new StubLlm(BODY);
+        assertEquals(0, new Pipeline(settled, ALWAYS_PASS, 4, fakeTarget())
+                .build(module, lock, root.resolve("build/fake-target"), quiet(), quiet()));
+        assertEquals(0, settled.calls(), "the retargeted lock freezes like any other");
+    }
+
     @Test
     void secondBuildReusesFrozenBodyWithoutCallingModel(@TempDir Path root) {
         Ast.Module module = checkedModule();

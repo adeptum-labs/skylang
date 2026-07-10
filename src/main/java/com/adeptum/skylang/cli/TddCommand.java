@@ -116,15 +116,15 @@ public final class TddCommand implements Callable<Integer> {
         Path root = file.toAbsolutePath().getParent();
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
-            String active = ActiveProfile.resolve(profile, file);
-            int code = new Pipeline(llm, new MavenVerifier(), Math.max(0, attempts - 1))
-                    .build(module, root.resolve("sky.lock"), root.resolve("build").resolve(active),
+            com.adeptum.skylang.backend.Profile active = ActiveProfile.activate(profile, file, module);
+            int code = new Pipeline(llm, new MavenVerifier(), Math.max(0, attempts - 1), active)
+                    .build(module, root.resolve("sky.lock"), root.resolve("build").resolve(active.id()),
                             System.out, System.err);
             System.out.println(code == 0
                     ? "  green — examples, specs and contracts hold; fresh bodies frozen"
                     : "  red   — a clause was violated; adjust the cases or the spec");
             return code;
-        } catch (ConfigException | SynthException e) {
+        } catch (ConfigException | CheckException | SynthException e) {
             System.out.println("  red   " + e.getMessage());
             return 1;
         }

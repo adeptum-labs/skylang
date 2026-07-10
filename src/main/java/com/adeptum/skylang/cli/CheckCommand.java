@@ -21,12 +21,14 @@
 
 package com.adeptum.skylang.cli;
 
+import com.adeptum.skylang.config.ConfigException;
 import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.SkyParseException;
 import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.types.CheckException;
 import com.adeptum.skylang.types.TypeChecker;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 import java.io.IOException;
@@ -40,17 +42,22 @@ public final class CheckCommand implements Callable<Integer> {
     @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file to check.")
     Path file;
 
+    @Option(names = "--profile",
+            description = "Target profile (default: the sky.project manifest, else jvm-jakarta).")
+    String profile;
+
     @Override
     public Integer call() {
         try {
             Ast.Module module = Parsing.parseFile(file);
             new TypeChecker().check(module);
+            ActiveProfile.activate(profile, file, module);   // the portability boundary is frontend
             int methods = module.services().stream().mapToInt(s -> s.methods().size()).sum();
             System.out.printf("ok: %s — %d entit%s, %d method%s%n",
                     file, module.entities().size(), module.entities().size() == 1 ? "y" : "ies",
                     methods, methods == 1 ? "" : "s");
             return 0;
-        } catch (SkyParseException | CheckException e) {
+        } catch (SkyParseException | CheckException | ConfigException e) {
             System.err.println("error [frontend]: " + e.getMessage());
             return 1;
         } catch (IOException e) {

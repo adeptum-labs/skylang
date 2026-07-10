@@ -23,6 +23,8 @@ package com.adeptum.skylang.cli;
 
 import com.adeptum.skylang.Pipeline;
 import com.adeptum.skylang.backend.Lowering;
+import com.adeptum.skylang.backend.Profile;
+import com.adeptum.skylang.config.ConfigException;
 import com.adeptum.skylang.freeze.Hashing;
 import com.adeptum.skylang.freeze.Lock;
 import com.adeptum.skylang.front.Parsing;
@@ -55,10 +57,12 @@ public final class WhyCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         Ast.Module module;
+        Profile active;
         try {
             module = Parsing.parseFile(file);
             new TypeChecker().check(module);
-        } catch (SkyParseException | CheckException e) {
+            active = ActiveProfile.activate(null, file, module);
+        } catch (SkyParseException | CheckException | ConfigException e) {
             System.err.println("error [frontend]: " + e.getMessage());
             return 1;
         } catch (IOException e) {
@@ -80,11 +84,11 @@ public final class WhyCommand implements Callable<Integer> {
             return 1;
         }
 
-        print(module, service, method);
+        print(module, service, method, active);
         return 0;
     }
 
-    private void print(Ast.Module module, Ast.Service service, Ast.Method method) {
+    private void print(Ast.Module module, Ast.Service service, Ast.Method method, Profile active) {
         String params = method.params().stream()
                 .map(p -> p.name() + " " + p.type().sky())
                 .collect(Collectors.joining(", "));
@@ -103,7 +107,7 @@ public final class WhyCommand implements Callable<Integer> {
         method.specs().forEach(sp -> System.out.println("  spec      \"" + sp.title() + "\""));
 
         String key = module.name() + "." + service.name() + "." + method.name();
-        String hash = Pipeline.methodSpecHash(module, method);
+        String hash = Pipeline.methodSpecHash(module, method, active);
         Lock lock = Lock.load(file.toAbsolutePath().getParent().resolve("sky.lock"));
         var frozen = lock.get(key);
         if (frozen.isEmpty()) {

@@ -84,13 +84,21 @@ public final class BuildCommand implements Callable<Integer> {
         Path root = file.toAbsolutePath().getParent();
         Path lockPath = root.resolve("sky.lock");
 
+        com.adeptum.skylang.backend.Profile active;
+        try {
+            active = ActiveProfile.activate(profile, file, module);
+        } catch (ConfigException | CheckException e) {
+            System.err.println("error [frontend]: " + e.getMessage());
+            return 1;
+        }
+
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);   // resolved lazily on first synth
         Verifier verifier = new MavenVerifier();
 
         try {
-            String active = ActiveProfile.resolve(profile, file);
-            return new Pipeline(llm, verifier, Math.max(0, attempts - 1))
-                    .build(module, lockPath, root.resolve("build").resolve(active), System.out, System.err, recheck);
+            return new Pipeline(llm, verifier, Math.max(0, attempts - 1), active)
+                    .build(module, lockPath, root.resolve("build").resolve(active.id()),
+                            System.out, System.err, recheck);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());
             return 1;

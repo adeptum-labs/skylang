@@ -221,24 +221,32 @@ public final class Ast {
                          List<Example> examples,
                          List<Raise> raises,
                          List<Spec> specs,
-                         Optional<String> nativeBody) {
+                         Optional<String> nativeBody,
+                         String nativeKeyword) {
         public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
                       List<Expr> requires, List<Expr> ensures, List<Example> examples) {
             this(name, params, returnType, intent, requires, ensures, examples,
-                    List.of(), List.of(), Optional.empty());
+                    List.of(), List.of(), Optional.empty(), "java");
         }
 
         public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
                       List<Expr> requires, List<Expr> ensures, List<Example> examples, List<Raise> raises) {
             this(name, params, returnType, intent, requires, ensures, examples,
-                    raises, List.of(), Optional.empty());
+                    raises, List.of(), Optional.empty(), "java");
         }
 
         public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
                       List<Expr> requires, List<Expr> ensures, List<Example> examples,
                       List<Raise> raises, List<Spec> specs) {
             this(name, params, returnType, intent, requires, ensures, examples,
-                    raises, specs, Optional.empty());
+                    raises, specs, Optional.empty(), "java");
+        }
+
+        public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
+                      List<Expr> requires, List<Expr> ensures, List<Example> examples,
+                      List<Raise> raises, List<Spec> specs, Optional<String> nativeBody) {
+            this(name, params, returnType, intent, requires, ensures, examples,
+                    raises, specs, nativeBody, "java");
         }
 
         @Override
@@ -248,7 +256,9 @@ public final class Ast {
                     + ", examples=" + examples
                     + (raises.isEmpty() ? "" : ", raises=" + raises)
                     + (specs.isEmpty() ? "" : ", specs=" + specs)
-                    + (nativeBody.isEmpty() ? "" : ", native=" + nativeBody.get()) + "]";
+                    + (nativeBody.isEmpty() ? "" : ", native=" + nativeBody.get())
+                    + (nativeBody.isEmpty() || "java".equals(nativeKeyword)
+                            ? "" : ", nativeKeyword=" + nativeKeyword) + "]";
         }
     }
 
