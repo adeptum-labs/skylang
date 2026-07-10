@@ -65,16 +65,21 @@ public final class FacesViewStager {
             """;
 
     /**
-     * @param views map from view name to its synthesized markup and backing bean
+     * @param views     map from view name to its synthesized markup and backing bean
+     * @param baselines map from view name to its frozen visual baseline (PNG); a view without one is
+     *                  captured by the staged visual gate instead of compared
      */
-    public void stage(Ast.Module module, Map<String, UiArtifact> views, Path buildDir) {
+    public void stage(Ast.Module module, Map<String, UiArtifact> views, Map<String, byte[]> baselines,
+                      Path buildDir) {
         String pkg = module.name();
         Path webapp = buildDir.resolve("src/main/webapp");
         Path webInf = webapp.resolve("WEB-INF");
         Path java = buildDir.resolve("src/main/java").resolve(pkg);
+        Path visual = buildDir.resolve("src/test/resources/sky-visual");
         try {
             Files.createDirectories(webInf);
             Files.createDirectories(java);
+            Files.createDirectories(visual);
             Files.writeString(webInf.resolve("web.xml"), WEB_XML);
             Files.writeString(webInf.resolve("beans.xml"), BEANS_XML);
 
@@ -85,6 +90,15 @@ public final class FacesViewStager {
                 }
                 Files.writeString(webapp.resolve(view.name() + ".xhtml"), page(view, artifact.markup()));
                 Files.writeString(java.resolve(view.name() + "Bean.java"), bean(pkg, artifact.bean()));
+
+                // Stage the frozen baseline for the visual gate; drop a stale one left by an earlier
+                // staging so a re-synthesized view is recaptured instead of compared against its past.
+                byte[] baseline = baselines.get(view.name());
+                if (baseline != null) {
+                    Files.write(visual.resolve(view.name() + ".png"), baseline);
+                } else {
+                    Files.deleteIfExists(visual.resolve(view.name() + ".png"));
+                }
             }
 
             Path test = buildDir.resolve("src/test/java").resolve(pkg);
