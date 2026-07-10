@@ -29,6 +29,13 @@ entity Card {
   labels [Text]
 }
 
+entity NotFound { }
+
+entity InsufficientFunds {
+  requested Money
+  available Money
+}
+
 service Accounts uses db, clock {
 
   all() -> [Account]
@@ -45,6 +52,19 @@ service Accounts uses db, clock {
 
   interest(a Account, since Instant, rate Int(0..100)) -> Money
     intent "The interest accrued on the balance since the date at the given percentage rate."
+
+  lookup(id Int) -> Account
+    intent "The stored account with that id."
+    raises NotFound when no account has that id
+
+  withdraw(a Account, amount PositiveMoney) -> Account
+    intent  "Persist and return a copy with the amount taken from the balance."
+    ensures result.balance == a.balance - amount
+    raises  InsufficientFunds when amount > a.balance
+
+  totalBalance() -> Money
+    intent  "The sum of every stored balance."
+    ensures result == sum of (acc.balance for acc in all accounts)
 }
 
 view AccountList at "/accounts" {
