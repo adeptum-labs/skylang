@@ -62,6 +62,10 @@ public final class BuildCommand implements Callable<Integer> {
                     + "everything is frozen. Offline — never calls the model.")
     boolean recheck;
 
+    @Option(names = "--attempts", description = "Candidates per method before giving up (default: 5).",
+            defaultValue = "5")
+    int attempts;
+
     @Override
     public Integer call() {
         Ast.Module module;
@@ -84,7 +88,8 @@ public final class BuildCommand implements Callable<Integer> {
         Verifier verifier = new MavenVerifier();
 
         try {
-            return new Pipeline(llm, verifier).build(module, lockPath, buildDir, System.out, System.err, recheck);
+            return new Pipeline(llm, verifier, Math.max(0, attempts - 1))
+                    .build(module, lockPath, buildDir, System.out, System.err, recheck);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());
             return 1;

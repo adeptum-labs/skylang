@@ -63,6 +63,10 @@ public final class TddCommand implements Callable<Integer> {
     @Option(names = "--once", description = "Run a single cycle instead of watching (for scripts).")
     boolean once;
 
+    @Option(names = "--attempts", description = "Candidates per method before giving up (default: 5).",
+            defaultValue = "5")
+    int attempts;
+
     @Override
     public Integer call() {
         int first = cycle();
@@ -111,7 +115,7 @@ public final class TddCommand implements Callable<Integer> {
         Path root = file.toAbsolutePath().getParent();
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
-            int code = new Pipeline(llm, new MavenVerifier())
+            int code = new Pipeline(llm, new MavenVerifier(), Math.max(0, attempts - 1))
                     .build(module, root.resolve("sky.lock"), root.resolve("build").resolve(profile),
                             System.out, System.err);
             System.out.println(code == 0

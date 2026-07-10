@@ -56,6 +56,10 @@ public final class FreezeCommand implements Callable<Integer> {
     @Option(names = "--profile", description = "Target profile (default: jvm-jakarta).", defaultValue = "jvm-jakarta")
     String profile;
 
+    @Option(names = "--attempts", description = "Candidates per method before giving up (default: 5).",
+            defaultValue = "5")
+    int attempts;
+
     @Override
     public Integer call() {
         Ast.Module module;
@@ -81,7 +85,7 @@ public final class FreezeCommand implements Callable<Integer> {
 
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
-            return new Pipeline(llm, new MavenVerifier())
+            return new Pipeline(llm, new MavenVerifier(), Math.max(0, attempts - 1))
                     .build(module, lockPath, root.resolve("build").resolve(profile), System.out, System.err);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());

@@ -140,6 +140,22 @@ class PipelineTest {
     }
 
     @Test
+    void theDefaultRetryBudgetAllowsFiveCandidates(@TempDir Path root) {
+        Ast.Module module = checkedModule();
+        StubLlm stub = new StubLlm(BODY);
+        var runs = new java.util.concurrent.atomic.AtomicInteger();
+        Verifier passesOnFifth = dir -> runs.incrementAndGet() < 5
+                ? VerificationResult.fail("[ERROR]   CatalogTest.restock_example_1:20 ensures: x")
+                : VerificationResult.pass();
+
+        int code = new Pipeline(stub, passesOnFifth)
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code, "the default budget should allow five candidates per method");
+        assertEquals(5, stub.calls(), "four regenerations follow the first candidate");
+    }
+
+    @Test
     void secondBuildReusesFrozenBodyWithoutCallingModel(@TempDir Path root) {
         Ast.Module module = checkedModule();
         Path lock = root.resolve("sky.lock");

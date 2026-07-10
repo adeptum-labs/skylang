@@ -64,8 +64,9 @@ public final class Pipeline {
     private final ViewVerifier viewVerifier = new ViewVerifier();
     private final int maxRegenerations;
 
+    /** Five candidates per method by default: the first proposal plus four regenerations. */
     public Pipeline(Llm client, Verifier verifier) {
-        this(client, verifier, 1);
+        this(client, verifier, 4);
     }
 
     public Pipeline(Llm client, Verifier verifier, int maxRegenerations) {
