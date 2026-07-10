@@ -71,4 +71,43 @@ public final class EffectLinter {
         }
         return found;
     }
+
+    private static final List<String> LOGGER_TOKENS =
+            List.of("log.", "logger.", "Logger", "System.out", "System.err");
+
+    /** Budget violations plus the module's forbid-policies, checked line by line. */
+    public static List<String> violations(String body, List<String> uses,
+                                          com.adeptum.skylang.front.ast.Ast.Module module) {
+        List<String> found = new ArrayList<>(violations(body, uses));
+        for (var policy : module.policies()) {
+            if (!(policy.whenever() instanceof com.adeptum.skylang.front.ast.Ast.PassedToLogger)
+                    || !(policy.rule() instanceof com.adeptum.skylang.front.ast.Ast.ForbidRule)) {
+                continue;
+            }
+            List<String> secretReads = secretReads(module);
+            for (String line : body.split("\n")) {
+                boolean logs = LOGGER_TOKENS.stream().anyMatch(line::contains);
+                boolean secret = line.contains(".reveal(") || secretReads.stream().anyMatch(line::contains);
+                if (logs && secret) {
+                    found.add("policy " + policy.name() + ": a Secret must never reach a logger — "
+                            + line.strip());
+                }
+            }
+        }
+        return found;
+    }
+
+    /** The accessor calls that read a Secret-typed field anywhere in the module. */
+    private static List<String> secretReads(com.adeptum.skylang.front.ast.Ast.Module module) {
+        List<String> reads = new ArrayList<>();
+        for (var entity : module.entities()) {
+            for (var field : entity.fields()) {
+                if (field.type() instanceof com.adeptum.skylang.front.ast.Ast.GenericType g
+                        && g.name().equals("Secret")) {
+                    reads.add("." + field.name() + "()");
+                }
+            }
+        }
+        return reads;
+    }
 }

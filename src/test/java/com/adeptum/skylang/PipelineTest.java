@@ -816,6 +816,64 @@ class PipelineTest {
                 "bare field expectations assert on the result");
     }
 
+    private static final String VAULT = """
+            module vault
+            type Password = Text(12..128)
+            entity WeakPassword { }
+            entity User { id Int @id  password Password }
+            policy StrongPasswords {
+              whenever a Password is constructed
+              require  length >= 12 and contains a symbol
+              else     raise WeakPassword
+            }
+            policy NoSecretsInLogs {
+              whenever a Secret is passed to a logger
+              forbid
+            }
+            service Users uses db {
+              register(id Int, password Password) -> User
+                intent "Create and store the user."
+            }
+            """;
+
+    @Test
+    void requirePoliciesGuardConstructionSites(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(VAULT, "vault.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return db.save(new User(id, password));"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String user = Files.readString(buildDir.resolve("src/main/java/vault/User.java"));
+        assertTrue(user.contains("new WeakPassword()"),
+                "a construction policy raises its named error in the record constructor");
+        assertTrue(user.contains("isLetterOrDigit"), "'contains a symbol' lowers to a character scan");
+        String users = Files.readString(buildDir.resolve("src/main/java/vault/Users.java"));
+        assertTrue(users.contains("new WeakPassword()"),
+                "the policy also guards service parameters of the type");
+        assertTrue(users.contains("password.length() >= 12"),
+                "the length predicate lowers to plain Java");
+    }
+
+    @Test
+    void forbidPoliciesFailViolatingBodies(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(VAULT.replace("password Password }", "password Password  pin Secret<Text> }"),
+                "vault.sky");
+        new TypeChecker().check(module);
+        var err = new ByteArrayOutputStream();
+
+        int code = new Pipeline(
+                new StubLlm("User u = db.save(new User(id, password, Secret.of(\"1\")));\n"
+                        + "System.out.println(u.pin().reveal());\nreturn u;"),
+                ALWAYS_PASS).build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                quiet(), new PrintStream(err));
+
+        assertEquals(1, code, "a body breaking a forbid policy must fail the build");
+        assertTrue(err.toString().contains("NoSecretsInLogs"), err.toString());
+    }
+
     @Test
     void bankRebuildStaysFrozen(@TempDir Path root) {
         Path lock = root.resolve("sky.lock");

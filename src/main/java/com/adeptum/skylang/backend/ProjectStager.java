@@ -96,7 +96,7 @@ public final class ProjectStager {
             for (Ast.Entity e : module.entities()) {
                 Files.writeString(main.resolve(e.name() + ".java"), errors.contains(e.name())
                         ? errorSource(pkg, e, types)
-                        : entitySource(pkg, e, web, types, values));
+                        : entitySource(pkg, e, web, types, values, module));
             }
             for (Ast.Service s : module.services()) {
                 Files.writeString(main.resolve(s.name() + ".java"), serviceSource(pkg, module, s, bodies, types));
@@ -110,7 +110,7 @@ public final class ProjectStager {
     // ----- entity ------------------------------------------------------------
 
     private String entitySource(String pkg, Ast.Entity entity, boolean web, Map<String, Ast.TypeDecl> types,
-                                java.util.Set<String> values) {
+                                java.util.Set<String> values, Ast.Module module) {
         String components = entity.fields().stream()
                 .map(f -> Lowering.javaType(f.type(), types) + " " + f.name())
                 .collect(Collectors.joining(", "));
@@ -127,6 +127,10 @@ public final class ProjectStager {
                     entity.name() + "." + f.name());
             if (!refined.isEmpty()) {
                 checks.append(indent(refined.strip(), "        ")).append('\n');
+            }
+            String policy = Lowering.policyChecks(f.name(), f.type(), module);
+            if (!policy.isEmpty()) {
+                checks.append(indent(policy.strip(), "        ")).append('\n');
             }
         }
 
@@ -202,9 +206,14 @@ public final class ProjectStager {
         return type instanceof Ast.GenericType g && g.name().equals("Secret");
     }
 
-    /** The entities named as failures — by raises clauses, spec thens, or example results. */
+    /** The entities named as failures — by raises clauses, spec thens, example results, or policies. */
     public static java.util.Set<String> errorEntities(Ast.Module module) {
         java.util.Set<String> errors = new java.util.LinkedHashSet<>();
+        for (Ast.Policy p : module.policies()) {
+            if (p.rule() instanceof Ast.RequireRule rr) {
+                rr.raise().ifPresent(errors::add);
+            }
+        }
         for (Ast.Service s : module.services()) {
             for (Ast.Method m : s.methods()) {
                 m.raises().forEach(r -> errors.add(r.error()));
@@ -323,6 +332,10 @@ public final class ProjectStager {
                         service.name() + "." + m.name() + " parameter " + p.name());
                 if (!guard.isEmpty()) {
                     sb.append(indent(guard.strip(), "        ")).append('\n');
+                }
+                String policy = Lowering.policyChecks(p.name(), p.type(), module);
+                if (!policy.isEmpty()) {
+                    sb.append(indent(policy.strip(), "        ")).append('\n');
                 }
             }
             // A requires clause is the caller's obligation, enforced as a guard.

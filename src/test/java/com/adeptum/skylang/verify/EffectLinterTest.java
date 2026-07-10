@@ -62,4 +62,29 @@ class EffectLinterTest {
         assertTrue(!EffectLinter.violations("java.sql.DriverManager.getConnection(u);", List.of("db")).isEmpty());
         assertTrue(!EffectLinter.violations("jakarta.mail.Transport.send(m);", List.of()).isEmpty());
     }
+
+    @Test
+    void forbidPoliciesCatchSecretsReachingLoggers() {
+        com.adeptum.skylang.front.ast.Ast.Module module = com.adeptum.skylang.front.Parsing.parse("""
+                module m
+                entity User { id Int @id  pw Secret<Text> }
+                policy NoSecretsInLogs {
+                  whenever a Secret is passed to a logger
+                  forbid
+                }
+                service S { f(u User) -> Int  intent "x" }
+                """, "m.sky");
+
+        List<String> leak = EffectLinter.violations(
+                "System.out.println(u.pw().reveal());\nreturn 1L;", List.of(), module);
+        assertTrue(leak.stream().anyMatch(v -> v.contains("NoSecretsInLogs")), leak.toString());
+
+        List<String> accessor = EffectLinter.violations(
+                "log.info(\"user \" + u.pw());\nreturn 1L;", List.of(), module);
+        assertTrue(accessor.stream().anyMatch(v -> v.contains("NoSecretsInLogs")), accessor.toString());
+
+        assertTrue(EffectLinter.violations(
+                "var x = u.pw().reveal();\nreturn (long) x.length();", List.of(), module).isEmpty(),
+                "reveal away from a logger is the legitimate path");
+    }
 }

@@ -226,14 +226,14 @@ public final class Pipeline {
      */
     private boolean resolveBody(Ast.Module module, Unit u, PrintStream out, PrintStream err) {
         u.body = synthesize(module, u);
-        List<String> violations = EffectLinter.violations(u.body, u.service.uses());
+        List<String> violations = EffectLinter.violations(u.body, u.service.uses(), module);
         int attempts = 0;
         while (!violations.isEmpty() && attempts < maxRegenerations) {
             attempts++;
             out.println("  " + u.key + " broke its effects budget " + violations
                     + " — regenerating (attempt " + attempts + ")");
             u.body = synthesize(module, u);
-            violations = EffectLinter.violations(u.body, u.service.uses());
+            violations = EffectLinter.violations(u.body, u.service.uses(), module);
         }
         if (!violations.isEmpty()) {
             err.println("build failed: " + u.key + " reaches outside its effects budget:");
@@ -361,13 +361,16 @@ public final class Pipeline {
     }
 
     /**
-     * Declared refined types are part of every spec (their predicates shape lowering and
-     * verification). A module without them contributes nothing here, so specs written before
-     * type declarations existed keep their exact hash.
+     * Declared refined types and policies are part of every spec (both shape lowering and
+     * verification for all bodies). A module without them contributes nothing here, so specs
+     * written before these constructs existed keep their exact hash.
      */
     private static void appendTypes(StringBuilder sb, Ast.Module module) {
         for (Ast.TypeDecl d : module.types()) {
             sb.append("type ").append(d).append('\n');
+        }
+        for (Ast.Policy p : module.policies()) {
+            sb.append("policy ").append(p).append('\n');
         }
     }
 

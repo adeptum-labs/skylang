@@ -91,6 +91,28 @@ public final class PromptBuilder {
             sb.append('\n');
         }
 
+        if (!module.policies().isEmpty()) {
+            sb.append("// Module policies — they hold for EVERY body, this one included:\n");
+            for (Ast.Policy p : module.policies()) {
+                sb.append("//   ").append(p.name()).append(": whenever ").append(switch (p.whenever()) {
+                    case Ast.Constructed c -> "a " + c.typeWord() + " is constructed";
+                    case Ast.PassedToLogger l -> "a " + l.typeWord() + " is passed to a logger";
+                });
+                switch (p.rule()) {
+                    case Ast.RequireRule rr -> {
+                        sb.append(" require ").append(rr.terms().stream().map(t -> switch (t) {
+                            case Ast.TermExpr te -> sky(te.expr());
+                            case Ast.Contains c -> "contains a " + c.what();
+                        }).collect(Collectors.joining(" and ")));
+                        rr.raise().ifPresent(e -> sb.append(" else raise ").append(e));
+                    }
+                    case Ast.ForbidRule ignored -> sb.append(" — FORBIDDEN, never do this");
+                }
+                sb.append('\n');
+            }
+            sb.append('\n');
+        }
+
         sb.append("// Entities in scope (their Java record shapes):\n");
         for (Ast.Entity e : module.entities()) {
             String components = e.fields().stream()

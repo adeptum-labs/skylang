@@ -415,6 +415,77 @@ public final class Lowering {
         };
     }
 
+    /**
+     * The construction checks a module's require-policies impose on values of the named
+     * declared type — plain-Java conditions (no helper methods exist at construction sites),
+     * raising the policy's error.
+     */
+    public static String policyChecks(String var, Ast.Type type, Ast.Module module) {
+        if (!(type instanceof Ast.TypeRef ref) || ref.list()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        Map<String, Ast.TypeDecl> types = typesOf(module);
+        for (Ast.Policy p : module.policies()) {
+            if (!(p.whenever() instanceof Ast.Constructed c) || !c.typeWord().equals(ref.name())
+                    || !(p.rule() instanceof Ast.RequireRule rule)) {
+                continue;
+            }
+            Ast.TypeDecl declared = types.get(ref.name());
+            boolean text = declared != null && javaName(declared.base(), types).equals("String");
+            List<String> conditions = new java.util.ArrayList<>();
+            for (Ast.ReqTerm term : rule.terms()) {
+                conditions.add(switch (term) {
+                    case Ast.Contains ignored ->
+                            var + ".chars().anyMatch(ch -> !Character.isLetterOrDigit(ch))";
+                    case Ast.TermExpr te -> plainCondition(te.expr(), var, text);
+                });
+            }
+            String consequence = rule.raise()
+                    .map(error -> "throw new " + error + "();")
+                    .orElse("throw new IllegalArgumentException(\"policy " + p.name() + "\");");
+            sb.append("if (!(").append(String.join(" && ", conditions)).append(")) ")
+                    .append(consequence).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Policy predicates range over {@code value} and {@code length} only, so they lower to
+     * plain Java operators; string equality goes through equals.
+     */
+    private static String plainCondition(Ast.Expr e, String var, boolean text) {
+        return switch (e) {
+            case Ast.NameExpr n -> switch (n.name()) {
+                case "value" -> var;
+                case "length" -> var + ".length()";
+                default -> n.name();
+            };
+            case Ast.IntLit i -> i.value() + "L";
+            case Ast.StrLit s -> javaString(s.value());
+            case Ast.BoolLit b -> String.valueOf(b.value());
+            case Ast.NotExpr n -> "!(" + plainCondition(n.value(), var, text) + ")";
+            case Ast.BinExpr b -> {
+                String l = plainCondition(b.left(), var, text);
+                String r = plainCondition(b.right(), var, text);
+                yield switch (b.op()) {
+                    case "and" -> "(" + l + " && " + r + ")";
+                    case "or" -> "(" + l + " || " + r + ")";
+                    case "==" -> stringOperand(b, text) ? l + ".equals(" + r + ")" : l + " == " + r;
+                    case "!=" -> stringOperand(b, text) ? "!" + l + ".equals(" + r + ")" : l + " != " + r;
+                    default -> l + " " + b.op() + " " + r;
+                };
+            }
+            default -> throw new IllegalStateException("policy predicates lower to plain Java only");
+        };
+    }
+
+    private static boolean stringOperand(Ast.BinExpr b, boolean text) {
+        return b.left() instanceof Ast.StrLit || b.right() instanceof Ast.StrLit
+                || text && (b.left() instanceof Ast.NameExpr n && n.name().equals("value")
+                        || b.right() instanceof Ast.NameExpr m && m.name().equals("value"));
+    }
+
     public static String javaString(String s) {
         StringBuilder sb = new StringBuilder("\"");
         for (int i = 0; i < s.length(); i++) {
