@@ -758,6 +758,64 @@ class PipelineTest {
                 "effect-free helper calls lower to service calls");
     }
 
+    private static final String LEDGER = """
+            module ledger
+            entity Account { id Int @id  balance Money }
+            entity Receipt { id Int @id  amount Money }
+            entity InsufficientFunds { }
+            entity BadInput { }
+            service Bank uses db {
+              transfer(from Account, to Account, amount Money) -> Receipt
+                spec "moves money atomically" {
+                  given from.balance == 100eur and to.balance == 0eur
+                  when  transfer(from, to, 30eur)
+                  then  from.balance == 70eur
+                        to.balance   == 30eur
+                }
+                spec "rejects overdraft" {
+                  given from.balance == 10eur
+                  when  transfer(from, to, 50eur)
+                  then  raises InsufficientFunds
+                        from.balance == 10eur
+                }
+            }
+            service Shelf uses db {
+              restock(id Int, units Int) -> Account
+                example restock(7, 3) on a Account with balance 5eur -> balance 8eur
+                example restock(7, 0) -> raises BadInput
+            }
+            """;
+
+    @Test
+    void specsAndSeededExamplesLowerIntoTests(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(LEDGER, "ledger.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String bank = Files.readString(buildDir.resolve("src/test/java/ledger/BankTest.java"));
+        assertTrue(bank.contains("void transfer_spec_1()"), "each spec becomes a test");
+        assertTrue(bank.contains("new Account(1L, Money.of(\"100\", \"EUR\"))"),
+                "given pins construct the witness arguments");
+        assertTrue(bank.contains("db.save(from)") && bank.contains("db.save(to)"),
+                "given state is seeded into the store");
+        assertTrue(bank.contains("db.findAccount((from).id()).orElseThrow()"),
+                "then re-reads stored state after the call");
+        assertTrue(bank.contains("assertThrows(InsufficientFunds.class"),
+                "then raises becomes an exception assertion");
+
+        String shelf = Files.readString(buildDir.resolve("src/test/java/ledger/ShelfTest.java"));
+        assertTrue(shelf.contains("db.save(new Account(id, Money.of(\"5\", \"EUR\")))"),
+                "a seeded example stores the row keyed by the call argument");
+        assertTrue(shelf.contains("assertThrows(BadInput.class"),
+                "a raises example result becomes an exception assertion");
+        assertTrue(shelf.contains("result.balance()"),
+                "bare field expectations assert on the result");
+    }
+
     @Test
     void bankRebuildStaysFrozen(@TempDir Path root) {
         Path lock = root.resolve("sky.lock");

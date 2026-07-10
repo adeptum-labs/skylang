@@ -393,6 +393,10 @@ public final class ProjectStager {
             for (Ast.Example ex : m.examples()) {
                 sb.append(testMethod(service, m, ex, ++n, module));
             }
+            int sp = 0;
+            for (Ast.Spec spec : m.specs()) {
+                sb.append(specTest(service, m, spec, ++sp, module, types));
+            }
             int k = 0;
             for (Ast.Raise r : m.raises()) {
                 sb.append(raiseTest(service, m, r, ++k, module, types));
@@ -611,6 +615,19 @@ public final class ProjectStager {
             env.put(name, name);
         }
 
+        // `on a Product with stock 5` — establish the stored row before anything reads it.
+        ex.seed().ifPresent(seed -> sb.append("        db.save(")
+                .append(seedValue(seed, m, module, Lowering.typesOf(module), values)).append(");\n"));
+
+        String argNames = m.params().stream().map(Ast.Param::name).collect(Collectors.joining(", "));
+        if (ex.result() instanceof Ast.RaisesResult rr) {
+            sb.append("        assertThrows(").append(rr.error()).append(".class, () -> svc.")
+                    .append(m.name()).append("(").append(argNames).append("), ")
+                    .append(Lowering.javaString("example: raises " + rr.error())).append(");\n");
+            sb.append("    }\n");
+            return sb.toString();
+        }
+
         // old(...) values are snapshotted before the call; old(result...) reads the stored
         // row the method will return, found by its id parameter.
         Map<String, String> oldNames = new LinkedHashMap<>();
@@ -633,8 +650,6 @@ public final class ProjectStager {
             emitSnapshotWalk(ens, oldNames, env, module, sb, emitted);
         }
         env.put("result", "result");
-
-        String argNames = m.params().stream().map(Ast.Param::name).collect(Collectors.joining(", "));
         sb.append("        var result = svc.").append(m.name()).append("(").append(argNames).append(");\n");
 
         for (Ast.Expr ens : m.ensures()) {
@@ -645,22 +660,220 @@ public final class ProjectStager {
 
         switch (ex.result()) {
             case Ast.RaisesResult rr ->
-                    throw new UnsupportedOperationException("raises results do not lower yet");
-            case Ast.FieldsResult fr ->
-                    throw new UnsupportedOperationException("field-expectation results do not lower yet");
+                    throw new IllegalStateException("raises results return before the call");
             case Ast.ExprResult er -> sb.append("        assertEquals(")
                     .append(Lowering.javaValue(er.value(), values)).append(", result, \"example result\");\n");
-            case Ast.EntityResult ent -> {
-                for (Ast.FieldExpect fe : ent.fields()) {
-                    sb.append("        assertEquals(").append(Lowering.javaValue(fe.expected(), values))
-                            .append(", result.").append(fe.field()).append("(), ")
-                            .append(Lowering.javaString("example: " + fe.field())).append(");\n");
-                }
-            }
+            case Ast.EntityResult ent -> appendFieldAsserts(sb, ent.fields(), values);
+            case Ast.FieldsResult fr -> appendFieldAsserts(sb, fr.fields(), values);
         }
 
         sb.append("    }\n");
         return sb.toString();
+    }
+
+    private static void appendFieldAsserts(StringBuilder sb, List<Ast.FieldExpect> fields,
+                                           java.util.Set<String> values) {
+        for (Ast.FieldExpect fe : fields) {
+            sb.append("        assertEquals(").append(Lowering.javaValue(fe.expected(), values))
+                    .append(", result.").append(fe.field()).append("(), ")
+                    .append(Lowering.javaString("example: " + fe.field())).append(");\n");
+        }
+    }
+
+    /** The seeded row: pinned fields from the seed, the id from the matching call argument. */
+    private static String seedValue(Ast.Seed seed, Ast.Method m, Ast.Module module,
+                                    Map<String, Ast.TypeDecl> types, java.util.Set<String> values) {
+        Ast.Entity entity = module.entities().stream()
+                .filter(e -> e.name().equals(seed.entityName())).findFirst().orElseThrow();
+        List<String> args = new java.util.ArrayList<>();
+        for (Ast.Field f : entity.fields()) {
+            Ast.Expr pinned = seed.fields().stream()
+                    .filter(fe -> fe.field().equals(f.name()))
+                    .map(Ast.FieldExpect::expected).findFirst().orElse(null);
+            if (pinned != null) {
+                args.add(Lowering.javaValue(pinned, values));
+            } else if (f.id() && m.params().stream().anyMatch(p -> p.name().equals(f.name()))) {
+                args.add(f.name());   // the local bound to the call argument of the same name
+            } else {
+                String fallback = Lowering.defaultJavaValue(f.type(), types, module);
+                if (fallback == null) {
+                    throw new IllegalStateException("cannot derive a value for "
+                            + entity.name() + "." + f.name() + " in a seeded example");
+                }
+                args.add(fallback);
+            }
+        }
+        return "new " + entity.name() + "(" + String.join(", ", args) + ")";
+    }
+
+    /**
+     * A spec block as a test: given pins construct and seed the witnesses, when performs
+     * the call, then asserts raises and outcomes — stored state re-read after the call.
+     */
+    private String specTest(Ast.Service service, Ast.Method m, Ast.Spec spec, int n,
+                            Ast.Module module, Map<String, Ast.TypeDecl> types) {
+        java.util.Set<String> values = Lowering.valueEntities(module);
+        Map<String, Map<String, Ast.Expr>> fieldPins = new LinkedHashMap<>();
+        Map<String, Ast.Expr> directPins = new LinkedHashMap<>();
+        spec.given().ifPresent(g -> collectPins(g, fieldPins, directPins));
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n    @Test\n    void ").append(m.name()).append("_spec_").append(n).append("() {\n");
+        sb.append(construction(service));
+
+        // Witness variables for the parameters the when-call names; sequential ids keep
+        // distinct entity witnesses distinct rows.
+        Map<String, String> env = new LinkedHashMap<>();
+        List<String> entityParams = new java.util.ArrayList<>();
+        long nextId = 1;
+        for (Ast.Param p : m.params()) {
+            boolean referenced = spec.when().args().stream()
+                    .anyMatch(a -> a instanceof Ast.NameExpr ne && ne.name().equals(p.name()));
+            if (!referenced) {
+                continue;
+            }
+            String value;
+            if (directPins.containsKey(p.name())) {
+                value = Lowering.javaValue(directPins.get(p.name()), values);
+            } else if (p.type() instanceof Ast.TypeRef ref && isModuleEntity(module, ref.name())) {
+                value = entityWitness(ref.name(), fieldPins.getOrDefault(p.name(), Map.of()),
+                        nextId++, module, types, values);
+                entityParams.add(p.name());
+            } else {
+                value = Lowering.defaultJavaValue(p.type(), types, module);
+            }
+            sb.append("        var ").append(p.name()).append(" = ").append(value).append(";\n");
+            env.put(p.name(), p.name());
+        }
+        if (service.uses().contains("db")) {
+            for (String p : entityParams) {
+                sb.append("        db.save(").append(p).append(");\n");
+            }
+        }
+
+        String call = "svc." + m.name() + "(" + spec.when().args().stream()
+                .map(a -> Lowering.exprToJava(a, env, module)).collect(Collectors.joining(", ")) + ")";
+        String raises = spec.then().stream()
+                .filter(t -> t instanceof Ast.ThenRaises)
+                .map(t -> ((Ast.ThenRaises) t).error()).findFirst().orElse(null);
+        if (raises != null) {
+            sb.append("        assertThrows(").append(raises).append(".class, () -> ").append(call)
+                    .append(", ").append(Lowering.javaString("spec: " + spec.title())).append(");\n");
+        } else {
+            sb.append("        var result = ").append(call).append(";\n");
+            env.put("result", "result");
+        }
+
+        // Stored state after the call: re-read each asserted entity witness by its id.
+        java.util.Set<String> reread = new java.util.LinkedHashSet<>();
+        for (Ast.ThenAssert t : spec.then()) {
+            if (t instanceof Ast.ThenExpr te) {
+                collectPostReads(te.expr(), entityParams, reread);
+            }
+        }
+        for (String p : reread) {
+            String entity = m.params().stream().filter(x -> x.name().equals(p))
+                    .map(x -> ((Ast.TypeRef) x.type()).name()).findFirst().orElseThrow();
+            String idField = idFieldOf(module, entity);
+            sb.append("        var __post_").append(p).append(" = db.find").append(entity)
+                    .append("((").append(p).append(").").append(idField).append("()).orElseThrow();\n");
+            env.put("__post_" + p, "__post_" + p);
+        }
+        for (Ast.ThenAssert t : spec.then()) {
+            if (t instanceof Ast.ThenExpr te) {
+                Ast.Expr rewritten = rewritePostState(te.expr(), reread);
+                sb.append("        assertTrue(").append(Lowering.exprToJava(rewritten, env, module))
+                        .append(", ").append(Lowering.javaString("then: " + Lowering.skyText(te.expr())))
+                        .append(");\n");
+            }
+        }
+        sb.append("    }\n");
+        return sb.toString();
+    }
+
+    private static boolean isModuleEntity(Ast.Module module, String name) {
+        return module.entities().stream().anyMatch(e -> e.name().equals(name) && e.values().isEmpty());
+    }
+
+    private static String idFieldOf(Ast.Module module, String entity) {
+        return module.entities().stream().filter(e -> e.name().equals(entity))
+                .flatMap(e -> e.fields().stream()).filter(Ast.Field::id)
+                .map(Ast.Field::name).findFirst().orElseThrow();
+    }
+
+    /** Split an and-chain of given pins into per-parameter field pins and direct pins. */
+    private static void collectPins(Ast.Expr g, Map<String, Map<String, Ast.Expr>> fieldPins,
+                                    Map<String, Ast.Expr> directPins) {
+        if (g instanceof Ast.BinExpr and && and.op().equals("and")) {
+            collectPins(and.left(), fieldPins, directPins);
+            collectPins(and.right(), fieldPins, directPins);
+            return;
+        }
+        Ast.BinExpr pin = (Ast.BinExpr) g;
+        if (pin.left() instanceof Ast.NameExpr n) {
+            directPins.put(n.name(), pin.right());
+        } else if (pin.left() instanceof Ast.MemberExpr me && me.target() instanceof Ast.NameExpr n) {
+            fieldPins.computeIfAbsent(n.name(), k -> new LinkedHashMap<>()).put(me.field(), pin.right());
+        }
+    }
+
+    /** A full-constructor witness: pinned fields, a sequential id, defaults elsewhere. */
+    private static String entityWitness(String entity, Map<String, Ast.Expr> pins, long id,
+                                        Ast.Module module, Map<String, Ast.TypeDecl> types,
+                                        java.util.Set<String> values) {
+        Ast.Entity e = module.entities().stream()
+                .filter(x -> x.name().equals(entity)).findFirst().orElseThrow();
+        List<String> args = new java.util.ArrayList<>();
+        for (Ast.Field f : e.fields()) {
+            if (pins.containsKey(f.name())) {
+                args.add(Lowering.javaValue(pins.get(f.name()), values));
+            } else if (f.id()) {
+                args.add(f.type() instanceof Ast.TypeRef ref && ref.name().equals("Text")
+                        ? "\"w" + id + "\"" : id + "L");
+            } else {
+                String fallback = Lowering.defaultJavaValue(f.type(), types, module);
+                if (fallback == null) {
+                    throw new IllegalStateException("cannot derive a witness for "
+                            + entity + "." + f.name() + " in a spec");
+                }
+                args.add(fallback);
+            }
+        }
+        return "new " + entity + "(" + String.join(", ", args) + ")";
+    }
+
+    private static void collectPostReads(Ast.Expr e, List<String> entityParams, java.util.Set<String> out) {
+        switch (e) {
+            case Ast.MemberExpr m -> {
+                if (m.target() instanceof Ast.NameExpr n && entityParams.contains(n.name())) {
+                    out.add(n.name());
+                }
+                collectPostReads(m.target(), entityParams, out);
+            }
+            case Ast.BinExpr b -> {
+                collectPostReads(b.left(), entityParams, out);
+                collectPostReads(b.right(), entityParams, out);
+            }
+            case Ast.NotExpr n -> collectPostReads(n.value(), entityParams, out);
+            case Ast.CallExpr c -> c.args().forEach(a -> collectPostReads(a, entityParams, out));
+            default -> {
+            }
+        }
+    }
+
+    /** In then-assertions, a witness's field means the stored row after the call. */
+    private static Ast.Expr rewritePostState(Ast.Expr e, java.util.Set<String> reread) {
+        return switch (e) {
+            case Ast.MemberExpr m -> m.target() instanceof Ast.NameExpr n && reread.contains(n.name())
+                    ? new Ast.MemberExpr(new Ast.NameExpr("__post_" + n.name()), m.field())
+                    : new Ast.MemberExpr(rewritePostState(m.target(), reread), m.field());
+            case Ast.BinExpr b -> new Ast.BinExpr(b.op(), rewritePostState(b.left(), reread),
+                    rewritePostState(b.right(), reread));
+            case Ast.NotExpr n -> new Ast.NotExpr(rewritePostState(n.value(), reread));
+            case Ast.CallExpr c -> new Ast.CallExpr(c.callee(),
+                    c.args().stream().map(a -> rewritePostState(a, reread)).toList());
+            default -> e;
+        };
     }
 
     /** Index each distinct old(...) by its written form; the value becomes its snapshot name. */
