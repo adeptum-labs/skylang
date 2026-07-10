@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LoweringTest {
 
@@ -122,6 +123,38 @@ class LoweringTest {
         Ast.Expr ensures = m.services().get(0).methods().get(0).ensures().get(0);
         assertEquals("eq((u).role(), Role.Admin)",
                 Lowering.exprToJava(ensures, Map.of(), java.util.Set.of("Role")));
+    }
+
+    @Test
+    void lowersLengthThroughTheDispatchingHelper() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                service S {
+                  keep(input [Text]) -> [Text]
+                    intent  "x"
+                    ensures result.length == input.length
+                }
+                """, "t.sky");
+        Ast.Expr ensures = m.services().get(0).methods().get(0).ensures().get(0);
+        assertEquals("eq(len(result), len(input))", Lowering.exprToJava(ensures, Map.of()));
+    }
+
+    @Test
+    void lowersFixtureWitnesses() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Wallet { id Int @id  owner Email @unique  balance Money }
+                service S uses db {
+                  withdraw(w Wallet, amount Money) -> Wallet
+                    intent  "x"
+                    example withdraw(wallet_with(100eur), 30eur) -> balance 70eur
+                }
+                """, "t.sky");
+        Ast.Expr fixture = m.services().get(0).methods().get(0).examples().get(0).call().args().get(0);
+        String lowered = Lowering.exprToJava(fixture, Map.of(), m);
+        assertTrue(lowered.startsWith("new Wallet("), lowered);
+        assertTrue(lowered.contains("Money.of(\"100\", \"EUR\")"), lowered);
+        assertTrue(lowered.contains("@example.com"), lowered);
     }
 
     @Test

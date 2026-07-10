@@ -189,6 +189,10 @@ public final class TypeChecker {
             LinkedHashMap<String, Ty> fields = entities.get(e.name());
             for (Ast.Field f : e.fields()) {
                 String where = "field '" + e.name() + "." + f.name() + "'";
+                if (f.name().equals("length") || f.name().equals("size")) {
+                    throw new CheckException(where + ": 'length' and 'size' are reserved for"
+                            + " collection and byte-sequence measurements");
+                }
                 Ty ty = resolveType(f.type(), where);
                 if (f.min().isPresent() && !ty.isInt()) {
                     throw new CheckException("@min is only valid on Int fields, but "
@@ -1017,9 +1021,11 @@ public final class TypeChecker {
                     yield Ty.entity(n.name());
                 }
                 Ty target = infer(me.target(), env, where);
-                if (target.erased().equals(Ty.BYTES)
-                        && (me.field().equals("length") || me.field().equals("size"))) {
-                    yield Ty.INT;   // a byte sequence exposes its length to contracts
+                boolean sized = target.erased().equals(Ty.BYTES)
+                        || target instanceof Ty.GenericTy g
+                                && (g.kind().equals("List") || g.kind().equals("Set") || g.kind().equals("Map"));
+                if (sized && (me.field().equals("length") || me.field().equals("size"))) {
+                    yield Ty.INT;   // byte sequences and collections expose their length to contracts
                 }
                 if (!(target instanceof Ty.EntityTy et)) {
                     throw new CheckException(where + ": cannot read field '" + me.field() + "' of non-entity " + target);
@@ -1111,6 +1117,9 @@ public final class TypeChecker {
         }
         LinkedHashMap<String, Ty> fields = entities.get(ce.callee());
         if (fields == null) {
+            if (ce.callee().endsWith("_with")) {
+                return inferFixture(ce, where);
+            }
             return inferHelperCall(ce, env, where);
         }
         List<Ty> fieldTypes = List.copyOf(fields.values());
@@ -1142,6 +1151,54 @@ public final class TypeChecker {
                     + " type, got " + l + " and " + r);
         }
         return l;
+    }
+
+    /**
+     * {@code wallet_with(100eur)} — a fixture witness: each literal pins the one field of
+     * its type, defaults fill the rest, and anything underivable must be pinned.
+     */
+    private Ty inferFixture(Ast.CallExpr ce, String where) {
+        String word = ce.callee().substring(0, ce.callee().length() - "_with".length());
+        String entity = entityByWord(word);
+        if (entity == null || valueSets.containsKey(entity) || errorEntities.contains(entity)) {
+            throw new CheckException(where + ": cannot resolve fixture '" + ce.callee()
+                    + "' — no entity matches '" + word + "'");
+        }
+        LinkedHashMap<String, Ty> fields = entities.get(entity);
+        java.util.Set<String> pinned = new java.util.HashSet<>();
+        for (Ast.Expr arg : ce.args()) {
+            if (!isLiteral(arg)) {
+                throw new CheckException(where + ": fixture arguments are literals");
+            }
+            Ty at = infer(arg, Map.of(), where);
+            List<String> candidates = fields.entrySet().stream()
+                    .filter(f -> !pinned.contains(f.getKey()))
+                    .filter(f -> at.erased().equals(f.getValue().erased()))
+                    .map(Map.Entry::getKey).toList();
+            if (candidates.isEmpty()) {
+                throw new CheckException(where + ": " + entity + " has no unpinned " + at
+                        + " field to take " + literalText(arg));
+            }
+            if (candidates.size() > 1) {
+                throw new CheckException(where + ": ambiguous fixture value " + literalText(arg)
+                        + " — " + entity + " has " + String.join(", ", candidates));
+            }
+            String field = candidates.get(0);
+            fits(where + " fixture field '" + field + "'", arg, at, fields.get(field));
+            pinned.add(field);
+        }
+        for (Ast.Entity e : moduleEntities) {
+            if (!e.name().equals(entity)) {
+                continue;
+            }
+            for (Ast.Field f : e.fields()) {
+                if (!pinned.contains(f.name()) && !f.id() && !derivableWitness(f.type())) {
+                    throw new CheckException(where + ": pin " + entity + "." + f.name()
+                            + " — its type has no derivable witness value");
+                }
+            }
+        }
+        return Ty.entity(entity);
     }
 
     /** A contract may call any module method that declares no effects. */

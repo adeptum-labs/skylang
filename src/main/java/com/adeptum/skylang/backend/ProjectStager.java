@@ -357,7 +357,8 @@ public final class ProjectStager {
         }
         boolean guarded = service.methods().stream().anyMatch(m -> !m.requires().isEmpty());
         if (guarded) {
-            sb.append(opHelpers(SupportClasses.used(module).contains("Money")));
+            java.util.Set<String> guardSupport = SupportClasses.used(module);
+            sb.append(opHelpers(guardSupport.contains("Money"), guardSupport.contains("Bytes")));
         }
         sb.append("}\n");
         return sb.toString();
@@ -436,7 +437,8 @@ public final class ProjectStager {
                 sb.append(requiresTest(service, m, req, ++g, module, types));
             }
         }
-        sb.append(opHelpers(SupportClasses.used(module).contains("Money")));
+        java.util.Set<String> support = SupportClasses.used(module);
+        sb.append(opHelpers(support.contains("Money"), support.contains("Bytes")));
         sb.append("}\n");
         return sb.toString();
     }
@@ -579,7 +581,7 @@ public final class ProjectStager {
      * resolution gives each lowered type its correct semantics (primitive comparison for
      * long, value equality for objects, currency-safe arithmetic for Money).
      */
-    private static String opHelpers(boolean money) {
+    private static String opHelpers(boolean money, boolean bytes) {
         String base = """
 
                     private static boolean eq(long a, long b) { return a == b; }
@@ -602,6 +604,14 @@ public final class ProjectStager {
                     private static <T extends Comparable<T>> T max(T a, T b) { return a.compareTo(b) >= 0 ? a : b; }
                     private static <T extends Comparable<T>> T min(T a, T b) { return a.compareTo(b) <= 0 ? a : b; }
                 """;
+        String lenDispatch = """
+                    private static long len(Object o) {
+                        if (o instanceof java.util.Collection<?> c) { return c.size(); }
+                        if (o instanceof java.util.Map<?, ?> m) { return m.size(); }
+                        if (o instanceof String s) { return s.length(); }
+                %s        throw new IllegalArgumentException("no length for " + o);
+                    }
+                """.formatted(bytes ? "        if (o instanceof Bytes b) { return b.length(); }\n" : "");
         String moneyOps = """
                     private static Money plus(Money a, Money b) { return a.plus(b); }
                     private static Money minus(Money a, Money b) { return a.minus(b); }
@@ -627,7 +637,18 @@ public final class ProjectStager {
                         return moneyTotal != null ? moneyTotal : total;
                     }
                 """;
-        return money ? base + moneyOps + dispatchingSum : base + longSum;
+        return (money ? base + moneyOps + dispatchingSum : base + longSum) + lenDispatch;
+    }
+
+    /** A message suffix printing the inputs — the counterexample when the clause fails. */
+    private static String counterexample(List<String> inputs) {
+        if (inputs.isEmpty()) {
+            return "";
+        }
+        String parts = inputs.stream()
+                .map(name -> Lowering.javaString(name + "=") + " + " + name)
+                .collect(Collectors.joining(" + " + Lowering.javaString(", ") + " + "));
+        return " + " + Lowering.javaString(" [") + " + " + parts + " + " + Lowering.javaString("]");
     }
 
     private String testMethod(Ast.Service service, Ast.Method m, Ast.Example ex, int n, Ast.Module module) {
@@ -641,7 +662,7 @@ public final class ProjectStager {
         for (int i = 0; i < m.params().size(); i++) {
             String name = m.params().get(i).name();
             sb.append("        var ").append(name).append(" = ")
-                    .append(Lowering.javaValue(args.get(i), values)).append(";\n");
+                    .append(Lowering.exprToJava(args.get(i), Map.of(), module)).append(";\n");
             env.put(name, name);
         }
 
@@ -682,10 +703,12 @@ public final class ProjectStager {
         env.put("result", "result");
         sb.append("        var result = svc.").append(m.name()).append("(").append(argNames).append(");\n");
 
+        List<String> inputs = m.params().stream().map(Ast.Param::name).toList();
         for (Ast.Expr ens : m.ensures()) {
             String cond = Lowering.exprToJava(replaceOld(ens, oldNames), env, module);
-            sb.append("        assertTrue(").append(cond).append(", ")
-                    .append(Lowering.javaString("ensures: " + Lowering.skyText(ens))).append(");\n");
+            sb.append("        assertTrue(").append(cond).append(", () -> ")
+                    .append(Lowering.javaString("ensures: " + Lowering.skyText(ens)))
+                    .append(counterexample(inputs)).append(");\n");
         }
 
         switch (ex.result()) {
@@ -766,7 +789,7 @@ public final class ProjectStager {
             if (directPins.containsKey(p.name())) {
                 value = Lowering.javaValue(directPins.get(p.name()), values);
             } else if (p.type() instanceof Ast.TypeRef ref && isModuleEntity(module, ref.name())) {
-                value = entityWitness(ref.name(), fieldPins.getOrDefault(p.name(), Map.of()),
+                value = Lowering.entityWitness(ref.name(), fieldPins.getOrDefault(p.name(), Map.of()),
                         nextId++, module, types, values);
                 entityParams.add(p.name());
             } else {
@@ -809,12 +832,14 @@ public final class ProjectStager {
                     .append("((").append(p).append(").").append(idField).append("()).orElseThrow();\n");
             env.put("__post_" + p, "__post_" + p);
         }
+        List<String> witnesses = m.params().stream().map(Ast.Param::name)
+                .filter(env::containsKey).toList();
         for (Ast.ThenAssert t : spec.then()) {
             if (t instanceof Ast.ThenExpr te) {
                 Ast.Expr rewritten = rewritePostState(te.expr(), reread);
                 sb.append("        assertTrue(").append(Lowering.exprToJava(rewritten, env, module))
-                        .append(", ").append(Lowering.javaString("then: " + Lowering.skyText(te.expr())))
-                        .append(");\n");
+                        .append(", () -> ").append(Lowering.javaString("then: " + Lowering.skyText(te.expr())))
+                        .append(counterexample(witnesses)).append(");\n");
             }
         }
         sb.append("    }\n");
@@ -845,45 +870,6 @@ public final class ProjectStager {
         } else if (pin.left() instanceof Ast.MemberExpr me && me.target() instanceof Ast.NameExpr n) {
             fieldPins.computeIfAbsent(n.name(), k -> new LinkedHashMap<>()).put(me.field(), pin.right());
         }
-    }
-
-    /** A full-constructor witness: pinned fields, a sequential id, defaults elsewhere. */
-    private static String entityWitness(String entity, Map<String, Ast.Expr> pins, long id,
-                                        Ast.Module module, Map<String, Ast.TypeDecl> types,
-                                        java.util.Set<String> values) {
-        Ast.Entity e = module.entities().stream()
-                .filter(x -> x.name().equals(entity)).findFirst().orElseThrow();
-        List<String> args = new java.util.ArrayList<>();
-        for (Ast.Field f : e.fields()) {
-            if (pins.containsKey(f.name())) {
-                args.add(Lowering.javaValue(pins.get(f.name()), values));
-            } else if (f.id()) {
-                args.add(f.type() instanceof Ast.TypeRef ref && ref.name().equals("Text")
-                        ? "\"w" + id + "\"" : id + "L");
-            } else if (f.unique()) {
-                // Distinct witnesses must not collide on a unique column.
-                String javaType = Lowering.javaType(f.type(), types);
-                args.add(switch (javaType) {
-                    case "long" -> (1000 + id) + "L";
-                    case "String" -> f.type() instanceof Ast.TypeRef ref && ref.name().equals("Email")
-                            ? "\"w" + id + "@example.com\"" : "\"w" + id + "\"";
-                    default -> witnessFallback(entity, f, types, module);
-                });
-            } else {
-                args.add(witnessFallback(entity, f, types, module));
-            }
-        }
-        return "new " + entity + "(" + String.join(", ", args) + ")";
-    }
-
-    private static String witnessFallback(String entity, Ast.Field f, Map<String, Ast.TypeDecl> types,
-                                          Ast.Module module) {
-        String fallback = Lowering.defaultJavaValue(f.type(), types, module);
-        if (fallback == null) {
-            throw new IllegalStateException("cannot derive a witness for "
-                    + entity + "." + f.name() + " in a spec");
-        }
-        return fallback;
     }
 
     private static void collectPostReads(Ast.Expr e, List<String> entityParams, java.util.Set<String> out) {

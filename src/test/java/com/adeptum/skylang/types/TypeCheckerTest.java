@@ -1102,6 +1102,62 @@ class TypeCheckerTest {
         assertTrue(e.getMessage().contains("error"), e.getMessage());
     }
 
+    // ----- the chapter-9 surface: list length and fixture arguments ------------
+
+    @Test
+    void collectionsExposeTheirLengthToContracts() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                service S {
+                  keep(input [Text]) -> [Text]
+                    intent  "Same size out as in."
+                    ensures result.length == input.length
+                }
+                """));
+    }
+
+    private static final String WALLETS = """
+            module m
+            entity Wallet { id Int @id  owner Email @unique  balance Money }
+            entity Purse { id Int @id  cash Money  reserve Money }
+            service Bank uses db {
+            %s
+            }
+            """;
+
+    @Test
+    void fixtureArgumentsConstructWitnesses() {
+        assertDoesNotThrow(() -> check(WALLETS.formatted("""
+              withdraw(w Wallet, amount Money) -> Wallet
+                intent  "Take the amount out."
+                ensures result.balance == old(w.balance) - amount
+                example withdraw(wallet_with(100eur), 30eur) -> balance 70eur
+            """)));
+    }
+
+    @Test
+    void fixtureFieldsMustResolveUniquely() {
+        CheckException ambiguous = assertThrows(CheckException.class, () -> check(WALLETS.formatted("""
+              drain(p Purse) -> Purse
+                intent  "x"
+                example drain(purse_with(5eur)) -> cash 0eur
+            """)));
+        assertTrue(ambiguous.getMessage().contains("cash") && ambiguous.getMessage().contains("reserve"),
+                ambiguous.getMessage());
+        CheckException unknown = assertThrows(CheckException.class, () -> check(WALLETS.formatted("""
+              f(w Wallet) -> Wallet
+                intent  "x"
+                example f(widget_with(5eur)) -> balance 0eur
+            """)));
+        assertTrue(unknown.getMessage().contains("widget"), unknown.getMessage());
+        CheckException noField = assertThrows(CheckException.class, () -> check(WALLETS.formatted("""
+              f(w Wallet) -> Wallet
+                intent  "x"
+                example f(wallet_with(true)) -> balance 0eur
+            """)));
+        assertTrue(noField.getMessage().contains("Bool"), noField.getMessage());
+    }
+
     @Test
     void memberDefaultsMustMatchTheFieldType() {
         CheckException e = assertThrows(CheckException.class, () -> check("""

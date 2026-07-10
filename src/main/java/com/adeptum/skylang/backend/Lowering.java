@@ -143,11 +143,17 @@ public final class Lowering {
             case Ast.BoolLit b -> String.valueOf(b.value());
             case Ast.MoneyLit m -> "Money.of(\"" + m.amount().toPlainString() + "\", \"" + m.currency() + "\")";
             case Ast.NameExpr n -> env.getOrDefault(n.name(), n.name());
-            case Ast.MemberExpr m ->
-                    m.target() instanceof Ast.NameExpr n && !env.containsKey(n.name())
-                            && valueEntities.contains(n.name())
-                            ? n.name() + "." + m.field()
-                            : "(" + exprToJava(m.target(), env, valueEntities, module) + ")." + m.field() + "()";
+            case Ast.MemberExpr m -> {
+                if (m.target() instanceof Ast.NameExpr n && !env.containsKey(n.name())
+                        && valueEntities.contains(n.name())) {
+                    yield n.name() + "." + m.field();
+                }
+                String target = exprToJava(m.target(), env, valueEntities, module);
+                // length/size are reserved measurements, dispatched at runtime by the helper.
+                yield m.field().equals("length") || m.field().equals("size")
+                        ? "len(" + target + ")"
+                        : "(" + target + ")." + m.field() + "()";
+            }
             case Ast.CallExpr c -> callToJava(c, env, valueEntities, module);
             case Ast.BinExpr b -> binToJava(b, env, valueEntities, module);
             case Ast.NotExpr n -> "!(" + exprToJava(n.value(), env, valueEntities, module) + ")";
@@ -166,6 +172,13 @@ public final class Lowering {
                 .collect(Collectors.joining(", "));
         if (c.callee().equals("max") || c.callee().equals("min")) {
             return c.callee() + "(" + args + ")";
+        }
+        if (module != null && c.callee().endsWith("_with")
+                && module.entities().stream().noneMatch(e -> e.name().equals(c.callee()))) {
+            String fixture = fixtureWitness(c, module);
+            if (fixture != null) {
+                return fixture;
+            }
         }
         if (module != null && module.entities().stream().noneMatch(e -> e.name().equals(c.callee()))) {
             String owner = module.services().stream()
@@ -198,6 +211,91 @@ public final class Lowering {
         }
         return "sumOf(" + source + ".stream()" + filter + ".map(" + a.var() + " -> (Object) ("
                 + exprToJava(a.value(), inner, valueEntities, module) + ")).toList())";
+    }
+
+    /** {@code wallet_with(100eur)} — the witness the checker validated, as a constructor call. */
+    private static String fixtureWitness(Ast.CallExpr c, Ast.Module module) {
+        String word = c.callee().substring(0, c.callee().length() - "_with".length());
+        Ast.Entity entity = module.entities().stream()
+                .filter(e -> {
+                    String lower = e.name().toLowerCase(java.util.Locale.ROOT);
+                    return lower.equals(word.toLowerCase(java.util.Locale.ROOT));
+                })
+                .findFirst().orElse(null);
+        if (entity == null) {
+            return null;
+        }
+        Map<String, Ast.TypeDecl> types = typesOf(module);
+        Map<String, Ast.Expr> pins = new LinkedHashMap<>();
+        for (Ast.Expr arg : c.args()) {
+            for (Ast.Field f : entity.fields()) {
+                if (!pins.containsKey(f.name()) && literalMatches(arg, f.type(), types)) {
+                    pins.put(f.name(), arg);
+                    break;
+                }
+            }
+        }
+        long id = Math.floorMod(pins.values().stream().map(Lowering::skyText)
+                .collect(Collectors.joining(",")).hashCode(), 997) + 1;
+        return entityWitness(entity.name(), pins, id, module, types, valueEntities(module));
+    }
+
+    /** Whether the literal's kind matches the field's erased base — the checker's rule. */
+    private static boolean literalMatches(Ast.Expr literal, Ast.Type type, Map<String, Ast.TypeDecl> types) {
+        String base = switch (type) {
+            case Ast.TypeRef ref -> {
+                Ast.TypeDecl d = types.get(ref.name());
+                yield ref.list() ? "List" : d != null ? d.base() : ref.name();
+            }
+            case Ast.RangedType r -> r.base();
+            case Ast.GenericType g -> g.name();
+        };
+        return switch (literal) {
+            case Ast.IntLit ignored -> base.equals("Int");
+            case Ast.StrLit ignored -> base.equals("Text") || base.equals("Email");
+            case Ast.BoolLit ignored -> base.equals("Bool");
+            case Ast.MoneyLit ignored -> base.equals("Money");
+            default -> false;
+        };
+    }
+
+    /** A full-constructor witness: pinned fields, the given id, distinct uniques, defaults elsewhere. */
+    public static String entityWitness(String entity, Map<String, Ast.Expr> pins, long id,
+                                       Ast.Module module, Map<String, Ast.TypeDecl> types,
+                                       Set<String> values) {
+        Ast.Entity e = module.entities().stream()
+                .filter(x -> x.name().equals(entity)).findFirst().orElseThrow();
+        List<String> args = new java.util.ArrayList<>();
+        for (Ast.Field f : e.fields()) {
+            if (pins.containsKey(f.name())) {
+                args.add(javaValue(pins.get(f.name()), values));
+            } else if (f.id()) {
+                args.add(f.type() instanceof Ast.TypeRef ref && ref.name().equals("Text")
+                        ? "\"w" + id + "\"" : id + "L");
+            } else if (f.unique()) {
+                // Distinct witnesses must not collide on a unique column.
+                String javaType = javaType(f.type(), types);
+                args.add(switch (javaType) {
+                    case "long" -> (1000 + id) + "L";
+                    case "String" -> f.type() instanceof Ast.TypeRef ref && ref.name().equals("Email")
+                            ? "\"w" + id + "@example.com\"" : "\"w" + id + "\"";
+                    default -> witnessFallback(entity, f, types, module);
+                });
+            } else {
+                args.add(witnessFallback(entity, f, types, module));
+            }
+        }
+        return "new " + entity + "(" + String.join(", ", args) + ")";
+    }
+
+    private static String witnessFallback(String entity, Ast.Field f, Map<String, Ast.TypeDecl> types,
+                                          Ast.Module module) {
+        String fallback = defaultJavaValue(f.type(), types, module);
+        if (fallback == null) {
+            throw new IllegalStateException("cannot derive a witness for "
+                    + entity + "." + f.name());
+        }
+        return fallback;
     }
 
     /** Match "products" to the module's Product entity, as the checker did. */

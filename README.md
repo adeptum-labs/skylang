@@ -150,11 +150,19 @@ editing the block re-verifies it. Native methods may use checked platform APIs (
 checked resurfaces unchecked), generated siblings may lean on them, and a module's
 portability stays visible at a grep: no `java` blocks means retargetable.
 
+The specification vocabulary carries the craft chapter's tools. Collections and byte
+sequences expose `length`/`size` to contracts (`ensures result.length == input.length`).
+Fixture arguments build example witnesses tersely: `withdraw(wallet_with(100eur), 30eur)`
+constructs a Wallet whose one Money field is pinned to 100eur, with defaults elsewhere —
+each literal pins the unique field of its type, ambiguity and underivable fields are check
+errors naming what to pin. And a failing clause reports its counterexample: generated
+assertions print the input values alongside the violated `ensures`/`then` line.
+
 Not yet implemented (deferred): `page`/`flow`, the dependency `requires` registry, further
 whenever-forms (audited deletes, money conservation, layer boundaries), the `ts`/`py`
-native keywords (they arrive with their profiles), property-based `ensures`, prose-form
-example arguments, a Jakarta Mail binding for the `mail` effect, and persistence for `Map`
-fields and lists of identified entities.
+native keywords (they arrive with their profiles), property-based `ensures`, article-form
+example arguments (`a Gold member`), a Jakarta Mail binding for the `mail` effect, and
+persistence for `Map` fields and lists of identified entities.
 
 ## Build & run
 

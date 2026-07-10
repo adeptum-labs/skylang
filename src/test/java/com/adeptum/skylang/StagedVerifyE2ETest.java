@@ -305,6 +305,32 @@ class StagedVerifyE2ETest {
         assertEquals(1, stub.calls(), "only the generated sibling should be synthesized");
     }
 
+    private static final String WALLETS = """
+            module wallets
+            entity Wallet { id Int @id  owner Email @unique  balance Money }
+            service Bank uses db {
+              withdraw(w Wallet, amount Money) -> Wallet
+                intent  "Take the amount out and persist the wallet."
+                ensures result.balance == old(w.balance) - amount
+                example withdraw(wallet_with(100eur), 30eur) -> balance 70eur
+            }
+            """;
+
+    @Test
+    void fixtureExamplesPassEndToEnd(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(WALLETS, "wallets.sky");
+        new TypeChecker().check(module);
+
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(
+                new StubLlm("return db.save(new Wallet(w.id(), w.owner(), w.balance().minus(amount)));"),
+                new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
+    }
+
     private static final String BANK = """
             module bank
             type Quantity = Int(1..)
