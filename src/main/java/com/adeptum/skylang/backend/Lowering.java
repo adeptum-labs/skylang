@@ -27,6 +27,7 @@ import com.adeptum.skylang.types.Builtins;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Lowers SkyLang types and expressions to their JVM-profile Java forms. */
@@ -95,34 +96,56 @@ public final class Lowering {
         };
     }
 
+    /** The names of the module's enum-like entities, whose members lower to constants. */
+    public static Set<String> valueEntities(Ast.Module module) {
+        return module.entities().stream()
+                .filter(e -> !e.values().isEmpty())
+                .map(Ast.Entity::name)
+                .collect(Collectors.toSet());
+    }
+
     /** A Java literal/expression for an example argument or expected value. */
     public static String javaValue(Ast.Expr expr) {
-        return exprToJava(expr, Map.of());
+        return exprToJava(expr, Map.of(), Set.of());
+    }
+
+    public static String javaValue(Ast.Expr expr, Set<String> valueEntities) {
+        return exprToJava(expr, Map.of(), valueEntities);
+    }
+
+    public static String exprToJava(Ast.Expr expr, Map<String, String> env) {
+        return exprToJava(expr, env, Set.of());
     }
 
     /**
      * Translate a contract/expression to Java. {@code env} maps SkyLang names (parameters,
-     * {@code result}) to the Java identifiers they are bound to in the generated test.
-     * Binary operators lower to the overloaded helper methods staged into every generated
-     * test class, so javac's overload resolution picks primitive or object semantics.
+     * {@code result}) to the Java identifiers they are bound to in the generated test;
+     * {@code valueEntities} names the enum-like entities so {@code Role.Member} lowers to
+     * its constant rather than an accessor call. Binary operators lower to the overloaded
+     * helper methods staged into every generated test class, so javac's overload resolution
+     * picks primitive or object semantics.
      */
-    public static String exprToJava(Ast.Expr expr, Map<String, String> env) {
+    public static String exprToJava(Ast.Expr expr, Map<String, String> env, Set<String> valueEntities) {
         return switch (expr) {
             case Ast.IntLit i -> i.value() + "L";
             case Ast.StrLit s -> javaString(s.value());
             case Ast.BoolLit b -> String.valueOf(b.value());
             case Ast.MoneyLit m -> "Money.of(\"" + m.amount().toPlainString() + "\", \"" + m.currency() + "\")";
             case Ast.NameExpr n -> env.getOrDefault(n.name(), n.name());
-            case Ast.MemberExpr m -> "(" + exprToJava(m.target(), env) + ")." + m.field() + "()";
-            case Ast.CallExpr c -> "new " + c.callee() + "("
-                    + c.args().stream().map(a -> exprToJava(a, env)).collect(Collectors.joining(", ")) + ")";
-            case Ast.BinExpr b -> binToJava(b, env);
+            case Ast.MemberExpr m ->
+                    m.target() instanceof Ast.NameExpr n && !env.containsKey(n.name())
+                            && valueEntities.contains(n.name())
+                            ? n.name() + "." + m.field()
+                            : "(" + exprToJava(m.target(), env, valueEntities) + ")." + m.field() + "()";
+            case Ast.CallExpr c -> "new " + c.callee() + "(" + c.args().stream()
+                    .map(a -> exprToJava(a, env, valueEntities)).collect(Collectors.joining(", ")) + ")";
+            case Ast.BinExpr b -> binToJava(b, env, valueEntities);
         };
     }
 
-    private static String binToJava(Ast.BinExpr b, Map<String, String> env) {
-        String l = exprToJava(b.left(), env);
-        String r = exprToJava(b.right(), env);
+    private static String binToJava(Ast.BinExpr b, Map<String, String> env, Set<String> valueEntities) {
+        String l = exprToJava(b.left(), env, valueEntities);
+        String r = exprToJava(b.right(), env, valueEntities);
         return switch (b.op()) {
             case "and" -> "(" + l + " && " + r + ")";
             case "or" -> "(" + l + " || " + r + ")";

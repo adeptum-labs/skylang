@@ -72,6 +72,47 @@ class StagedVerifyE2ETest {
         assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
     }
 
+    private static final String STORE = """
+            module store
+            entity Status { name Text @id  values Open, Closed }
+            entity Customer { id Int @id  email Email @unique }
+            entity LineItem { item Text  quantity Int(1..) }
+            entity Order {
+              id       Int @id
+              customer Customer
+              status   Status  = Status.Open
+              items    [LineItem]
+              placed   Instant = now
+              total    Money
+            }
+            service Orders uses db, clock {
+              place(c Customer, total Money) -> Order
+                intent  "Persist the customer, then a one-line order for them, and return the stored copy."
+                ensures result.total == total
+                example place(Customer(7, "ada@example.com"), 9.99eur) -> a Order with total 9.99eur
+            }
+            """;
+
+    private static final String PLACE_BODY = """
+            db.save(c);
+            Order order = new Order(1, c, Status.Open,
+                    java.util.List.of(new LineItem("book", 2)), clock.instant(), total);
+            return db.save(order);
+            """;
+
+    @Test
+    void theDbEffectRoundTripsThroughRealJpa(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(STORE, "store.sky");
+        new TypeChecker().check(module);
+
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(new StubLlm(PLACE_BODY), new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
+    }
+
     private static final String BANK = """
             module bank
             type Quantity = Int(1..)

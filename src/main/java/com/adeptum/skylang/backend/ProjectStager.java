@@ -61,19 +61,43 @@ public final class ProjectStager {
         try {
             Files.createDirectories(main);
             Files.createDirectories(test);
-            Files.writeString(buildDir.resolve("pom.xml"), module.views().isEmpty() ? pom() : webPom());
+            boolean db = SupportClasses.effectsOf(module).contains("db");
+            Files.writeString(buildDir.resolve("pom.xml"), module.views().isEmpty() ? pom(db) : webPom(db));
 
             for (String support : SupportClasses.used(module)) {
                 Files.writeString(main.resolve(support + ".java"),
                         SupportClasses.source(support, pkg).orElseThrow());
             }
+            java.util.Set<String> effects = SupportClasses.effectsOf(module);
+            boolean usesNow = SupportClasses.usesNow(module);
+            if (effects.contains("mail")) {
+                Files.writeString(main.resolve("Mail.java"), SupportClasses.mail(pkg));
+            }
+            if (effects.contains("http")) {
+                Files.writeString(main.resolve("Http.java"), SupportClasses.http(pkg));
+                Files.writeString(main.resolve("JdkHttp.java"), SupportClasses.jdkHttp(pkg));
+            }
+            if (usesNow) {
+                Files.writeString(main.resolve("SkyClock.java"), SupportClasses.skyClock(pkg));
+            }
+            if (effects.contains("db")) {
+                new JpaStager().stage(module, buildDir);
+            }
+            if (!module.views().isEmpty() && !effects.isEmpty()) {
+                Files.writeString(main.resolve("Effects.java"), SupportClasses.effectProducers(pkg, effects));
+            }
+            if (!effects.isEmpty() || usesNow) {
+                Files.writeString(test.resolve("TestEffects.java"),
+                        SupportClasses.testEffects(pkg, effects, usesNow));
+            }
             boolean web = !module.views().isEmpty();
+            java.util.Set<String> values = Lowering.valueEntities(module);
             for (Ast.Entity e : module.entities()) {
-                Files.writeString(main.resolve(e.name() + ".java"), entitySource(pkg, e, web, types));
+                Files.writeString(main.resolve(e.name() + ".java"), entitySource(pkg, e, web, types, values));
             }
             for (Ast.Service s : module.services()) {
                 Files.writeString(main.resolve(s.name() + ".java"), serviceSource(pkg, module, s, bodies, types));
-                Files.writeString(test.resolve(s.name() + "Test.java"), testSource(pkg, module, s));
+                Files.writeString(test.resolve(s.name() + "Test.java"), testSource(pkg, module, s, values));
             }
         } catch (IOException e) {
             throw new UncheckedIOException("cannot stage project under " + buildDir, e);
@@ -82,7 +106,8 @@ public final class ProjectStager {
 
     // ----- entity ------------------------------------------------------------
 
-    private String entitySource(String pkg, Ast.Entity entity, boolean web, Map<String, Ast.TypeDecl> types) {
+    private String entitySource(String pkg, Ast.Entity entity, boolean web, Map<String, Ast.TypeDecl> types,
+                                java.util.Set<String> values) {
         String components = entity.fields().stream()
                 .map(f -> Lowering.javaType(f.type(), types) + " " + f.name())
                 .collect(Collectors.joining(", "));
@@ -123,9 +148,51 @@ public final class ProjectStager {
                 + entityJavadoc(entity)
                 + "public record " + entity.name() + "(" + components + ") {\n"
                 + compact
-                + defaultsConstructor(entity, types)
+                + valueConstants(entity)
+                + identityEquality(entity, types)
+                + defaultsConstructor(entity, types, values)
                 + getters
                 + "}\n";
+    }
+
+    /** {@code values Member, Admin} lowers to one constant per value; the checker closes the set. */
+    private static String valueConstants(Ast.Entity entity) {
+        StringBuilder sb = new StringBuilder(entity.values().isEmpty() ? "" : "\n");
+        for (String v : entity.values()) {
+            sb.append("    public static final ").append(entity.name()).append(' ').append(v)
+                    .append(" = new ").append(entity.name()).append("(\"").append(v).append("\");\n");
+        }
+        return sb.toString();
+    }
+
+    /** An @id entity compares by its identity; a value entity keeps record content equality. */
+    private static String identityEquality(Ast.Entity entity, Map<String, Ast.TypeDecl> types) {
+        var idField = entity.fields().stream().filter(Ast.Field::id).findFirst();
+        if (idField.isEmpty() || entity.fields().size() == 1) {
+            return "";
+        }
+        String name = idField.get().name();
+        String javaType = Lowering.javaType(idField.get().type(), types);
+        boolean primitive = javaType.equals("long") || javaType.equals("boolean");
+        String compare = primitive ? name + " == other." + name
+                : "java.util.Objects.equals(" + name + ", other." + name + ")";
+        String hash = switch (javaType) {
+            case "long" -> "Long.hashCode(" + name + ")";
+            case "boolean" -> "Boolean.hashCode(" + name + ")";
+            default -> "java.util.Objects.hashCode(" + name + ")";
+        };
+        return """
+
+                    @Override
+                    public boolean equals(Object o) {
+                        return o instanceof %s other && %s;
+                    }
+
+                    @Override
+                    public int hashCode() {
+                        return %s;
+                    }
+                """.formatted(entity.name(), compare, hash);
     }
 
     private static boolean isSecret(Ast.Type type) {
@@ -142,7 +209,8 @@ public final class ProjectStager {
     }
 
     /** A constructor omitting the trailing run of defaulted fields, so callers may skip them. */
-    private String defaultsConstructor(Ast.Entity entity, Map<String, Ast.TypeDecl> types) {
+    private String defaultsConstructor(Ast.Entity entity, Map<String, Ast.TypeDecl> types,
+                                       java.util.Set<String> values) {
         List<Ast.Field> fields = entity.fields();
         int first = fields.size();
         while (first > 0 && fields.get(first - 1).defaultValue().isPresent()) {
@@ -158,10 +226,17 @@ public final class ProjectStager {
         for (int i = 0; i < fields.size(); i++) {
             args.append(i > 0 ? ", " : "").append(i < first
                     ? fields.get(i).name()
-                    : Lowering.javaValue(fields.get(i).defaultValue().orElseThrow()));
+                    : defaultValue(fields.get(i).defaultValue().orElseThrow(), values));
         }
         return "\n    public " + entity.name() + "(" + params + ") {\n"
                 + "        this(" + args + ");\n    }\n";
+    }
+
+    private static String defaultValue(Ast.Expr value, java.util.Set<String> values) {
+        if (value instanceof Ast.NameExpr n && n.name().equals("now")) {
+            return "SkyClock.now()";
+        }
+        return Lowering.javaValue(value, values);
     }
 
     // ----- service -----------------------------------------------------------
@@ -178,6 +253,7 @@ public final class ProjectStager {
         } else {
             sb.append("public final class ").append(service.name()).append(" {\n");
         }
+        sb.append(effectHandles(service, web));
         for (Ast.Method m : service.methods()) {
             String key = methodKey(module.name(), service.name(), m.name());
             String body = bodies.get(key);
@@ -201,6 +277,44 @@ public final class ProjectStager {
         return sb.toString();
     }
 
+    /** The Java type each declared effect binds to under the JVM profile. */
+    private static final Map<String, String> EFFECT_TYPES = Map.of(
+            "db", "Db", "clock", "java.time.Clock", "mail", "Mail", "http", "Http");
+
+    /**
+     * The service's effects budget as injected handles: one final field per declared effect,
+     * arriving through the constructor. An undeclared effect has no handle, so no body can
+     * reach it — the budget is enforced by what exists. Under the web profile the constructor
+     * is the CDI injection point, plus the no-arg constructor a normal-scoped proxy needs.
+     */
+    private static String effectHandles(Ast.Service service, boolean web) {
+        if (service.uses().isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("\n");
+        for (String effect : service.uses()) {
+            sb.append("    private final ").append(EFFECT_TYPES.get(effect)).append(' ')
+                    .append(effect).append(";\n");
+        }
+        String params = service.uses().stream()
+                .map(e -> EFFECT_TYPES.get(e) + " " + e)
+                .collect(Collectors.joining(", "));
+        if (web) {
+            sb.append("\n    @jakarta.inject.Inject");
+        }
+        sb.append("\n    public ").append(service.name()).append("(").append(params).append(") {\n");
+        for (String effect : service.uses()) {
+            sb.append("        this.").append(effect).append(" = ").append(effect).append(";\n");
+        }
+        sb.append("    }\n");
+        if (web) {
+            String nulls = service.uses().stream().map(e -> "null").collect(Collectors.joining(", "));
+            sb.append("\n    protected ").append(service.name()).append("() {\n");
+            sb.append("        this(").append(nulls).append(");\n    }\n");
+        }
+        return sb.toString();
+    }
+
     private String signature(Ast.Method m, Map<String, Ast.TypeDecl> types) {
         String params = m.params().stream()
                 .map(p -> Lowering.javaType(p.type(), types) + " " + p.name())
@@ -210,7 +324,7 @@ public final class ProjectStager {
 
     // ----- tests -------------------------------------------------------------
 
-    private String testSource(String pkg, Ast.Module module, Ast.Service service) {
+    private String testSource(String pkg, Ast.Module module, Ast.Service service, java.util.Set<String> values) {
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(pkg).append(";\n\n");
         sb.append("import org.junit.jupiter.api.Test;\n");
@@ -220,7 +334,7 @@ public final class ProjectStager {
         for (Ast.Method m : service.methods()) {
             int n = 0;
             for (Ast.Example ex : m.examples()) {
-                sb.append(testMethod(service, m, ex, ++n));
+                sb.append(testMethod(service, m, ex, ++n, values));
             }
         }
         sb.append(opHelpers(SupportClasses.used(module).contains("Money")));
@@ -261,17 +375,22 @@ public final class ProjectStager {
         return money ? base + moneyOps : base;
     }
 
-    private String testMethod(Ast.Service service, Ast.Method m, Ast.Example ex, int n) {
+    private String testMethod(Ast.Service service, Ast.Method m, Ast.Example ex, int n,
+                              java.util.Set<String> values) {
         Map<String, String> env = new LinkedHashMap<>();
         StringBuilder sb = new StringBuilder();
         sb.append("\n    @Test\n    void ").append(m.name()).append("_example_").append(n).append("() {\n");
-        sb.append("        ").append(service.name()).append(" svc = new ").append(service.name()).append("();\n");
+        String wiring = service.uses().stream()
+                .map(e -> "TestEffects." + e + "()")
+                .collect(Collectors.joining(", "));
+        sb.append("        ").append(service.name()).append(" svc = new ").append(service.name())
+                .append("(").append(wiring).append(");\n");
 
         List<Ast.Expr> args = ex.call().args();
         for (int i = 0; i < m.params().size(); i++) {
             String name = m.params().get(i).name();
             sb.append("        var ").append(name).append(" = ")
-                    .append(Lowering.javaValue(args.get(i))).append(";\n");
+                    .append(Lowering.javaValue(args.get(i), values)).append(";\n");
             env.put(name, name);
         }
         env.put("result", "result");
@@ -280,17 +399,17 @@ public final class ProjectStager {
         sb.append("        var result = svc.").append(m.name()).append("(").append(argNames).append(");\n");
 
         for (Ast.Expr ens : m.ensures()) {
-            String cond = Lowering.exprToJava(ens, env);
+            String cond = Lowering.exprToJava(ens, env, values);
             sb.append("        assertTrue(").append(cond).append(", ")
                     .append(Lowering.javaString("ensures: " + cond)).append(");\n");
         }
 
         switch (ex.result()) {
             case Ast.ExprResult er -> sb.append("        assertEquals(")
-                    .append(Lowering.javaValue(er.value())).append(", result, \"example result\");\n");
+                    .append(Lowering.javaValue(er.value(), values)).append(", result, \"example result\");\n");
             case Ast.EntityResult ent -> {
                 for (Ast.FieldExpect fe : ent.fields()) {
-                    sb.append("        assertEquals(").append(Lowering.javaValue(fe.expected()))
+                    sb.append("        assertEquals(").append(Lowering.javaValue(fe.expected(), values))
                             .append(", result.").append(fe.field()).append("(), ")
                             .append(Lowering.javaString("example: " + fe.field())).append(");\n");
                 }
@@ -307,7 +426,26 @@ public final class ProjectStager {
         return block.lines().map(l -> l.isBlank() ? l : prefix + l).collect(Collectors.joining("\n"));
     }
 
-    private static String pom() {
+    private static String pom(boolean db) {
+        String persistence = !db ? "" : """
+                    <dependency>
+                      <groupId>jakarta.persistence</groupId>
+                      <artifactId>jakarta.persistence-api</artifactId>
+                      <version>3.1.0</version>
+                    </dependency>
+                    <dependency>
+                      <groupId>org.eclipse.persistence</groupId>
+                      <artifactId>eclipselink</artifactId>
+                      <version>4.0.8</version>
+                      <scope>runtime</scope>
+                    </dependency>
+                    <dependency>
+                      <groupId>com.h2database</groupId>
+                      <artifactId>h2</artifactId>
+                      <version>2.2.224</version>
+                      <scope>test</scope>
+                    </dependency>
+                """;
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -322,7 +460,7 @@ public final class ProjectStager {
                     <maven.compiler.release>17</maven.compiler.release>
                   </properties>
                   <dependencies>
-                    <dependency>
+                %s    <dependency>
                       <groupId>org.junit.jupiter</groupId>
                       <artifactId>junit-jupiter</artifactId>
                       <version>5.10.2</version>
@@ -339,7 +477,7 @@ public final class ProjectStager {
                     </plugins>
                   </build>
                 </project>
-                """;
+                """.formatted(persistence);
     }
 
     /**
@@ -347,7 +485,20 @@ public final class ProjectStager {
      * Mojarra as the sole Faces implementation, so a generated view renders in-container for
      * verification. TomEE provides the APIs, so the aggregate api jar stays off the runtime classpath.
      */
-    private static String webPom() {
+    private static String webPom(boolean db) {
+        String persistence = !db ? "" : """
+                    <dependency>
+                      <groupId>org.eclipse.persistence</groupId>
+                      <artifactId>eclipselink</artifactId>
+                      <version>4.0.8</version>
+                    </dependency>
+                    <dependency>
+                      <groupId>com.h2database</groupId>
+                      <artifactId>h2</artifactId>
+                      <version>2.2.224</version>
+                      <scope>runtime</scope>
+                    </dependency>
+                """;
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -364,7 +515,7 @@ public final class ProjectStager {
                     <failOnMissingWebXml>false</failOnMissingWebXml>
                   </properties>
                   <dependencies>
-                    <dependency>
+                %s    <dependency>
                       <groupId>jakarta.platform</groupId>
                       <artifactId>jakarta.jakartaee-api</artifactId>
                       <version>10.0.0</version>
@@ -447,6 +598,6 @@ public final class ProjectStager {
                     </plugins>
                   </build>
                 </project>
-                """;
+                """.formatted(persistence);
     }
 }

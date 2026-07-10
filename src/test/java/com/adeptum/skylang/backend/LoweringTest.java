@@ -108,6 +108,23 @@ class LoweringTest {
     }
 
     @Test
+    void lowersValueSetConstants() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Role { name Text @id  values Member, Admin }
+                entity User { id Int @id  role Role }
+                service S {
+                  f(u User) -> Bool
+                    intent  "x"
+                    ensures u.role == Role.Admin
+                }
+                """, "t.sky");
+        Ast.Expr ensures = m.services().get(0).methods().get(0).ensures().get(0);
+        assertEquals("eq((u).role(), Role.Admin)",
+                Lowering.exprToJava(ensures, Map.of(), java.util.Set.of("Role")));
+    }
+
+    @Test
     void lowersComparisonsAndLogicThroughHelpers() {
         Ast.Module m = Parsing.parse("""
                 module t

@@ -117,4 +117,54 @@ class ViewStagedVerifyE2ETest {
 
         assertEquals(0, code, () -> "staged render verification failed:\n" + out.toString(StandardCharsets.UTF_8));
     }
+
+    private static final String STORE_VIEW = """
+            module store
+            entity Order { id Int @id  total Money }
+            service Orders uses db {
+              all() -> [Order]  intent "Every order."
+            }
+            view OrderList at "/orders" {
+              shows  Orders.all() as a table of (id)
+              expect table has columns (id)
+            }
+            """;
+
+    private static final String STORE_VIEW_REPLY = """
+            ```xhtml
+            <h:form id="f">
+              <h:dataTable id="orders" value="#{orderListBean.rows}" var="row">
+                <h:column id="c_id"><f:facet name="header"><h:outputText value="Id"/></f:facet><h:outputText value="#{row.id}"/></h:column>
+              </h:dataTable>
+            </h:form>
+            ```
+            ```java
+            @jakarta.inject.Named
+            @jakarta.faces.view.ViewScoped
+            public class OrderListBean implements java.io.Serializable {
+                @jakarta.inject.Inject
+                Orders orders;
+
+                public java.util.List<Order> getRows() {
+                    return orders.all();
+                }
+            }
+            ```
+            """;
+
+    @Test
+    void dbBackedViewRendersInContainer(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(STORE_VIEW, "store.sky");
+        new TypeChecker().check(module);
+
+        StubLlm stub = new StubLlm((system, user) ->
+                system.contains("UI-synthesis") ? STORE_VIEW_REPLY : "return db.allOrders();");
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(stub, new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "db-backed render verification failed:\n"
+                + out.toString(StandardCharsets.UTF_8));
+    }
 }

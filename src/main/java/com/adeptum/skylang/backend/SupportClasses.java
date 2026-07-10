@@ -128,6 +128,206 @@ public final class SupportClasses {
         };
     }
 
+    /** The effects every service in the module declares, in first-seen order. */
+    public static Set<String> effectsOf(Ast.Module module) {
+        Set<String> effects = new LinkedHashSet<>();
+        for (Ast.Service s : module.services()) {
+            effects.addAll(s.uses());
+        }
+        return effects;
+    }
+
+    /** True when any entity field defaults to {@code now} — the pinnable clock is needed. */
+    public static boolean usesNow(Ast.Module module) {
+        return module.entities().stream()
+                .flatMap(e -> e.fields().stream())
+                .anyMatch(f -> f.defaultValue().orElse(null) instanceof Ast.NameExpr n
+                        && n.name().equals("now"));
+    }
+
+    public static String mail(String pkg) {
+        return """
+                package %s;
+
+                /** The mail effect: sending is the only capability the budget grants. */
+                @FunctionalInterface
+                public interface Mail {
+
+                    void send(String to, String subject, String body);
+                }
+                """.formatted(pkg);
+    }
+
+    public static String http(String pkg) {
+        return """
+                package %s;
+
+                /** The http effect: outbound requests through the budgeted handle only. */
+                @FunctionalInterface
+                public interface Http {
+
+                    String get(String url);
+                }
+                """.formatted(pkg);
+    }
+
+    public static String jdkHttp(String pkg) {
+        return """
+                package %s;
+
+                /** The production http binding, on the JDK's own client. */
+                public final class JdkHttp implements Http {
+
+                    @Override
+                    public String get(String url) {
+                        try {
+                            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                            java.net.http.HttpRequest request =
+                                    java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).build();
+                            return client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+                        } catch (java.io.IOException e) {
+                            throw new IllegalStateException("http get failed: " + url, e);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("http get interrupted: " + url, e);
+                        }
+                    }
+                }
+                """.formatted(pkg);
+    }
+
+    public static String skyClock(String pkg) {
+        return """
+                package %s;
+
+                /**
+                 * The clock behind '= now' field defaults. Production reads UTC; a test harness
+                 * pins it so entity construction stays deterministic.
+                 */
+                public final class SkyClock {
+
+                    private static volatile java.time.Clock clock = java.time.Clock.systemUTC();
+
+                    private SkyClock() {
+                    }
+
+                    public static java.time.Instant now() {
+                        return clock.instant();
+                    }
+
+                    public static java.time.Clock current() {
+                        return clock;
+                    }
+
+                    public static void pin(java.time.Clock pinned) {
+                        clock = pinned;
+                    }
+                }
+                """.formatted(pkg);
+    }
+
+    /** CDI producers binding the declared effects for the web profile. */
+    public static String effectProducers(String pkg, Set<String> effects) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(pkg).append(";\n\n");
+        sb.append("/** Binds each declared effect for the deployed application. */\n");
+        sb.append("@jakarta.enterprise.context.ApplicationScoped\n");
+        sb.append("public class Effects {\n");
+        if (effects.contains("db")) {
+            // The provider is named directly: the container's own resolver only offers its
+            // bundled provider, and the unit is ours, not container-managed. The transaction
+            // type is forced too — inside a container the provider would otherwise detect
+            // JTA and refuse the store's own transactions.
+            sb.append("""
+
+                        @jakarta.enterprise.inject.Produces
+                        @jakarta.enterprise.context.ApplicationScoped
+                        public Db db() {
+                            java.util.Map<String, String> props = java.util.Map.of(
+                                    "jakarta.persistence.transactionType", "RESOURCE_LOCAL",
+                                    "eclipselink.target-server", "None");
+                            return new JpaDb(new org.eclipse.persistence.jpa.PersistenceProvider()
+                                    .createEntityManagerFactory("sky", props));
+                        }
+                    """);
+        }
+        if (effects.contains("clock")) {
+            sb.append("""
+
+                        @jakarta.enterprise.inject.Produces
+                        @jakarta.enterprise.context.ApplicationScoped
+                        public java.time.Clock clock() {
+                            return java.time.Clock.systemUTC();
+                        }
+                    """);
+        }
+        if (effects.contains("mail")) {
+            sb.append("""
+
+                        @jakarta.enterprise.inject.Produces
+                        @jakarta.enterprise.context.ApplicationScoped
+                        public Mail sender() {
+                            return (to, subject, body) -> {
+                                throw new IllegalStateException("bind a real Mail sender before sending");
+                            };
+                        }
+                    """);
+        }
+        if (effects.contains("http")) {
+            sb.append("""
+
+                        @jakarta.enterprise.inject.Produces
+                        @jakarta.enterprise.context.ApplicationScoped
+                        public Http client() {
+                            return new JdkHttp();
+                        }
+                    """);
+        }
+        sb.append("}\n");
+        return sb.toString();
+    }
+
+    /** The substituted effects the generated tests wire in: deterministic and offline. */
+    public static String testEffects(String pkg, Set<String> effects, boolean pinsClock) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(pkg).append(";\n\n");
+        sb.append("/** Substituted effects for the generated tests: deterministic, offline. */\n");
+        sb.append("final class TestEffects {\n\n");
+        sb.append("    static final java.time.Instant NOW = java.time.Instant.parse(\"2026-01-01T00:00:00Z\");\n");
+        if (pinsClock) {
+            sb.append("\n    static {\n        SkyClock.pin(clock());\n    }\n");
+        }
+        sb.append("\n    private TestEffects() {\n    }\n");
+        sb.append("\n    static java.time.Clock clock() {\n");
+        sb.append("        return java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC);\n    }\n");
+        if (effects.contains("db")) {
+            sb.append("""
+
+                        private static final java.util.concurrent.atomic.AtomicInteger DB_SEQ =
+                                new java.util.concurrent.atomic.AtomicInteger();
+
+                        static Db db() {
+                            java.util.Map<String, String> props = java.util.Map.of(
+                                    "jakarta.persistence.jdbc.driver", "org.h2.Driver",
+                                    "jakarta.persistence.jdbc.url",
+                                            "jdbc:h2:mem:sky" + DB_SEQ.incrementAndGet() + ";DB_CLOSE_DELAY=-1",
+                                    "jakarta.persistence.schema-generation.database.action", "drop-and-create");
+                            return new JpaDb(jakarta.persistence.Persistence.createEntityManagerFactory("sky", props));
+                        }
+                    """);
+        }
+        if (effects.contains("mail")) {
+            sb.append("\n    static Mail mail() {\n        return (to, subject, body) -> { };\n    }\n");
+        }
+        if (effects.contains("http")) {
+            sb.append("\n    static Http http() {\n");
+            sb.append("        return url -> { throw new UnsupportedOperationException(\"no outbound http under test\"); };\n");
+            sb.append("    }\n");
+        }
+        sb.append("}\n");
+        return sb.toString();
+    }
+
     private static String money(String pkg) {
         return """
                 package %s;

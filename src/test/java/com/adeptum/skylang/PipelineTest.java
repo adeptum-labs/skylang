@@ -463,6 +463,158 @@ class PipelineTest {
                 "a view prompting only for Int must not stage converters");
     }
 
+    private static final String ROLES = """
+            module crew
+            entity Role {
+              name Text @id
+              values Member, Admin
+            }
+            entity User {
+              id   Int  @id
+              name Text
+              role Role = Role.Member
+            }
+            service Users {
+              promote(u User) -> User
+                intent  "Return a copy with the admin role."
+                ensures result.role == Role.Admin
+                example promote(User(1, "Ada", Role.Member)) -> a User with role Role.Admin
+            }
+            """;
+
+    @Test
+    void valuesEntitiesLowerToClosedConstantSets(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(ROLES, "crew.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String role = Files.readString(buildDir.resolve("src/main/java/crew/Role.java"));
+        assertTrue(role.contains("public static final Role Member = new Role(\"Member\")"),
+                "each declared value should lower to a constant");
+        assertTrue(role.contains("public static final Role Admin = new Role(\"Admin\")"));
+
+        String user = Files.readString(buildDir.resolve("src/main/java/crew/User.java"));
+        assertTrue(user.contains("public User(long id, String name)") && user.contains("Role.Member"),
+                "the member default should feed the omitting constructor");
+        assertTrue(user.contains("equals") && user.contains("id == other.id"),
+                "an @id entity should compare by its identity");
+
+        String tests = Files.readString(buildDir.resolve("src/test/java/crew/UsersTest.java"));
+        assertTrue(tests.contains("Role.Admin"), "value constants should lower into example asserts");
+    }
+
+    private static final String NOTIFY = """
+            module notify
+            entity Note {
+              id        Int @id
+              text      Text(1..280)
+              createdAt Instant = now
+            }
+            service Notifier uses clock, mail {
+              remind(n Note, to Email) -> Bool
+                intent  "Send the note text to the address and return true."
+                example remind(Note(1, "hello"), "a@example.com") -> true
+            }
+            """;
+
+    @Test
+    void effectsLowerToInjectedHandles(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(NOTIFY, "notify.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return true;"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String notifier = Files.readString(buildDir.resolve("src/main/java/notify/Notifier.java"));
+        assertTrue(notifier.contains("private final java.time.Clock clock;"),
+                "the clock effect should be an injected handle");
+        assertTrue(notifier.contains("private final Mail mail;"),
+                "the mail effect should be an injected handle");
+        assertTrue(notifier.contains("public Notifier(java.time.Clock clock, Mail mail)"),
+                "declared effects arrive through the constructor");
+
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/notify/Mail.java")),
+                "the Mail effect interface should be staged when declared");
+        assertFalse(Files.exists(buildDir.resolve("src/main/java/notify/Http.java")),
+                "undeclared effects must not exist in the staged project");
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/notify/SkyClock.java")),
+                "a '= now' default needs the pinnable clock holder");
+        assertTrue(Files.readString(buildDir.resolve("src/main/java/notify/Note.java"))
+                .contains("SkyClock.now()"), "the omitting constructor should read the pinnable clock");
+
+        String tests = Files.readString(buildDir.resolve("src/test/java/notify/NotifierTest.java"));
+        assertTrue(tests.contains("new Notifier(TestEffects.clock(), TestEffects.mail())"),
+                "generated tests wire substitute effects");
+        assertTrue(Files.readString(buildDir.resolve("src/test/java/notify/TestEffects.java"))
+                .contains("Clock.fixed"), "the test clock must be pinned for determinism");
+    }
+
+    private static final String STORE = """
+            module store
+            entity Status { name Text @id  values Open, Closed }
+            entity Customer { id Int @id  email Email @unique }
+            entity LineItem { item Text  quantity Int(1..) }
+            entity Order {
+              id       Int @id
+              customer Customer
+              status   Status  = Status.Open
+              items    [LineItem]
+              placed   Instant = now
+              total    Money
+            }
+            service Orders uses db, clock {
+              place(o Order) -> Order
+                intent "Persist the order and return the stored copy."
+            }
+            """;
+
+    @Test
+    void dbEffectStagesTheJpaStore(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(STORE, "store.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return db.save(o);"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String db = Files.readString(buildDir.resolve("src/main/java/store/Db.java"));
+        assertTrue(db.contains("Order save(Order order)") && db.contains("findOrder(long id)")
+                        && db.contains("allOrders()") && db.contains("deleteOrder(long id)"),
+                "the db effect exposes a typed store per identified entity");
+        assertFalse(db.contains("saveLineItem") || db.contains("findStatus"),
+                "components and value sets are not store roots");
+
+        String orderJpa = Files.readString(buildDir.resolve("src/main/java/store/OrderJpa.java"));
+        assertTrue(orderJpa.contains("@jakarta.persistence.Entity"), "roots map to JPA entities");
+        assertTrue(orderJpa.contains("ManyToOne"), "an entity reference maps to a relation");
+        assertTrue(orderJpa.contains("ElementCollection"), "a component list maps to an element collection");
+        assertTrue(orderJpa.contains("placedMillis"), "an Instant persists as epoch millis");
+        assertTrue(orderJpa.contains("totalAmount") && orderJpa.contains("totalCurrency"),
+                "Money persists as amount plus currency");
+        assertTrue(Files.readString(buildDir.resolve("src/main/java/store/LineItemJpa.java"))
+                .contains("@jakarta.persistence.Embeddable"), "components map to embeddables");
+        assertTrue(Files.readString(buildDir.resolve("src/main/java/store/CustomerJpa.java"))
+                .contains("unique = true"), "@unique becomes a schema constraint when persisted");
+
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/store/JpaDb.java")),
+                "the JPA-backed store implementation should be staged");
+        String persistence = Files.readString(buildDir.resolve("src/main/resources/META-INF/persistence.xml"));
+        assertTrue(persistence.contains("store.OrderJpa") && persistence.contains("eclipse"),
+                "the persistence unit lists the mapped classes");
+        String pom = Files.readString(buildDir.resolve("pom.xml"));
+        assertTrue(pom.contains("jakarta.persistence-api") && pom.contains("eclipselink") && pom.contains("h2"),
+                "the staged POM carries the JPA provider and test database");
+        assertTrue(Files.readString(buildDir.resolve("src/test/java/store/TestEffects.java"))
+                .contains("static Db db()"), "tests get a fresh in-memory store");
+    }
+
     @Test
     void bankRebuildStaysFrozen(@TempDir Path root) {
         Path lock = root.resolve("sky.lock");
@@ -493,6 +645,39 @@ class PipelineTest {
 
         assertEquals(2, after.calls(),
                 "a changed type declaration is a spec change: every method re-synthesizes");
+    }
+
+    private static final String STORE_WITH_ALL = STORE.replace(
+            "service Orders uses db, clock {",
+            "service Orders uses db, clock {\n  all() -> [Order]  intent \"Every order.\"\n");
+
+    @Test
+    void webModulesWireEffectsThroughCdi(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(STORE_WITH_ALL + """
+                view OrderList at "/orders" {
+                  shows  Orders.all() as a table of (id)
+                }
+                """, "store.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String orders = Files.readString(buildDir.resolve("src/main/java/store/Orders.java"));
+        assertTrue(orders.contains("@jakarta.inject.Inject"),
+                "a web-mode service receives its effects through CDI");
+        assertTrue(orders.contains("protected Orders()"),
+                "a normal-scoped CDI bean needs a constructor the proxy can call");
+        String effects = Files.readString(buildDir.resolve("src/main/java/store/Effects.java"));
+        assertTrue(effects.contains("@jakarta.enterprise.inject.Produces") && effects.contains("JpaDb"),
+                "the declared effects need CDI producers");
+        assertFalse(effects.contains("Mail mail"), "undeclared effects get no producer");
+        assertTrue(Files.readString(buildDir.resolve("src/main/resources/META-INF/persistence.xml"))
+                .contains("jdbc:h2:mem"), "the web persistence unit must be runnable as staged");
+        assertTrue(Files.readString(buildDir.resolve("pom.xml")).contains("eclipselink"),
+                "the web POM carries the JPA provider");
     }
 
     @Test
