@@ -57,6 +57,11 @@ public final class BuildCommand implements Callable<Integer> {
     @Option(names = "--profile", description = "Target profile (default: jvm-jakarta).", defaultValue = "jvm-jakarta")
     String profile;
 
+    @Option(names = "--recheck",
+            description = "Re-verify the staged project (tests, render checks, visual gate) even when "
+                    + "everything is frozen. Offline — never calls the model.")
+    boolean recheck;
+
     @Override
     public Integer call() {
         Ast.Module module;
@@ -79,7 +84,7 @@ public final class BuildCommand implements Callable<Integer> {
         Verifier verifier = new MavenVerifier();
 
         try {
-            return new Pipeline(llm, verifier).build(module, lockPath, buildDir, System.out, System.err);
+            return new Pipeline(llm, verifier).build(module, lockPath, buildDir, System.out, System.err, recheck);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());
             return 1;

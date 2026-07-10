@@ -31,11 +31,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -206,6 +210,129 @@ class PipelineTest {
 
         assertEquals(0, code);
         assertEquals(0, second.calls(), "an unchanged view and methods must not call the model");
+    }
+
+    @Test
+    void buildWithOnlyAFreshViewStillRunsTheVerifier(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS).build(checkedViewModule(), lock, buildDir, quiet(), quiet());
+
+        // Change only the view (its route): methods stay frozen, the view is re-synthesized.
+        Ast.Module changed = Parsing.parse(SHOP_VIEW.replace("\"/products\"", "\"/inventory\""), "shop.sky");
+        new TypeChecker().check(changed);
+        var verified = new java.util.concurrent.atomic.AtomicBoolean();
+        Verifier recording = dir -> {
+            verified.set(true);
+            return VerificationResult.pass();
+        };
+
+        int code = new Pipeline(routingStub(VIEW_REPLY), recording).build(changed, lock, buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertTrue(verified.get(), "a freshly synthesized view must go through the staged verification");
+    }
+
+    @Test
+    void recheckVerifiesEvenWhenEverythingIsFrozen(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS).build(checkedViewModule(), lock, buildDir, quiet(), quiet());
+
+        var verified = new java.util.concurrent.atomic.AtomicBoolean();
+        Verifier recording = dir -> {
+            verified.set(true);
+            return VerificationResult.pass();
+        };
+        StubLlm stub = routingStub(VIEW_REPLY);
+
+        int code = new Pipeline(stub, recording)
+                .build(checkedViewModule(), lock, buildDir, quiet(), quiet(), true);
+
+        assertEquals(0, code);
+        assertEquals(0, stub.calls(), "a recheck must stay offline — no model call");
+        assertTrue(verified.get(), "a recheck must run the staged verification despite the frozen lock");
+    }
+
+    @Test
+    void stagedProjectCarriesTheVisualGate(@TempDir Path root) throws Exception {
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(checkedViewModule(), root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertTrue(Files.exists(buildDir.resolve("src/test/java/shop/VisualGate.java")),
+                "the visual gate helper should be staged");
+        assertTrue(Files.readString(buildDir.resolve("src/test/java/shop/ViewsRenderTest.java"))
+                .contains("VisualGate.check(\"ProductList\", html)"), "each view should pass the visual gate");
+        assertTrue(Files.readString(buildDir.resolve("pom.xml")).contains("flying-saucer-core"),
+                "the pinned rasterizer should be a staged test dependency");
+    }
+
+    /** A verifier that behaves like the staged visual gate: it leaves a capture behind, then passes. */
+    private static Verifier capturing(byte[] png) {
+        return dir -> {
+            try {
+                Path captures = dir.resolve("target/sky-visual");
+                Files.createDirectories(captures);
+                Files.write(captures.resolve("ProductList.png"), png);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            return VerificationResult.pass();
+        };
+    }
+
+    @Test
+    void verifiedBuildFreezesTheVisualCapture(@TempDir Path root) throws Exception {
+        Path lock = root.resolve("sky.lock");
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
+
+        int code = new Pipeline(routingStub(VIEW_REPLY), capturing(png))
+                .build(checkedViewModule(), lock, root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code);
+        assertTrue(Files.readString(lock).contains(java.util.Base64.getEncoder().encodeToString(png)),
+                "the visual capture should be frozen into sky.lock");
+    }
+
+    @Test
+    void frozenBaselineIsStagedForComparison(@TempDir Path root) throws Exception {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 9, 8, 7};
+
+        new Pipeline(routingStub(VIEW_REPLY), capturing(png)).build(checkedViewModule(), lock, buildDir, quiet(), quiet());
+        int code = new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS).build(checkedViewModule(), lock, buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertArrayEquals(png, Files.readAllBytes(buildDir.resolve("src/test/resources/sky-visual/ProductList.png")),
+                "the frozen baseline should be staged so the visual gate can compare against it");
+    }
+
+    @Test
+    void reSynthesizedViewDropsItsStaleBaseline(@TempDir Path root) throws Exception {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        byte[] first = {(byte) 0x89, 'P', 'N', 'G', 1};
+        byte[] second = {(byte) 0x89, 'P', 'N', 'G', 2};
+
+        new Pipeline(routingStub(VIEW_REPLY), capturing(first)).build(checkedViewModule(), lock, buildDir, quiet(), quiet());
+
+        // A view-spec change re-synthesizes the view: the old baseline no longer describes it.
+        Ast.Module changed = Parsing.parse(SHOP_VIEW.replace("\"/products\"", "\"/inventory\""), "shop.sky");
+        new TypeChecker().check(changed);
+        Verifier gate = dir -> {
+            assertFalse(Files.exists(dir.resolve("src/test/resources/sky-visual/ProductList.png")),
+                    "a re-synthesized view must not be compared against its stale baseline");
+            return capturing(second).verify(dir);
+        };
+        int code = new Pipeline(routingStub(VIEW_REPLY), gate).build(changed, lock, buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertTrue(Files.readString(lock).contains(java.util.Base64.getEncoder().encodeToString(second)),
+                "the fresh capture should replace the stale baseline in sky.lock");
     }
 
     @Test

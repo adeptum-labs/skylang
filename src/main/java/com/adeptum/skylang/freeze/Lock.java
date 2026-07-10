@@ -42,8 +42,20 @@ public final class Lock {
     public record Entry(String specHash, String body) {
     }
 
-    /** A frozen view: the hash of its spec and the accepted Facelets markup plus backing bean. */
-    public record ViewEntry(String specHash, String markup, String bean) {
+    /**
+     * A frozen view: the hash of its spec, the accepted Facelets markup plus backing bean, and the
+     * visual baseline — a base64 PNG of the view rasterized by the pinned renderer, captured when
+     * the view was accepted ({@code ""} until then). Later builds re-render and diff against it.
+     */
+    public record ViewEntry(String specHash, String markup, String bean, String visual) {
+
+        public ViewEntry(String specHash, String markup, String bean) {
+            this(specHash, markup, bean, "");
+        }
+
+        public ViewEntry withVisual(String visual) {
+            return new ViewEntry(specHash, markup, bean, visual);
+        }
     }
 
     private String profileId = "";
@@ -78,7 +90,8 @@ public final class Lock {
                             lock.views.put(String.valueOf(e.getKey()), new ViewEntry(
                                     String.valueOf(v.get("specHash")),
                                     String.valueOf(v.get("markup")),
-                                    String.valueOf(v.get("bean"))));
+                                    String.valueOf(v.get("bean")),
+                                    asString(v.get("visual"))));
                         }
                     }
                 }
@@ -108,6 +121,7 @@ public final class Lock {
             v.put("specHash", entry.specHash());
             v.put("markup", entry.markup());
             v.put("bean", entry.bean());
+            v.put("visual", entry.visual());
             viewMap.put(key, v);
         });
 

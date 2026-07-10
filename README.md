@@ -97,6 +97,10 @@ GRAALVM_HOME=<graalvm> JAVA_HOME=<graalvm> mvn -Pnative -DskipTests package
 
 `sky build` needs a JDK + Maven on PATH (to compile and test the staged project) and Claude
 credentials + network for any method that is not already frozen. `sky check` needs neither.
+`sky build --recheck` re-runs the staged verification — the tests, the in-container render
+checks, and the visual gate that diffs each view against its frozen look — on a fully frozen
+project. It never calls the model, so it runs offline and credential-free; use it in CI to
+catch toolchain or rendering drift.
 
 ## Credentials (build-time only)
 

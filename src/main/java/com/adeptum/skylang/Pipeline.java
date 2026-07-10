@@ -34,12 +34,17 @@ import com.adeptum.skylang.verify.VerificationResult;
 import com.adeptum.skylang.verify.Verifier;
 import com.adeptum.skylang.verify.ViewVerifier;
 
+import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Drives the build pipeline for one already-checked module (guide §12): resolve each method body and
@@ -102,6 +107,17 @@ public final class Pipeline {
 
     /** @return 0 on success, non-zero on a verification/synthesis failure. */
     public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err) {
+        return build(module, lockPath, buildDir, out, err, false);
+    }
+
+    /**
+     * @param recheck run the staged verification even when every unit is frozen — an offline
+     *                re-render of the whole project (tests, render checks, the visual gate) that
+     *                catches environment or toolchain drift without a single model call
+     * @return 0 on success, non-zero on a verification/synthesis failure.
+     */
+    public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err,
+                     boolean recheck) {
         Lock lock = Lock.load(lockPath);
         lock.setProfile(JvmProfile.ID, JvmProfile.VERSION);
 
@@ -146,12 +162,13 @@ public final class Pipeline {
             }
         }
 
-        // Stage the project. If no method changed, everything is already verified — skip the test run.
+        // Stage the project. If nothing changed, everything is already verified — skip the test run.
         stager.stage(module, bodyMap(units), buildDir);
         if (!module.views().isEmpty()) {
-            facesViewStager.stage(module, viewArtifacts(viewUnits), buildDir);
+            facesViewStager.stage(module, viewArtifacts(viewUnits), baselines(viewUnits, lock), buildDir);
+            clearCaptures(buildDir);   // a stale rasterization must never be adopted as a baseline
         }
-        if (anyFresh) {
+        if (anyFresh || anyViewFresh || recheck) {
             int attempts = 0;
             VerificationResult result = verifier.verify(buildDir);
             while (!result.passed() && attempts < maxRegenerations) {
@@ -184,7 +201,8 @@ public final class Pipeline {
             }
         }
 
-        if (anyFresh || anyViewFresh) {
+        boolean anyVisualFrozen = adoptVisualCaptures(viewUnits, lock, buildDir, out);
+        if (anyFresh || anyViewFresh || anyVisualFrozen) {
             lock.save(lockPath);
         }
 
@@ -223,6 +241,54 @@ public final class Pipeline {
             map.put(u.key, u.body);
         }
         return map;
+    }
+
+    /** The frozen visual baseline of every view that was reused as-is; a fresh view has none yet. */
+    private static Map<String, byte[]> baselines(List<ViewUnit> viewUnits, Lock lock) {
+        Map<String, byte[]> map = new LinkedHashMap<>();
+        for (ViewUnit u : viewUnits) {
+            if (!u.fresh) {
+                lock.getView(u.key)
+                        .map(Lock.ViewEntry::visual)
+                        .filter(v -> !v.isEmpty())
+                        .ifPresent(v -> map.put(u.view.name(), Base64.getDecoder().decode(v)));
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Freeze the rasterizations the staged visual gate left behind: a view without a baseline gets
+     * the capture as its baseline, so the next verified build diffs against it instead of capturing.
+     */
+    private boolean adoptVisualCaptures(List<ViewUnit> viewUnits, Lock lock, Path buildDir, PrintStream out) {
+        boolean any = false;
+        for (ViewUnit u : viewUnits) {
+            var entry = lock.getView(u.key);
+            Path capture = buildDir.resolve("target/sky-visual").resolve(u.view.name() + ".png");
+            if (entry.isPresent() && entry.get().visual().isEmpty() && Files.exists(capture)) {
+                try {
+                    lock.putView(u.key, entry.get().withVisual(
+                            Base64.getEncoder().encodeToString(Files.readAllBytes(capture))));
+                    out.printf("  %-28s visual baseline frozen%n", "view " + u.view.name());
+                    any = true;
+                } catch (IOException e) {
+                    throw new UncheckedIOException("cannot read visual capture " + capture, e);
+                }
+            }
+        }
+        return any;
+    }
+
+    private static void clearCaptures(Path buildDir) {
+        Path captures = buildDir.resolve("target/sky-visual");
+        try (var files = Files.exists(captures) ? Files.list(captures) : Stream.<Path>empty()) {
+            for (Path file : files.toList()) {
+                Files.deleteIfExists(file);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot clear stale visual captures under " + captures, e);
+        }
     }
 
     private static Map<String, UiPromptBuilder.UiArtifact> viewArtifacts(List<ViewUnit> viewUnits) {
