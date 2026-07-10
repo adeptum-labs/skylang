@@ -644,6 +644,10 @@ public final class ProjectStager {
         }
 
         switch (ex.result()) {
+            case Ast.RaisesResult rr ->
+                    throw new UnsupportedOperationException("raises results do not lower yet");
+            case Ast.FieldsResult fr ->
+                    throw new UnsupportedOperationException("field-expectation results do not lower yet");
             case Ast.ExprResult er -> sb.append("        assertEquals(")
                     .append(Lowering.javaValue(er.value(), values)).append(", result, \"example result\");\n");
             case Ast.EntityResult ent -> {

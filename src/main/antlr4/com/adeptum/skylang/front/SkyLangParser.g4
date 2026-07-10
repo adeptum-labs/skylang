@@ -70,11 +70,19 @@ type
     ;
 
 clause
-    : INTENT STRING                        # intentClause
-    | REQUIRES expr                        # requiresClause
-    | ENSURES expr                         # ensuresClause
-    | EXAMPLE call ARROW exampleResult     # exampleClause
-    | RAISES ID WHEN raisesCondition       # raisesClause
+    : INTENT STRING                                # intentClause
+    | REQUIRES expr                                # requiresClause
+    | ENSURES expr                                 # ensuresClause
+    | EXAMPLE call (ON seed)? ARROW exampleResult  # exampleClause
+    | RAISES ID WHEN raisesCondition               # raisesClause
+    | SPEC STRING LBRACE (GIVEN expr)? WHEN call THEN thenAssert+ RBRACE  # specClause
+    ;
+
+seed : ID ID withClause? ;   // on a Product with stock 5 — a stored row before the call
+
+thenAssert
+    : RAISES ID    # thenRaises
+    | expr         # thenExpr
     ;
 
 // The when-vocabulary: a formal condition, or one of the fixed domain phrases
@@ -87,8 +95,10 @@ raisesCondition
     ;
 
 exampleResult
-    : ID ID withClause?    # entityResult   // "a" TypeName ["with" ...]
-    | expr                 # exprResult     // e.g. -> 5
+    : ID ID withClause?                               # entityResult   // "a" TypeName ["with" ...]
+    | RAISES ID                                       # raisesResult   // -> raises BadInput
+    | fieldExpect ((ID | AND | COMMA) fieldExpect)*   # fieldsResult   // -> stock 8
+    | expr                                            # exprResult     // e.g. -> 5
     ;
 
 withClause  : ID fieldExpect ((ID | AND | COMMA) fieldExpect)* ;  // "with" f v ("and"|",") ...

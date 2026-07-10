@@ -176,10 +176,16 @@ public final class Ast {
                          List<Expr> requires,
                          List<Expr> ensures,
                          List<Example> examples,
-                         List<Raise> raises) {
+                         List<Raise> raises,
+                         List<Spec> specs) {
         public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
                       List<Expr> requires, List<Expr> ensures, List<Example> examples) {
-            this(name, params, returnType, intent, requires, ensures, examples, List.of());
+            this(name, params, returnType, intent, requires, ensures, examples, List.of(), List.of());
+        }
+
+        public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
+                      List<Expr> requires, List<Expr> ensures, List<Example> examples, List<Raise> raises) {
+            this(name, params, returnType, intent, requires, ensures, examples, raises, List.of());
         }
 
         @Override
@@ -187,8 +193,23 @@ public final class Ast {
             return "Method[name=" + name + ", params=" + params + ", returnType=" + returnType
                     + ", intent=" + intent + ", requires=" + requires + ", ensures=" + ensures
                     + ", examples=" + examples
-                    + (raises.isEmpty() ? "" : ", raises=" + raises) + "]";
+                    + (raises.isEmpty() ? "" : ", raises=" + raises)
+                    + (specs.isEmpty() ? "" : ", specs=" + specs) + "]";
         }
+    }
+
+    /** {@code spec "title" { given ... when ... then ... }} — a multi-step scenario. */
+    public record Spec(String title, Optional<Expr> given, CallExpr when, List<ThenAssert> then) {
+    }
+
+    public sealed interface ThenAssert permits ThenRaises, ThenExpr {
+    }
+
+    /** {@code then raises InsufficientFunds}. */
+    public record ThenRaises(String error) implements ThenAssert {
+    }
+
+    public record ThenExpr(Expr expr) implements ThenAssert {
     }
 
     /** {@code raises NotFound when <condition>} — a named failure and when it must occur. */
@@ -210,13 +231,38 @@ public final class Ast {
     public record AlreadyRegistered(Expr value) implements RaiseCondition {
     }
 
-    /** A concrete {@code example call(...) -> result} case. */
-    public record Example(CallExpr call, Result result) {
+    /**
+     * A concrete {@code example call(...) [on <seed>] -> result} case. The freeze hash covers
+     * this record's string form, so {@code toString} is pinned: byte-identical to the original
+     * record format unless the example seeds state.
+     */
+    public record Example(CallExpr call, Result result, Optional<Seed> seed) {
+        public Example(CallExpr call, Result result) {
+            this(call, result, Optional.empty());
+        }
+
+        @Override
+        public String toString() {
+            return "Example[call=" + call + ", result=" + result
+                    + (seed.isEmpty() ? "" : ", seed=" + seed.get()) + "]";
+        }
+    }
+
+    /** {@code on a Product with stock 5} — a stored row established before the call. */
+    public record Seed(String entityName, List<FieldExpect> fields) {
     }
 
     // ----- example results ---------------------------------------------------
 
-    public sealed interface Result permits ExprResult, EntityResult {
+    public sealed interface Result permits ExprResult, EntityResult, RaisesResult, FieldsResult {
+    }
+
+    /** {@code -> raises BadInput} — the call must raise the named error. */
+    public record RaisesResult(String error) implements Result {
+    }
+
+    /** {@code -> stock 8} — field expectations on the result, without naming its type. */
+    public record FieldsResult(List<FieldExpect> fields) implements Result {
     }
 
     /** {@code -> 5} — the result is a plain expression the call must equal. */

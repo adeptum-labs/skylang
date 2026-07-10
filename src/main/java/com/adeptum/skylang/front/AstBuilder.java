@@ -146,6 +146,7 @@ public final class AstBuilder {
         List<Ast.Expr> ensures = new ArrayList<>();
         List<Ast.Example> examples = new ArrayList<>();
         List<Ast.Raise> raises = new ArrayList<>();
+        List<Ast.Spec> specs = new ArrayList<>();
 
         for (SkyLangParser.ClauseContext c : ctx.clause()) {
             if (c instanceof SkyLangParser.IntentClauseContext ic) {
@@ -158,11 +159,28 @@ public final class AstBuilder {
                 examples.add(example(xc));
             } else if (c instanceof SkyLangParser.RaisesClauseContext rz) {
                 raises.add(new Ast.Raise(rz.ID().getText(), raisesCondition(rz.raisesCondition())));
+            } else if (c instanceof SkyLangParser.SpecClauseContext sc) {
+                specs.add(spec(sc));
             }
         }
 
         return new Ast.Method(ctx.ID().getText(), params, type(ctx.type()),
-                intent, requires, ensures, examples, raises);
+                intent, requires, ensures, examples, raises, specs);
+    }
+
+    private Ast.Spec spec(SkyLangParser.SpecClauseContext ctx) {
+        Optional<Ast.Expr> given = ctx.GIVEN() == null
+                ? Optional.empty()
+                : Optional.of(expr(ctx.expr()));
+        List<Ast.ThenAssert> then = new ArrayList<>();
+        for (SkyLangParser.ThenAssertContext t : ctx.thenAssert()) {
+            then.add(switch (t) {
+                case SkyLangParser.ThenRaisesContext r -> new Ast.ThenRaises(r.ID().getText());
+                case SkyLangParser.ThenExprContext e -> new Ast.ThenExpr(expr(e.expr()));
+                default -> throw new IllegalStateException("unhandled then assertion");
+            });
+        }
+        return new Ast.Spec(unquote(ctx.STRING().getText()), given, call(ctx.call()), then);
     }
 
     /** The when-vocabulary: fixed phrases with soft keywords, or a formal condition. */
@@ -305,22 +323,43 @@ public final class AstBuilder {
 
     private Ast.Example example(SkyLangParser.ExampleClauseContext ctx) {
         Ast.CallExpr call = call(ctx.call());
-        return new Ast.Example(call, result(ctx.exampleResult()));
+        Optional<Ast.Seed> seed = ctx.seed() == null ? Optional.empty() : Optional.of(seed(ctx.seed()));
+        return new Ast.Example(call, result(ctx.exampleResult()), seed);
     }
 
-    private Ast.Result result(SkyLangParser.ExampleResultContext ctx) {
-        if (ctx instanceof SkyLangParser.ExprResultContext er) {
-            return new Ast.ExprResult(expr(er.expr()));
+    private Ast.Seed seed(SkyLangParser.SeedContext ctx) {
+        String article = ctx.ID(0).getText();
+        if (!article.equals("a") && !article.equals("an")) {
+            throw new IllegalArgumentException("a seed reads 'on a <Entity> with <field> <value>'");
         }
-        SkyLangParser.EntityResultContext en = (SkyLangParser.EntityResultContext) ctx;
-        String typeName = en.ID(1).getText();   // ID(0) is the soft keyword "a"
+        return new Ast.Seed(ctx.ID(1).getText(), fieldExpects(ctx.withClause()));
+    }
+
+    private List<Ast.FieldExpect> fieldExpects(SkyLangParser.WithClauseContext ctx) {
         List<Ast.FieldExpect> fields = new ArrayList<>();
-        if (en.withClause() != null) {
-            for (SkyLangParser.FieldExpectContext fe : en.withClause().fieldExpect()) {
+        if (ctx != null) {
+            for (SkyLangParser.FieldExpectContext fe : ctx.fieldExpect()) {
                 fields.add(new Ast.FieldExpect(fe.ID().getText(), expr(fe.expr())));
             }
         }
-        return new Ast.EntityResult(typeName, fields);
+        return fields;
+    }
+
+    private Ast.Result result(SkyLangParser.ExampleResultContext ctx) {
+        return switch (ctx) {
+            case SkyLangParser.ExprResultContext er -> new Ast.ExprResult(expr(er.expr()));
+            case SkyLangParser.RaisesResultContext rr -> new Ast.RaisesResult(rr.ID().getText());
+            case SkyLangParser.FieldsResultContext fr -> {
+                List<Ast.FieldExpect> fields = new ArrayList<>();
+                for (SkyLangParser.FieldExpectContext fe : fr.fieldExpect()) {
+                    fields.add(new Ast.FieldExpect(fe.ID().getText(), expr(fe.expr())));
+                }
+                yield new Ast.FieldsResult(fields);
+            }
+            case SkyLangParser.EntityResultContext en ->
+                    new Ast.EntityResult(en.ID(1).getText(), fieldExpects(en.withClause()));
+            default -> throw new IllegalStateException("unhandled example result: " + ctx.getClass());
+        };
     }
 
     private Ast.CallExpr call(SkyLangParser.CallContext ctx) {

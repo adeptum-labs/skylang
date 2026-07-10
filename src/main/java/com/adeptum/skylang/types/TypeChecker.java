@@ -694,6 +694,10 @@ public final class TypeChecker {
         }
 
         switch (ex.result()) {
+            case Ast.RaisesResult rr -> throw new CheckException(where
+                    + ": raises example results are not checkable yet");
+            case Ast.FieldsResult fr -> throw new CheckException(where
+                    + ": field-expectation results are not checkable yet");
             case Ast.ExprResult er -> {
                 String resultWhere = where + " example result";
                 Ty rt = infer(er.value(), Map.of(), resultWhere);

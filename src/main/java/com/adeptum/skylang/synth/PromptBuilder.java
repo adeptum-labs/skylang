@@ -159,6 +159,10 @@ public final class PromptBuilder {
     private String renderResult(Ast.Result result) {
         return switch (result) {
             case Ast.ExprResult er -> sky(er.value());
+            case Ast.RaisesResult rr -> "raises " + rr.error();
+            case Ast.FieldsResult fr -> fr.fields().stream()
+                    .map(fe -> fe.field() + " " + sky(fe.expected()))
+                    .collect(Collectors.joining(" and "));
             case Ast.EntityResult ent -> {
                 String fields = ent.fields().stream()
                         .map(fe -> fe.field() + " " + sky(fe.expected()))

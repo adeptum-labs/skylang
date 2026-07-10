@@ -63,9 +63,22 @@ public final class SupportClasses {
                 m.ensures().forEach(x -> addExpr(x, used));
                 for (Ast.Example ex : m.examples()) {
                     ex.call().args().forEach(a -> addExpr(a, used));
+                    ex.seed().ifPresent(sd -> sd.fields().forEach(fe -> addExpr(fe.expected(), used)));
                     switch (ex.result()) {
                         case Ast.ExprResult er -> addExpr(er.value(), used);
                         case Ast.EntityResult er -> er.fields().forEach(fe -> addExpr(fe.expected(), used));
+                        case Ast.FieldsResult fr -> fr.fields().forEach(fe -> addExpr(fe.expected(), used));
+                        case Ast.RaisesResult ignored -> {
+                        }
+                    }
+                }
+                for (Ast.Spec spec : m.specs()) {
+                    spec.given().ifPresent(g -> addExpr(g, used));
+                    spec.when().args().forEach(a -> addExpr(a, used));
+                    for (Ast.ThenAssert t : spec.then()) {
+                        if (t instanceof Ast.ThenExpr te) {
+                            addExpr(te.expr(), used);
+                        }
                     }
                 }
             }

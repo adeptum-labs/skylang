@@ -64,6 +64,9 @@ WHEN     : 'when' ;
 OLD      : 'old' ;
 NOT      : 'not' ;
 FOR      : 'for' ;
+SPEC     : 'spec' ;
+GIVEN    : 'given' ;
+THEN     : 'then' ;
 
 ARROW  : '->' ;
 AT     : '@' ;

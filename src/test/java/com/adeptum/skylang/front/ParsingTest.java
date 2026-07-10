@@ -494,6 +494,82 @@ class ParsingTest {
         assertInstanceOf(Ast.SourceExpr.class, count.source());
     }
 
+    // ----- the chapter-6 surface: spec blocks and extended examples ------------
+
+    @Test
+    void parsesSpecBlocks() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Account { id Int @id  balance Money }
+                entity Receipt { id Int @id  amount Money }
+                entity InsufficientFunds { }
+                service Bank uses db {
+                  transfer(from Account, to Account, amount Money) -> Receipt
+                    spec "moves money atomically" {
+                      given from.balance == 100eur and to.balance == 0eur
+                      when  transfer(from, to, 30eur)
+                      then  from.balance == 70eur
+                            to.balance   == 30eur
+                    }
+                    spec "rejects overdraft" {
+                      given from.balance == 10eur
+                      when  transfer(from, to, 50eur)
+                      then  raises InsufficientFunds
+                            from.balance == 10eur
+                    }
+                }
+                """, "t.sky");
+        Ast.Method transfer = m.services().get(0).methods().get(0);
+        assertEquals(2, transfer.specs().size());
+
+        Ast.Spec atomic = transfer.specs().get(0);
+        assertEquals("moves money atomically", atomic.title());
+        assertInstanceOf(Ast.BinExpr.class, atomic.given().orElseThrow());
+        assertEquals("transfer", atomic.when().callee());
+        assertEquals(3, atomic.when().args().size());
+        assertEquals(2, atomic.then().size());
+        assertInstanceOf(Ast.ThenExpr.class, atomic.then().get(0));
+
+        Ast.Spec overdraft = transfer.specs().get(1);
+        Ast.ThenRaises raises = assertInstanceOf(Ast.ThenRaises.class, overdraft.then().get(0));
+        assertEquals("InsufficientFunds", raises.error());
+        assertInstanceOf(Ast.ThenExpr.class, overdraft.then().get(1));
+    }
+
+    @Test
+    void parsesSeededExamplesAndRaisesResults() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Product { id Int @id  stock Int }
+                entity BadInput { }
+                service Catalog uses db {
+                  restock(id Int, units Int) -> Product
+                    example restock(7, 3) on a Product with stock 5 -> stock 8
+                    example restock(7, 0) -> raises BadInput
+                }
+                """, "t.sky");
+        Ast.Method restock = m.services().get(0).methods().get(0);
+
+        Ast.Example seeded = restock.examples().get(0);
+        Ast.Seed seed = seeded.seed().orElseThrow();
+        assertEquals("Product", seed.entityName());
+        assertEquals("stock", seed.fields().get(0).field());
+        Ast.FieldsResult fields = assertInstanceOf(Ast.FieldsResult.class, seeded.result());
+        assertEquals("stock", fields.fields().get(0).field());
+        assertInstanceOf(Ast.IntLit.class, fields.fields().get(0).expected());
+
+        Ast.RaisesResult raised = assertInstanceOf(Ast.RaisesResult.class, restock.examples().get(1).result());
+        assertEquals("BadInput", raised.error());
+    }
+
+    @Test
+    void legacyExampleToStringIsUnchanged() {
+        Ast.Example legacy = new Ast.Example(new Ast.CallExpr("f", List.of()),
+                new Ast.ExprResult(new Ast.IntLit(1)));
+        assertEquals("Example[call=CallExpr[callee=f, args=[]], result=ExprResult[value=IntLit[value=1]]]",
+                legacy.toString());
+    }
+
     @Test
     void legacyMethodToStringIsUnchanged() {
         Ast.Method legacy = new Ast.Method("f", List.of(), new Ast.TypeRef("Int"),
