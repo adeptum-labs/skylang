@@ -53,6 +53,27 @@ service Catalog {
 (with `@min` enforced in the compact constructor). `ensures` and `example` become JUnit tests
 in the staged project; `intent` drives the model.
 
+The full type system is in. Refined types attach machine-checked predicates to a base type —
+inline (`Int(0..100)`, `Text(1..120)`) or as named declarations, each a real nominal type:
+
+```sky
+type Iban          = Text matching /^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/
+type Percentage    = Int(0..100)
+type PositiveMoney = Money where amount > 0
+```
+
+The special types cover the rest of the catalogue: `Bool` (`boolean`), `Money` (an exact
+fixed-point amount plus currency — arithmetic requires matching currencies, money times money
+does not exist), `Instant` (`java.time.Instant`), `Bytes` (an immutable content-equal wrapper),
+`Email` (a `Text` that cannot be constructed from a non-address), `Maybe<T>`
+(`java.util.Optional`; there is no null), `Secret<T>` (masked `toString`, no Faces getter,
+never renderable in a view), and `List<T>`/`Map<K,V>`/`Set<T>` (`[T]` stays the list
+shorthand). Fields take `@unique` (advisory until persistence lands) and literal defaults
+(`active Bool = true`); `= now` is rejected until the clock effect exists. Every predicate is
+enforced where a value is constructed: entity compact constructors, guarded service-method
+parameters, and converter/validator-backed view inputs (`ask Money` renders with a staged
+`sky.money` Faces converter). See `examples/bank.sky` for the whole surface in one module.
+
 You write no test scaffolding: the example above compiles to `src/test/java/shop/CatalogTest.java`,
 where the `example` becomes a `@Test` and the `ensures` rides along as an assertion inside it —
 so a synthesized body is only accepted once both hold:
@@ -64,13 +85,17 @@ void restock_example_1() {
     var p = new Product(1L, "Notebook", 5L);
     var units = 3L;
     var result = svc.restock(p, units);
-    assertTrue(((result).stock() == ((p).stock() + units)), "ensures: ((result).stock() == ((p).stock() + units))");
+    assertTrue(eq((result).stock(), plus((p).stock(), units)), "ensures: eq((result).stock(), plus((p).stock(), units))");
     assertEquals(8L, result.stock(), "example: stock");
 }
 ```
 
-Not yet implemented (deferred): effects/`uses db` + JPA, `Secret`/`Maybe`/`policy`,
-`page`/`flow`, the dependency `requires` registry, `spec` blocks, `raises`, `Money`, and
+Contract operators lower through small overloaded helpers (`eq`, `lt`, `plus`, …) staged into
+the test class, so the same `ensures` works for `long`, `String`, `Money`, and `Instant`
+operands alike — javac's overload resolution picks the semantics.
+
+Not yet implemented (deferred): effects/`uses db` + JPA, `policy`, `page`/`flow`, the
+dependency `requires` registry, `spec` blocks, `raises`, `now`/the clock effect, enums, and
 property-based `ensures`.
 
 ## Build & run

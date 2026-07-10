@@ -173,6 +173,14 @@ class TypeCheckerTest {
     }
 
     @Test
+    void shippedBankExampleParsesAndChecks() throws Exception {
+        Ast.Module module = Parsing.parseFile(Path.of("examples/bank.sky"));
+        assertEquals(2, module.types().size(), "the example should declare Iban and PositiveMoney");
+        assertEquals(1, module.views().size(), "the example should carry the AccountList view");
+        assertDoesNotThrow(() -> new TypeChecker().check(module));
+    }
+
+    @Test
     void rejectsViewQueryNotList() {
         CheckException e = assertThrows(CheckException.class, () -> check(withView("""
                 view V {

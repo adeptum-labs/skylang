@@ -71,4 +71,44 @@ class StagedVerifyE2ETest {
 
         assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
     }
+
+    private static final String BANK = """
+            module bank
+            type Quantity = Int(1..)
+            entity Account {
+              id      Int   @id
+              owner   Email @unique
+              name    Text(1..120)
+              balance Money
+              active  Bool = true
+            }
+            service Accounts {
+              deposit(a Account, amount Money, times Quantity) -> Account
+                intent  "Return a copy with the amount added that many times."
+                ensures result.balance == a.balance + amount * times
+                example deposit(Account(1, "a@example.com", "Main", 0eur, true), 5eur, 2) -> a Account with balance 10eur
+              find(a Account, owner Email) -> Maybe<Account>
+                intent "The account when the owner matches, otherwise nothing."
+            }
+            """;
+
+    private static final String DEPOSIT_BODY =
+            "return new Account(a.id(), a.owner(), a.name(), a.balance().plus(amount.times(times)), a.active());";
+    private static final String FIND_BODY =
+            "return owner.equals(a.owner()) ? java.util.Optional.of(a) : java.util.Optional.empty();";
+
+    @Test
+    void moneyAndRefinedTypesCompileAndPass(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(BANK, "bank.sky");
+        new TypeChecker().check(module);
+
+        StubLlm stub = new StubLlm((system, user) ->
+                user.contains("public Account deposit") ? DEPOSIT_BODY : FIND_BODY);
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(stub, new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
+    }
 }
