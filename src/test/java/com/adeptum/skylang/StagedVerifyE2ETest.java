@@ -237,6 +237,39 @@ class StagedVerifyE2ETest {
         assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
     }
 
+    private static final String VAULT = """
+            module vault
+            type Password = Text(12..128)
+            entity WeakPassword { }
+            entity Login { id Int @id  owner Email  password Password }
+            policy StrongPasswords {
+              whenever a Password is constructed
+              require  length >= 12 and contains a symbol
+              else     raise WeakPassword
+            }
+            service Registry uses db {
+              register(id Int, password Password) -> Login
+                intent  "Store a login for the standard owner."
+                example register(1, "with-symbol-123!") -> a Login with id 1
+                example register(2, "weakpassword") -> raises WeakPassword
+            }
+            """;
+
+    @Test
+    void policiesFireAtConstructionEndToEnd(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(VAULT, "vault.sky");
+        new TypeChecker().check(module);
+
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(
+                new StubLlm("return db.save(new Login(id, \"a@example.com\", password));"),
+                new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
+    }
+
     private static final String BANK = """
             module bank
             type Quantity = Int(1..)

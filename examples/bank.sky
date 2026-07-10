@@ -6,6 +6,21 @@ module bank
 
 type Iban          = Text matching /^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/
 type PositiveMoney = Money where amount > 0
+type Password      = Text(12..128)
+
+entity WeakPassword { }
+
+// Rules that hold for every body in the module, wherever the concept appears.
+policy StrongPasswords {
+  whenever a Password is constructed
+  require  length >= 12 and contains a symbol
+  else     raise WeakPassword
+}
+
+policy NoSecretsInLogs {
+  whenever a Secret is passed to a logger
+  forbid
+}
 
 entity Status {
   name Text @id
@@ -52,6 +67,9 @@ service Accounts uses db, clock {
 
   interest(a Account, since Instant, rate Int(0..100)) -> Money
     intent "The interest accrued on the balance since the date at the given percentage rate."
+
+  protect(a Account, password Password) -> Bool
+    intent "Whether the password may guard the account."
 
   lookup(id Int) -> Account
     intent "The stored account with that id."

@@ -132,10 +132,20 @@ and `-> raises BadInput` asserts the failure. `sky tdd` watches the file and rer
 red-green cycle on save, regenerating only the methods whose specification changed
 (`--once` for scripts).
 
-Not yet implemented (deferred): `policy`, `page`/`flow`, the dependency `requires` registry,
-native `java { }` blocks, property-based `ensures`, prose-form example arguments, a Jakarta
-Mail binding for the `mail` effect, and persistence for `Map` fields and lists of
-identified entities.
+Policies state cross-cutting rules once and enforce them everywhere. `policy StrongPasswords
+{ whenever a Password is constructed require length >= 12 and contains a symbol else raise
+WeakPassword }` compiles into every construction site of the type — record constructors and
+service parameter guards — raising the named error; `policy NoSecretsInLogs { whenever a
+Secret is passed to a logger forbid }` joins the synthesis linter, failing any body where a
+Secret read meets a logging call. Policies participate in every method's frozen spec, so
+adding one re-verifies the module. The profile contributes its own policy in the same
+spirit: a `Secret` can never appear in a rendered view (no Faces getter, no column, no
+prompt). Unresolvable whenever-prose is a check error naming the two supported shapes.
+
+Not yet implemented (deferred): `page`/`flow`, the dependency `requires` registry, further
+whenever-forms (audited deletes, money conservation, layer boundaries), native `java { }`
+blocks, property-based `ensures`, prose-form example arguments, a Jakarta Mail binding for
+the `mail` effect, and persistence for `Map` fields and lists of identified entities.
 
 ## Build & run
 

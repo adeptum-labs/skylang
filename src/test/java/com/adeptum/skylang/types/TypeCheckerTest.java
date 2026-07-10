@@ -175,7 +175,8 @@ class TypeCheckerTest {
     @Test
     void shippedBankExampleParsesAndChecks() throws Exception {
         Ast.Module module = Parsing.parseFile(Path.of("examples/bank.sky"));
-        assertEquals(2, module.types().size(), "the example should declare Iban and PositiveMoney");
+        assertEquals(3, module.types().size(), "the example should declare Iban, PositiveMoney and Password");
+        assertEquals(2, module.policies().size(), "the example should carry the two book policies");
         assertEquals(1, module.views().size(), "the example should carry the AccountList view");
         assertDoesNotThrow(() -> new TypeChecker().check(module));
     }
