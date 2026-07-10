@@ -79,6 +79,7 @@ public final class TypeChecker {
             validatePersistability(module);
         }
         registerErrorsAndHelpers(module);
+        checkPolicies(module);
 
         // Check every method and index its signature for view resolution.
         Map<String, Map<String, MethodSig>> services = new HashMap<>();
@@ -356,11 +357,81 @@ public final class TypeChecker {
                 helpers.put(m.name(), new Helper(signatureOf(s.name(), m), s.uses(), ambiguous));
             }
         }
+        for (Ast.Policy p : module.policies()) {
+            if (p.rule() instanceof Ast.RequireRule rr && rr.raise().isPresent()) {
+                String error = rr.raise().get();
+                if (!entities.containsKey(error)) {
+                    throw new CheckException("policy " + p.name() + " raises unknown error '"
+                            + error + "' — declare it as an entity");
+                }
+                errorEntities.add(error);
+            }
+        }
         for (Ast.Entity e : module.entities()) {
             for (Ast.Field f : e.fields()) {
                 if (f.type() instanceof Ast.TypeRef ref && errorEntities.contains(ref.name())) {
                     throw new CheckException("field '" + e.name() + "." + f.name() + "': '" + ref.name()
                             + "' is an error (named in raises) and cannot be used as data");
+                }
+            }
+        }
+    }
+
+    // ----- policies --------------------------------------------------------------
+
+    /** Validate every policy: the whenever resolves, the shape fits, the predicate types. */
+    private void checkPolicies(Ast.Module module) {
+        for (Ast.Policy p : module.policies()) {
+            String where = "policy " + p.name();
+            switch (p.whenever()) {
+                case Ast.Constructed c -> {
+                    if (!(p.rule() instanceof Ast.RequireRule rr)) {
+                        throw new CheckException(where + ": a construction rule states what to require;"
+                                + " forbid pairs with 'is passed to a logger'");
+                    }
+                    Ty value = typeDecls.containsKey(c.typeWord())
+                            ? typeDecls.get(c.typeWord())
+                            : entities.containsKey(c.typeWord()) ? Ty.entity(c.typeWord()) : null;
+                    if (value == null) {
+                        throw new CheckException(where + ": cannot resolve 'a " + c.typeWord()
+                                + " is constructed' — no declared type or entity matches '"
+                                + c.typeWord() + "'");
+                    }
+                    checkRequireTerms(where, rr, value);
+                }
+                case Ast.PassedToLogger l -> {
+                    if (!l.typeWord().equals("Secret")) {
+                        throw new CheckException(where + ": only 'a Secret is passed to a logger'"
+                                + " is resolvable here");
+                    }
+                    if (!(p.rule() instanceof Ast.ForbidRule)) {
+                        throw new CheckException(where + ": the logger rule is a forbid");
+                    }
+                }
+            }
+        }
+    }
+
+    private void checkRequireTerms(String where, Ast.RequireRule rule, Ty value) {
+        Map<String, Ty> env = value.erased().equals(Ty.TEXT)
+                ? Map.of("value", value, "length", Ty.INT)
+                : Map.of("value", value);
+        for (Ast.ReqTerm term : rule.terms()) {
+            switch (term) {
+                case Ast.TermExpr te -> {
+                    Ty t = infer(te.expr(), env, where + " require");
+                    if (!t.isBool()) {
+                        throw new CheckException(where + ": require must be boolean, got " + t);
+                    }
+                }
+                case Ast.Contains c -> {
+                    if (!value.erased().equals(Ty.TEXT)) {
+                        throw new CheckException(where + ": 'contains a " + c.what()
+                                + "' needs a Text-based value");
+                    }
+                    if (!c.what().equals("symbol")) {
+                        throw new CheckException(where + ": only 'contains a symbol' is resolvable here");
+                    }
                 }
             }
         }

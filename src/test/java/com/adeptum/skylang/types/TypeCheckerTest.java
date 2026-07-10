@@ -1021,6 +1021,86 @@ class TypeCheckerTest {
                 "given a.balance == 10eur and a.iban == \"SE3550000000054910000003\"")));
     }
 
+    // ----- the chapter-7 surface: policies --------------------------------------
+
+    private static final String POLICIES = """
+            module m
+            type Password = Text(12..128)
+            entity WeakPassword { }
+            %s
+            service S { f(x Int) -> Int  intent "x" }
+            """;
+
+    @Test
+    void acceptsTheBookPolicies() {
+        assertDoesNotThrow(() -> check(POLICIES.formatted("""
+                policy StrongPasswords {
+                  whenever a Password is constructed
+                  require  length >= 12 and contains a symbol
+                  else     raise WeakPassword
+                }
+                policy NoSecretsInLogs {
+                  whenever a Secret is passed to a logger
+                  forbid
+                }
+                """)));
+    }
+
+    @Test
+    void policyWheneverTypesMustResolve() {
+        CheckException e = assertThrows(CheckException.class, () -> check(POLICIES.formatted("""
+                policy P {
+                  whenever a Widget is constructed
+                  require length >= 1
+                }
+                """)));
+        assertTrue(e.getMessage().contains("Widget"), e.getMessage());
+    }
+
+    @Test
+    void policyRequirePredicatesTypeAgainstTheValue() {
+        CheckException name = assertThrows(CheckException.class, () -> check(POLICIES.formatted("""
+                policy P {
+                  whenever a Password is constructed
+                  require balance >= 12
+                }
+                """)));
+        assertTrue(name.getMessage().contains("balance"), name.getMessage());
+        CheckException contains = assertThrows(CheckException.class, () -> check("""
+                module m
+                type Pin = Int(4..8)
+                policy P {
+                  whenever a Pin is constructed
+                  require contains a symbol
+                }
+                service S { f(x Int) -> Int  intent "x" }
+                """));
+        assertTrue(contains.getMessage().contains("contains"), contains.getMessage());
+    }
+
+    @Test
+    void policyShapesMatchTheirWhenever() {
+        CheckException e = assertThrows(CheckException.class, () -> check(POLICIES.formatted("""
+                policy P {
+                  whenever a Password is constructed
+                  forbid
+                }
+                """)));
+        assertTrue(e.getMessage().contains("forbid"), e.getMessage());
+    }
+
+    @Test
+    void policyErrorsAreErrorEntities() {
+        CheckException e = assertThrows(CheckException.class, () -> check(POLICIES.formatted("""
+                policy StrongPasswords {
+                  whenever a Password is constructed
+                  require length >= 12
+                  else    raise WeakPassword
+                }
+                """).replace("f(x Int) -> Int", "f(x WeakPassword) -> Int")));
+        assertTrue(e.getMessage().contains("error"), e.getMessage());
+    }
+
     @Test
     void memberDefaultsMustMatchTheFieldType() {
         CheckException e = assertThrows(CheckException.class, () -> check("""
