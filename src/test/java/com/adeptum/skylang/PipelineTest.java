@@ -464,6 +464,38 @@ class PipelineTest {
     }
 
     @Test
+    void bankRebuildStaysFrozen(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(new StubLlm("return null;"), ALWAYS_PASS)
+                .build(checkedBankModule(), lock, buildDir, quiet(), quiet());
+
+        StubLlm second = new StubLlm("return null;");
+        int code = new Pipeline(second, ALWAYS_PASS).build(checkedBankModule(), lock, buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertEquals(0, second.calls(), "an unchanged module with type declarations must stay frozen");
+    }
+
+    @Test
+    void changingATypeDeclarationRegenerates(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(new StubLlm("return null;"), ALWAYS_PASS)
+                .build(checkedBankModule(), lock, buildDir, quiet(), quiet());
+
+        Ast.Module changed = Parsing.parse(BANK.replace("{4,16}", "{4,32}"), "bank.sky");
+        new TypeChecker().check(changed);
+        StubLlm after = new StubLlm("return null;");
+        new Pipeline(after, ALWAYS_PASS).build(changed, lock, buildDir, quiet(), quiet());
+
+        assertEquals(2, after.calls(),
+                "a changed type declaration is a spec change: every method re-synthesizes");
+    }
+
+    @Test
     void secretFieldsStayOutOfTheWebSurface(@TempDir Path root) throws Exception {
         String source = SHOP_VIEW.replace("stock Int @min(0)", "stock Int @min(0)  password Secret<Text>");
         Ast.Module module = Parsing.parse(source, "shop.sky");

@@ -325,11 +325,23 @@ public final class Pipeline {
     static String specString(Ast.Module module, Ast.Method method) {
         StringBuilder sb = new StringBuilder();
         sb.append("profile=").append(JvmProfile.ID).append('@').append(JvmProfile.VERSION).append('\n');
+        appendTypes(sb, module);
         for (Ast.Entity e : module.entities()) {
             sb.append("entity ").append(e).append('\n');
         }
         sb.append("method ").append(method).append('\n');
         return sb.toString();
+    }
+
+    /**
+     * Declared refined types are part of every spec (their predicates shape lowering and
+     * verification). A module without them contributes nothing here, so specs written before
+     * type declarations existed keep their exact hash.
+     */
+    private static void appendTypes(StringBuilder sb, Ast.Module module) {
+        for (Ast.TypeDecl d : module.types()) {
+            sb.append("type ").append(d).append('\n');
+        }
     }
 
     /**
@@ -339,6 +351,7 @@ public final class Pipeline {
     static String viewSpecString(Ast.Module module, Ast.View view) {
         StringBuilder sb = new StringBuilder();
         sb.append("profile=").append(JvmProfile.ID).append('@').append(JvmProfile.VERSION).append('\n');
+        appendTypes(sb, module);
         for (Ast.Entity e : module.entities()) {
             sb.append("entity ").append(e).append('\n');
         }
