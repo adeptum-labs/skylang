@@ -80,7 +80,7 @@ public final class Lock {
                         if (e.getValue() instanceof Map<?, ?> m) {
                             lock.methods.put(String.valueOf(e.getKey()), new Entry(
                                     String.valueOf(m.get("specHash")),
-                                    String.valueOf(m.get("body"))));
+                                    multiline(m.get("body"))));
                         }
                     }
                 }
@@ -89,8 +89,8 @@ public final class Lock {
                         if (e.getValue() instanceof Map<?, ?> v) {
                             lock.views.put(String.valueOf(e.getKey()), new ViewEntry(
                                     String.valueOf(v.get("specHash")),
-                                    String.valueOf(v.get("markup")),
-                                    String.valueOf(v.get("bean")),
+                                    multiline(v.get("markup")),
+                                    multiline(v.get("bean")),
                                     asString(v.get("visual"))));
                         }
                     }
@@ -107,11 +107,13 @@ public final class Lock {
         profile.put("id", profileId);
         profile.put("version", profileVersion);
 
+        // Bodies and markup are stored one line per array element, and the whole lock is
+        // pretty-printed, so a git diff of sky.lock reads at the level of changed lines.
         Map<String, Object> methodMap = new LinkedHashMap<>();
         methods.forEach((key, entry) -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("specHash", entry.specHash());
-            m.put("body", entry.body());
+            m.put("body", entry.body().lines().toList());
             methodMap.put(key, m);
         });
 
@@ -119,8 +121,8 @@ public final class Lock {
         views.forEach((key, entry) -> {
             Map<String, Object> v = new LinkedHashMap<>();
             v.put("specHash", entry.specHash());
-            v.put("markup", entry.markup());
-            v.put("bean", entry.bean());
+            v.put("markup", entry.markup().lines().toList());
+            v.put("bean", entry.bean().lines().toList());
             v.put("visual", entry.visual());
             viewMap.put(key, v);
         });
@@ -131,7 +133,7 @@ public final class Lock {
         root.put("views", viewMap);
 
         try {
-            Files.writeString(path, Json.write(root) + "\n");
+            Files.writeString(path, Json.writePretty(root) + "\n");
         } catch (IOException e) {
             throw new UncheckedIOException("cannot write " + path, e);
         }
@@ -139,6 +141,43 @@ public final class Lock {
 
     private static String asString(Object o) {
         return o == null ? "" : o.toString();
+    }
+
+    /** A stored text: an array of lines in the current form, a single string in older locks. */
+    private static String multiline(Object o) {
+        if (o instanceof java.util.List<?> lines) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < lines.size(); i++) {
+                sb.append(i > 0 ? "\n" : "").append(lines.get(i));
+            }
+            return sb.toString();
+        }
+        return asString(o);
+    }
+
+    /**
+     * The canonical form frozen bodies are stored in: LF line endings, no trailing
+     * whitespace, leading tabs as four spaces, no blank first or last lines — so a
+     * regeneration can never produce a diff of pure formatting.
+     */
+    public static String canonical(String body) {
+        java.util.List<String> lines = new java.util.ArrayList<>(body.replace("\r\n", "\n")
+                .replace('\r', '\n').lines()
+                .map(line -> {
+                    int i = 0;
+                    while (i < line.length() && line.charAt(i) == '\t') {
+                        i++;
+                    }
+                    return "    ".repeat(i) + line.substring(i).stripTrailing();
+                })
+                .toList());
+        while (!lines.isEmpty() && lines.get(0).isBlank()) {
+            lines.remove(0);
+        }
+        while (!lines.isEmpty() && lines.get(lines.size() - 1).isBlank()) {
+            lines.remove(lines.size() - 1);
+        }
+        return String.join("\n", lines);
     }
 
     public void setProfile(String id, String version) {

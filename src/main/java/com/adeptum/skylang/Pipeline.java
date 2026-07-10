@@ -82,6 +82,7 @@ public final class Pipeline {
         final String specHash;
         String body;
         boolean fresh;   // true = synthesized this build (needs freezing on success)
+        boolean stale;   // true = an older frozen entry existed (fresh replaces it)
 
         Unit(Ast.Service service, Ast.Method method, String key, String specHash) {
             this.service = service;
@@ -136,9 +137,10 @@ public final class Pipeline {
             if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
                 u.body = frozen.get().body();
             } else if (u.method.nativeBody().isPresent()) {
+                u.stale = frozen.isPresent();
                 // The escape hatch: the body is the author's, never the model's — but the
                 // effects budget and the contracts hold for it all the same.
-                u.body = u.method.nativeBody().get();
+                u.body = Lock.canonical(u.method.nativeBody().get());
                 List<String> violations = EffectLinter.violations(u.body, u.service.uses(), module);
                 if (!violations.isEmpty()) {
                     err.println("build failed: " + u.key + " (native) reaches outside its effects budget:");
@@ -148,6 +150,7 @@ public final class Pipeline {
                 u.fresh = true;
                 anyFresh = true;
             } else {
+                u.stale = frozen.isPresent();
                 if (!resolveBody(module, u, out, err)) {
                     return 1;
                 }
@@ -207,7 +210,7 @@ public final class Pipeline {
             }
             for (Unit u : units) {
                 if (u.fresh) {
-                    lock.put(u.key, new Lock.Entry(u.specHash, u.body));
+                    lock.put(u.key, new Lock.Entry(u.specHash, Lock.canonical(u.body)));
                 }
             }
         }
@@ -215,7 +218,8 @@ public final class Pipeline {
         // Freeze the fresh views — they were already disposed against their expectations above.
         for (ViewUnit u : viewUnits) {
             if (u.fresh) {
-                lock.putView(u.key, new Lock.ViewEntry(u.specHash, u.artifact.markup(), u.artifact.bean()));
+                lock.putView(u.key, new Lock.ViewEntry(u.specHash,
+                        Lock.canonical(u.artifact.markup()), Lock.canonical(u.artifact.bean())));
             }
         }
 
@@ -341,23 +345,46 @@ public final class Pipeline {
         return map;
     }
 
+    /** The build transcript, in the shape the freeze model promises: per unit, one line. */
     private void report(List<Unit> units, List<ViewUnit> viewUnits, PrintStream out) {
+        int width = 24;
+        for (Unit u : units) {
+            width = Math.max(width, (u.service.name() + "." + u.method.name()).length());
+        }
+        for (ViewUnit u : viewUnits) {
+            width = Math.max(width, ("view " + u.view.name()).length());
+        }
         for (Unit u : units) {
             String label = u.service.name() + "." + u.method.name();
-            if (u.fresh) {
-                out.printf("  %-28s regenerated   (verified)%n", label);
-            } else {
-                out.printf("  %-28s frozen @ %s%n", label, Hashing.shortHash(u.specHash));
+            if (!u.fresh) {
+                out.printf("  %-" + width + "s \u25b8 frozen @ %s   (unchanged)%n",
+                        label, Hashing.shortHash(u.specHash));
+                continue;
             }
+            String how = u.method.nativeBody().isPresent() ? "native"
+                    : u.stale ? "regenerated" : "synthesized";
+            int contracts = u.method.requires().size() + u.method.ensures().size()
+                    + u.method.raises().size();
+            int examples = u.method.examples().size() + u.method.specs().size();
+            out.printf("  %-" + width + "s \u25b8 %s \u25b8 verified \u25b8 frozen @ %s%s%s%n",
+                    label, how, Hashing.shortHash(u.specHash),
+                    counted(contracts, "contract"), counted(examples, "example"));
         }
         for (ViewUnit u : viewUnits) {
             String label = "view " + u.view.name();
-            if (u.fresh) {
-                out.printf("  %-28s regenerated   (verified)%n", label);
+            if (!u.fresh) {
+                out.printf("  %-" + width + "s \u25b8 frozen @ %s   (unchanged)%n",
+                        label, Hashing.shortHash(u.specHash));
             } else {
-                out.printf("  %-28s frozen @ %s%n", label, Hashing.shortHash(u.specHash));
+                out.printf("  %-" + width + "s \u25b8 synthesized \u25b8 verified \u25b8 frozen @ %s%s%n",
+                        label, Hashing.shortHash(u.specHash),
+                        counted(u.view.expects().size(), "expectation"));
             }
         }
+    }
+
+    private static String counted(int n, String noun) {
+        return n == 0 ? "" : "   \u2713 " + n + " " + noun + (n == 1 ? "" : "s");
     }
 
     /**

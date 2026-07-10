@@ -960,6 +960,32 @@ class PipelineTest {
     }
 
     @Test
+    void theBuildTranscriptReadsLikeTheFreezeModel(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        var first = new ByteArrayOutputStream();
+        new Pipeline(new StubLlm(BODY), ALWAYS_PASS)
+                .build(checkedModule(), lock, buildDir, new PrintStream(first), quiet());
+        String firstOut = first.toString();
+        assertTrue(firstOut.contains("▸ synthesized ▸ verified ▸ frozen @"), firstOut);
+        assertTrue(firstOut.contains("✓ 2 contracts") && firstOut.contains("✓ 1 example"), firstOut);
+
+        var second = new ByteArrayOutputStream();
+        new Pipeline(new StubLlm(BODY), ALWAYS_PASS)
+                .build(checkedModule(), lock, buildDir, new PrintStream(second), quiet());
+        assertTrue(second.toString().contains("▸ frozen @") && second.toString().contains("(unchanged)"),
+                second.toString());
+
+        Ast.Module changed = Parsing.parse(SHOP.replace("Increase stock.", "Raise it."), "shop.sky");
+        new TypeChecker().check(changed);
+        var third = new ByteArrayOutputStream();
+        new Pipeline(new StubLlm(BODY), ALWAYS_PASS)
+                .build(changed, lock, buildDir, new PrintStream(third), quiet());
+        assertTrue(third.toString().contains("▸ regenerated ▸ verified ▸ frozen @"), third.toString());
+    }
+
+    @Test
     void bankRebuildStaysFrozen(@TempDir Path root) {
         Path lock = root.resolve("sky.lock");
         Path buildDir = root.resolve("build/jvm-jakarta");

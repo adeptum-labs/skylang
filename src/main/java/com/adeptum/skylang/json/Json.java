@@ -45,6 +45,53 @@ public final class Json {
         return sb.toString();
     }
 
+    /** Indented output, one entry or element per line — the diff-friendly form. */
+    public static String writePretty(Object value) {
+        StringBuilder sb = new StringBuilder();
+        writePrettyValue(sb, value, 0);
+        return sb.toString();
+    }
+
+    private static void writePrettyValue(StringBuilder sb, Object v, int depth) {
+        switch (v) {
+            case Map<?, ?> map when !map.isEmpty() -> {
+                sb.append("{\n");
+                boolean first = true;
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    if (!first) {
+                        sb.append(",\n");
+                    }
+                    first = false;
+                    indent(sb, depth + 1);
+                    writeString(sb, String.valueOf(e.getKey()));
+                    sb.append(": ");
+                    writePrettyValue(sb, e.getValue(), depth + 1);
+                }
+                sb.append('\n');
+                indent(sb, depth);
+                sb.append('}');
+            }
+            case List<?> list when !list.isEmpty() -> {
+                sb.append("[\n");
+                for (int i = 0; i < list.size(); i++) {
+                    if (i > 0) {
+                        sb.append(",\n");
+                    }
+                    indent(sb, depth + 1);
+                    writePrettyValue(sb, list.get(i), depth + 1);
+                }
+                sb.append('\n');
+                indent(sb, depth);
+                sb.append(']');
+            }
+            default -> writeValue(sb, v);
+        }
+    }
+
+    private static void indent(StringBuilder sb, int depth) {
+        sb.append("  ".repeat(depth));
+    }
+
     private static void writeValue(StringBuilder sb, Object v) {
         switch (v) {
             case null -> sb.append("null");
