@@ -32,7 +32,8 @@ public final class Profiles {
     public static Profile byId(String id) {
         return switch (id) {
             case JvmProfile.ID -> JvmProfile.INSTANCE;
-            case "ts-node", "python" -> throw new ConfigException("profile '" + id
+            case TsProfile.ID -> TsProfile.INSTANCE;
+            case "python" -> throw new ConfigException("profile '" + id
                     + "' is designed but not shipped in this build (available: " + available() + ")");
             default -> throw new ConfigException(
                     "unknown profile '" + id + "' (available: " + available() + ")");
@@ -40,6 +41,6 @@ public final class Profiles {
     }
 
     public static String available() {
-        return JvmProfile.ID;
+        return JvmProfile.ID + ", " + TsProfile.ID;
     }
 }

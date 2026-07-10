@@ -92,6 +92,11 @@ public final class JvmProfile implements Profile {
     }
 
     @Override
+    public com.adeptum.skylang.verify.Verifier verifier() {
+        return new com.adeptum.skylang.verify.MavenVerifier();
+    }
+
+    @Override
     public String systemPrompt() {
         return prompts.system();
     }

@@ -32,7 +32,6 @@ import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.synth.SynthException;
 import com.adeptum.skylang.types.CheckException;
 import com.adeptum.skylang.types.TypeChecker;
-import com.adeptum.skylang.verify.MavenVerifier;
 import com.adeptum.skylang.verify.Verifier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -93,7 +92,7 @@ public final class BuildCommand implements Callable<Integer> {
         }
 
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);   // resolved lazily on first synth
-        Verifier verifier = new MavenVerifier();
+        Verifier verifier = active.verifier();
 
         try {
             return new Pipeline(llm, verifier, Math.max(0, attempts - 1), active)

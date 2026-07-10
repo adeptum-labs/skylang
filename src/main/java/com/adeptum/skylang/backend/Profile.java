@@ -22,6 +22,7 @@
 package com.adeptum.skylang.backend;
 
 import com.adeptum.skylang.front.ast.Ast;
+import com.adeptum.skylang.verify.Verifier;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -56,6 +57,9 @@ public interface Profile {
 
     /** Materialise the complete staged project — sources, spliced bodies, contracts as tests. */
     void stage(Ast.Module module, Map<String, String> bodies, Path dir);
+
+    /** The platform's own toolchain, run as the verification harness over the staged project. */
+    Verifier verifier();
 
     String systemPrompt();
 

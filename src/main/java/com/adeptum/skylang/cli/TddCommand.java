@@ -32,7 +32,6 @@ import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.synth.SynthException;
 import com.adeptum.skylang.types.CheckException;
 import com.adeptum.skylang.types.TypeChecker;
-import com.adeptum.skylang.verify.MavenVerifier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -117,7 +116,7 @@ public final class TddCommand implements Callable<Integer> {
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
             com.adeptum.skylang.backend.Profile active = ActiveProfile.activate(profile, file, module);
-            int code = new Pipeline(llm, new MavenVerifier(), Math.max(0, attempts - 1), active)
+            int code = new Pipeline(llm, active.verifier(), Math.max(0, attempts - 1), active)
                     .build(module, root.resolve("sky.lock"), root.resolve("build").resolve(active.id()),
                             System.out, System.err);
             System.out.println(code == 0

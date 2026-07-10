@@ -53,6 +53,40 @@ class ProfilesTest {
     }
 
     @Test
+    void theTsNodeProfileResolves() {
+        Profile p = Profiles.byId("ts-node");
+        assertEquals("ts-node", p.id());
+        assertEquals("ts", p.nativeKeyword());
+        assertEquals("ts", p.tag());
+        assertTrue(!p.supportsViews(), "the interface library is optional and ts-node omits it");
+    }
+
+    @Test
+    void theTsNodeProfileRejectsAJavaBlock() {
+        var module = com.adeptum.skylang.front.Parsing.parse("""
+                module t
+                service Crypto { hash(x Int) -> Int  intent "x"  java { return x; } }
+                """, "t.sky");
+        var e = assertThrows(com.adeptum.skylang.types.CheckException.class,
+                () -> Profiles.byId("ts-node").validate(module));
+        assertTrue(e.getMessage().contains("java block has no meaning under profile 'ts-node'"),
+                e.getMessage());
+    }
+
+    @Test
+    void theTsNodeProfileNamesWhatItDoesNotLowerYet() {
+        var module = com.adeptum.skylang.front.Parsing.parse("""
+                module t
+                entity Order { id Int  total Money }
+                service Orders { total(o Order) -> Money  intent "x" }
+                """, "t.sky");
+        var e = assertThrows(com.adeptum.skylang.types.CheckException.class,
+                () -> Profiles.byId("ts-node").validate(module));
+        assertTrue(e.getMessage().contains("not yet supported by the ts-node profile"),
+                e.getMessage());
+    }
+
+    @Test
     void aDesignedButUnshippedProfileSaysSo() {
         ConfigException e = assertThrows(ConfigException.class, () -> Profiles.byId("python"));
         assertTrue(e.getMessage().contains("not shipped"), e.getMessage());
@@ -63,5 +97,6 @@ class ProfilesTest {
         ConfigException e = assertThrows(ConfigException.class, () -> Profiles.byId("go-lang"));
         assertTrue(e.getMessage().contains("unknown profile 'go-lang'"), e.getMessage());
         assertTrue(e.getMessage().contains("jvm-jakarta"), e.getMessage());
+        assertTrue(e.getMessage().contains("ts-node"), e.getMessage());
     }
 }

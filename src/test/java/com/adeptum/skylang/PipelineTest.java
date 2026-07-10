@@ -269,6 +269,7 @@ class PipelineTest {
             public void stage(Ast.Module module, java.util.Map<String, String> bodies, Path dir) {
                 stager.stage(module, bodies, dir);
             }
+            public Verifier verifier() { return ALWAYS_PASS; }
             public String systemPrompt() { return prompts.system(); }
             public String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method) {
                 return prompts.user(module, service, method);
@@ -302,6 +303,26 @@ class PipelineTest {
         assertEquals(0, new Pipeline(settled, ALWAYS_PASS, 4, fakeTarget())
                 .build(module, lock, root.resolve("build/fake-target"), quiet(), quiet()));
         assertEquals(0, settled.calls(), "the retargeted lock freezes like any other");
+    }
+
+    @Test
+    void theTsNodeProfileFreezesTypeScript(@TempDir Path root) throws IOException {
+        Ast.Module module = checkedModule();
+        String tsBody = "return new Product(p.id, p.name, p.stock + units);";
+        var out = new ByteArrayOutputStream();
+
+        int code = new Pipeline(new StubLlm(tsBody), ALWAYS_PASS, 4,
+                com.adeptum.skylang.backend.TsProfile.INSTANCE)
+                .build(module, root.resolve("sky.lock"), root.resolve("build/ts-node"),
+                        new PrintStream(out), quiet());
+
+        assertEquals(0, code);
+        assertTrue(out.toString().contains("▸ synthesized (ts) ▸ verified ▸ frozen @"),
+                out.toString());
+        assertTrue(Files.readString(root.resolve("build/ts-node/src/Catalog.ts")).contains(tsBody),
+                "the TypeScript body is spliced into the staged service");
+        assertTrue(Files.readString(root.resolve("sky.lock")).contains("p.stock + units"),
+                "the frozen body is TypeScript source");
     }
 
     @Test

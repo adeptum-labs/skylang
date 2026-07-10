@@ -32,7 +32,6 @@ import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.synth.SynthException;
 import com.adeptum.skylang.types.CheckException;
 import com.adeptum.skylang.types.TypeChecker;
-import com.adeptum.skylang.verify.MavenVerifier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -95,7 +94,7 @@ public final class FreezeCommand implements Callable<Integer> {
 
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
-            return new Pipeline(llm, new MavenVerifier(), Math.max(0, attempts - 1), active)
+            return new Pipeline(llm, active.verifier(), Math.max(0, attempts - 1), active)
                     .build(module, lockPath, root.resolve("build").resolve(active.id()),
                             System.out, System.err);
         } catch (ConfigException | SynthException e) {
