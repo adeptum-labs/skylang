@@ -24,11 +24,27 @@ package com.adeptum.skylang.cli;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
-/** The {@code sky} command-line entry point. */
+/**
+ * The {@code sky} command-line entry point. The help header recreates the book cover's
+ * look: the tracked eyebrow, the two-tone wordmark (near-white Sky, petrol Lang), the
+ * tagline and the motto. Picocli strips the colors when output is not a terminal.
+ */
 @Command(
         name = "sky",
         mixinStandardHelpOptions = true,
         version = "sky 0.1.0",
+        header = {
+                "",
+                "@|fg(109) S P E C I F I C A T I O N   L A N G U A G E|@ @|fg(66) ·|@ @|fg(109) J V M - F I R S T|@",
+                "",
+                "@|fg(255) ┏━┓╻┏ ╻ ╻|@@|fg(109) ╻  ┏━┓┏┓╻┏━╸|@",
+                "@|fg(255) ┗━┓┣┻┓┗┳┛|@@|fg(109) ┃  ┣━┫┃┗┫┃╺┓|@",
+                "@|fg(255) ┗━┛╹ ╹ ╹ |@@|fg(109) ┗━╸╹ ╹╹ ╹┗━┛|@",
+                "",
+                "@|fg(255) You write the contract. The compiler writes the code.|@",
+                "@|fg(66) ────────────────────────|@",
+                "@|fg(66) THE MODEL PROPOSES. THE COMPILER DISPOSES.|@",
+                ""},
         description = "SkyLang compiler: declare the contract, the model writes the body.",
         subcommands = {OnboardCommand.class, CheckCommand.class, BuildCommand.class, PreviewCommand.class,
                 TddCommand.class})
