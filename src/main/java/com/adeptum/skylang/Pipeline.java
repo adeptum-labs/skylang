@@ -146,12 +146,12 @@ public final class Pipeline {
             }
         }
 
-        // Stage the project. If no method changed, everything is already verified — skip the test run.
+        // Stage the project. If nothing changed, everything is already verified — skip the test run.
         stager.stage(module, bodyMap(units), buildDir);
         if (!module.views().isEmpty()) {
             facesViewStager.stage(module, viewArtifacts(viewUnits), buildDir);
         }
-        if (anyFresh) {
+        if (anyFresh || anyViewFresh) {
             int attempts = 0;
             VerificationResult result = verifier.verify(buildDir);
             while (!result.passed() && attempts < maxRegenerations) {

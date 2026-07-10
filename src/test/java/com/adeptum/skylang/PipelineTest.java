@@ -209,6 +209,28 @@ class PipelineTest {
     }
 
     @Test
+    void buildWithOnlyAFreshViewStillRunsTheVerifier(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS).build(checkedViewModule(), lock, buildDir, quiet(), quiet());
+
+        // Change only the view (its route): methods stay frozen, the view is re-synthesized.
+        Ast.Module changed = Parsing.parse(SHOP_VIEW.replace("\"/products\"", "\"/inventory\""), "shop.sky");
+        new TypeChecker().check(changed);
+        var verified = new java.util.concurrent.atomic.AtomicBoolean();
+        Verifier recording = dir -> {
+            verified.set(true);
+            return VerificationResult.pass();
+        };
+
+        int code = new Pipeline(routingStub(VIEW_REPLY), recording).build(changed, lock, buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertTrue(verified.get(), "a freshly synthesized view must go through the staged verification");
+    }
+
+    @Test
     void viewFailingItsExpectationsFailsTheBuild(@TempDir Path root) {
         Ast.Module module = checkedViewModule();
         Path lock = root.resolve("sky.lock");
