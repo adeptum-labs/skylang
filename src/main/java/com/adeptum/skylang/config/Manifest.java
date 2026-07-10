@@ -69,7 +69,18 @@ public record Manifest(String project, String profile) {
         if (project == null || project.isEmpty()) {
             throw new ConfigException("sky.project: missing 'project <name>' line");
         }
-        return new Manifest(project, profile == null ? REFERENCE_PROFILE : profile);
+        // Both values name things and become path segments; keep them to plain identifiers.
+        requireName("project", project);
+        String active = profile == null ? REFERENCE_PROFILE : profile;
+        requireName("profile", active);
+        return new Manifest(project, active);
+    }
+
+    private static void requireName(String directive, String value) {
+        if (!value.matches("[A-Za-z0-9][A-Za-z0-9_-]*")) {
+            throw new ConfigException("sky.project: '" + directive + "' must be a plain name, got '"
+                    + value + "'");
+        }
     }
 
     private static String unique(String directive, String existing, String value) {

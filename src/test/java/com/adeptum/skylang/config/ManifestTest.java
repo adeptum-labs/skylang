@@ -63,6 +63,13 @@ class ManifestTest {
     }
 
     @Test
+    void rejectsAProfileThatIsNotAPlainName() {
+        ConfigException e = assertThrows(ConfigException.class,
+                () -> Manifest.parse("project shop\nprofile ../../etc\n"));
+        assertTrue(e.getMessage().contains("plain name"), e.getMessage());
+    }
+
+    @Test
     void rejectsADuplicateProfileLine() {
         ConfigException e = assertThrows(ConfigException.class,
                 () -> Manifest.parse("project shop\nprofile a\nprofile b\n"));
