@@ -103,6 +103,7 @@ public final class FacesViewStager {
 
             Path test = buildDir.resolve("src/test/java").resolve(pkg);
             Files.createDirectories(test);
+            Files.writeString(test.resolve("ViewHarness.java"), VIEW_HARNESS.formatted(pkg));
             Files.writeString(test.resolve("ViewsRenderTest.java"), renderTest(pkg, module));
             Files.writeString(test.resolve("ViewsInteractionTest.java"), interactionTest(pkg, module));
             Files.writeString(test.resolve("PreviewServer.java"), PREVIEW_SERVER.formatted(pkg));
@@ -160,11 +161,11 @@ public final class FacesViewStager {
         for (Ast.View view : module.views()) {
             String lower = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1);
             methods.append("\n    @Test\n    void ").append(lower).append("Interacts() throws Exception {\n");
-            methods.append("        int port = freePort();\n");
+            methods.append("        int port = ViewHarness.freePort();\n");
             methods.append("        Configuration configuration = new Configuration();\n");
             methods.append("        configuration.setHttpPort(port);\n");
             methods.append("        try (Container container = new Container(configuration)) {\n");
-            methods.append("            container.deploy(\"/app\", webapp().toFile());\n");
+            methods.append("            container.deploy(\"/app\", ViewHarness.webapp().toFile());\n");
             methods.append("            HtmlUnitDriver driver = new HtmlUnitDriver(true);\n");
             methods.append("            try {\n");
             methods.append("                driver.get(\"http://localhost:\" + port + \"/app/")
@@ -187,16 +188,9 @@ public final class FacesViewStager {
         return INTERACTION_TEST.formatted(pkg, methods.toString());
     }
 
-    private static final String INTERACTION_TEST = """
+    /** Shared plumbing for everything that boots the staged webapp: tests, gates, the preview server. */
+    private static final String VIEW_HARNESS = """
             package %s;
-
-            import org.apache.tomee.embedded.Configuration;
-            import org.apache.tomee.embedded.Container;
-            import org.junit.jupiter.api.Test;
-            import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-            import org.openqa.selenium.By;
-            import org.openqa.selenium.WebElement;
-            import org.openqa.selenium.htmlunit.HtmlUnitDriver;
 
             import java.io.IOException;
             import java.io.UncheckedIOException;
@@ -205,22 +199,22 @@ public final class FacesViewStager {
             import java.nio.file.Path;
 
             import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
-            import static org.junit.jupiter.api.Assertions.assertFalse;
-            import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-            /** Drives each view in a real (headless) browser and clicks its actions. Opt-in: run with SKY_UI=1. */
-            @EnabledIfEnvironmentVariable(named = "SKY_UI", matches = "1")
-            class ViewsInteractionTest {
-            %s
-                private static Path webapp() throws IOException {
-                    Path webapp = Files.createTempDirectory("sky-ui").resolve("app");
+            /** Explodes the staged webapp and hands out ports for an embedded-container deployment. */
+            final class ViewHarness {
+
+                private ViewHarness() {
+                }
+
+                static Path webapp() throws IOException {
+                    Path webapp = Files.createTempDirectory("sky-webapp").resolve("app");
                     Files.createDirectories(webapp);
                     copyTree(Path.of("src/main/webapp"), webapp);
                     copyTree(Path.of("target/classes"), webapp.resolve("WEB-INF/classes"));
                     return webapp;
                 }
 
-                private static int freePort() throws IOException {
+                static int freePort() throws IOException {
                     try (ServerSocket probe = new ServerSocket(0)) {
                         return probe.getLocalPort();
                     }
@@ -249,6 +243,26 @@ public final class FacesViewStager {
             }
             """;
 
+    private static final String INTERACTION_TEST = """
+            package %s;
+
+            import org.apache.tomee.embedded.Configuration;
+            import org.apache.tomee.embedded.Container;
+            import org.junit.jupiter.api.Test;
+            import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+            import org.openqa.selenium.By;
+            import org.openqa.selenium.WebElement;
+            import org.openqa.selenium.htmlunit.HtmlUnitDriver;
+
+            import static org.junit.jupiter.api.Assertions.assertFalse;
+            import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+            /** Drives each view in a real (headless) browser and clicks its actions. Opt-in: run with SKY_UI=1. */
+            @EnabledIfEnvironmentVariable(named = "SKY_UI", matches = "1")
+            class ViewsInteractionTest {
+            %s}
+            """;
+
     /** A long-lived embedded TomEE that serves every staged view at {@code /app/<View>.xhtml}. */
     private static final String PREVIEW_SERVER = """
             package %s;
@@ -256,33 +270,17 @@ public final class FacesViewStager {
             import org.apache.tomee.embedded.Configuration;
             import org.apache.tomee.embedded.Container;
 
-            import java.io.IOException;
-            import java.io.UncheckedIOException;
-            import java.net.ServerSocket;
-            import java.nio.file.Files;
-            import java.nio.file.Path;
             import java.util.concurrent.CountDownLatch;
-
-            import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
             /** Long-lived embedded TomEE serving the staged views for `sky preview`. */
             public final class PreviewServer {
 
                 public static void main(String[] args) throws Exception {
-                    int port;
-                    try (ServerSocket probe = new ServerSocket(0)) {
-                        port = probe.getLocalPort();
-                    }
-
-                    Path webapp = Files.createTempDirectory("sky-preview").resolve("app");
-                    Files.createDirectories(webapp);
-                    copyTree(Path.of("src/main/webapp"), webapp);
-                    copyTree(Path.of("target/classes"), webapp.resolve("WEB-INF/classes"));
-
+                    int port = ViewHarness.freePort();
                     Configuration configuration = new Configuration();
                     configuration.setHttpPort(port);
                     Container container = new Container(configuration);
-                    container.deploy("/app", webapp.toFile());
+                    container.deploy("/app", ViewHarness.webapp().toFile());
                     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                         try {
                             container.close();
@@ -293,27 +291,6 @@ public final class FacesViewStager {
                     System.out.println("PREVIEW READY app=" + port);
                     System.out.flush();
                     new CountDownLatch(1).await();
-                }
-
-                private static void copyTree(Path src, Path dest) throws IOException {
-                    if (!Files.exists(src)) {
-                        return;
-                    }
-                    try (var walk = Files.walk(src)) {
-                        walk.forEach(p -> {
-                            try {
-                                Path target = dest.resolve(src.relativize(p).toString());
-                                if (Files.isDirectory(p)) {
-                                    Files.createDirectories(target);
-                                } else {
-                                    Files.createDirectories(target.getParent());
-                                    Files.copy(p, target, REPLACE_EXISTING);
-                                }
-                            } catch (IOException e) {
-                                throw new UncheckedIOException(e);
-                            }
-                        });
-                    }
                 }
             }
             """;
@@ -327,65 +304,30 @@ public final class FacesViewStager {
             import org.jsoup.nodes.Document;
             import org.junit.jupiter.api.Test;
 
-            import java.io.IOException;
-            import java.io.UncheckedIOException;
-            import java.net.ServerSocket;
             import java.net.URI;
             import java.net.http.HttpClient;
             import java.net.http.HttpRequest;
             import java.net.http.HttpResponse;
-            import java.nio.file.Files;
-            import java.nio.file.Path;
 
-            import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
             import static org.junit.jupiter.api.Assertions.assertEquals;
             import static org.junit.jupiter.api.Assertions.assertFalse;
             import static org.junit.jupiter.api.Assertions.assertNotNull;
             import static org.junit.jupiter.api.Assertions.assertTrue;
 
-            /** Deploys each view to an embedded TomEE and verifies its rendered structure — no pixels. */
+            /** Deploys each view to an embedded TomEE and verifies its rendered structure and look. */
             class ViewsRenderTest {
             %s
                 private static String render(String view) throws Exception {
-                    Path webapp = Files.createTempDirectory("sky-render").resolve("app");
-                    Files.createDirectories(webapp);
-                    copyTree(Path.of("src/main/webapp"), webapp);
-                    copyTree(Path.of("target/classes"), webapp.resolve("WEB-INF/classes"));
-
-                    int port;
-                    try (ServerSocket probe = new ServerSocket(0)) {
-                        port = probe.getLocalPort();
-                    }
+                    int port = ViewHarness.freePort();
                     Configuration configuration = new Configuration();
                     configuration.setHttpPort(port);
                     try (Container container = new Container(configuration)) {
-                        container.deploy("/app", webapp.toFile());
+                        container.deploy("/app", ViewHarness.webapp().toFile());
                         HttpResponse<String> response = HttpClient.newHttpClient().send(
                                 HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/app/" + view)).build(),
                                 HttpResponse.BodyHandlers.ofString());
                         assertEquals(200, response.statusCode(), () -> "render failed:\\n" + response.body());
                         return response.body();
-                    }
-                }
-
-                private static void copyTree(Path src, Path dest) throws IOException {
-                    if (!Files.exists(src)) {
-                        return;
-                    }
-                    try (var walk = Files.walk(src)) {
-                        walk.forEach(p -> {
-                            try {
-                                Path target = dest.resolve(src.relativize(p).toString());
-                                if (Files.isDirectory(p)) {
-                                    Files.createDirectories(target);
-                                } else {
-                                    Files.createDirectories(target.getParent());
-                                    Files.copy(p, target, REPLACE_EXISTING);
-                                }
-                            } catch (IOException e) {
-                                throw new UncheckedIOException(e);
-                            }
-                        });
                     }
                 }
             }
