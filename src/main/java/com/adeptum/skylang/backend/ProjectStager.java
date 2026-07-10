@@ -57,18 +57,23 @@ public final class ProjectStager {
         String pkg = module.name();
         Path main = buildDir.resolve("src/main/java").resolve(pkg);
         Path test = buildDir.resolve("src/test/java").resolve(pkg);
+        Map<String, Ast.TypeDecl> types = Lowering.typesOf(module);
         try {
             Files.createDirectories(main);
             Files.createDirectories(test);
             Files.writeString(buildDir.resolve("pom.xml"), module.views().isEmpty() ? pom() : webPom());
 
+            for (String support : SupportClasses.used(module)) {
+                Files.writeString(main.resolve(support + ".java"),
+                        SupportClasses.source(support, pkg).orElseThrow());
+            }
             boolean web = !module.views().isEmpty();
             for (Ast.Entity e : module.entities()) {
-                Files.writeString(main.resolve(e.name() + ".java"), entitySource(pkg, e, web));
+                Files.writeString(main.resolve(e.name() + ".java"), entitySource(pkg, e, web, types));
             }
             for (Ast.Service s : module.services()) {
-                Files.writeString(main.resolve(s.name() + ".java"), serviceSource(pkg, module, s, bodies));
-                Files.writeString(test.resolve(s.name() + "Test.java"), testSource(pkg, s));
+                Files.writeString(main.resolve(s.name() + ".java"), serviceSource(pkg, module, s, bodies, types));
+                Files.writeString(test.resolve(s.name() + "Test.java"), testSource(pkg, module, s));
             }
         } catch (IOException e) {
             throw new UncheckedIOException("cannot stage project under " + buildDir, e);
@@ -77,9 +82,9 @@ public final class ProjectStager {
 
     // ----- entity ------------------------------------------------------------
 
-    private String entitySource(String pkg, Ast.Entity entity, boolean web) {
+    private String entitySource(String pkg, Ast.Entity entity, boolean web, Map<String, Ast.TypeDecl> types) {
         String components = entity.fields().stream()
-                .map(f -> Lowering.javaType(f.type()) + " " + f.name())
+                .map(f -> Lowering.javaType(f.type(), types) + " " + f.name())
                 .collect(Collectors.joining(", "));
 
         StringBuilder checks = new StringBuilder();
@@ -90,31 +95,79 @@ public final class ProjectStager {
                         .append(entity.name()).append('.').append(f.name())
                         .append(" violates @min(").append(f.min().getAsLong()).append(")\");\n");
             }
+            String refined = Lowering.javaCheck(f.name(), f.type(), types,
+                    entity.name() + "." + f.name());
+            if (!refined.isEmpty()) {
+                checks.append(indent(refined.strip(), "        ")).append('\n');
+            }
         }
 
         String compact = checks.isEmpty() ? "" :
                 "\n    public " + entity.name() + " {\n" + checks + "    }\n";
 
-        // Faces EL reads properties through getX() getters, which records lack; add them for the web profile.
+        // Faces EL reads properties through getX() getters, which records lack; add them for the
+        // web profile. Secret fields get none: nothing in a page may reach a secret.
         StringBuilder getters = new StringBuilder();
         if (web) {
             for (Ast.Field f : entity.fields()) {
+                if (isSecret(f.type())) {
+                    continue;
+                }
                 String cap = Character.toUpperCase(f.name().charAt(0)) + f.name().substring(1);
-                getters.append("\n    public ").append(Lowering.javaType(f.type())).append(" get").append(cap)
+                getters.append("\n    public ").append(Lowering.javaType(f.type(), types)).append(" get").append(cap)
                         .append("() {\n        return ").append(f.name()).append(";\n    }\n");
             }
         }
 
         return "package " + pkg + ";\n\n"
+                + entityJavadoc(entity)
                 + "public record " + entity.name() + "(" + components + ") {\n"
                 + compact
+                + defaultsConstructor(entity, types)
                 + getters
                 + "}\n";
     }
 
+    private static boolean isSecret(Ast.Type type) {
+        return type instanceof Ast.GenericType g && g.name().equals("Secret");
+    }
+
+    private static String entityJavadoc(Ast.Entity entity) {
+        String unique = entity.fields().stream()
+                .filter(Ast.Field::unique)
+                .map(Ast.Field::name)
+                .collect(Collectors.joining(", "));
+        return unique.isEmpty() ? "" :
+                "/** @unique (advisory until a persistence layer enforces it): " + unique + ". */\n";
+    }
+
+    /** A constructor omitting the trailing run of defaulted fields, so callers may skip them. */
+    private String defaultsConstructor(Ast.Entity entity, Map<String, Ast.TypeDecl> types) {
+        List<Ast.Field> fields = entity.fields();
+        int first = fields.size();
+        while (first > 0 && fields.get(first - 1).defaultValue().isPresent()) {
+            first--;
+        }
+        if (first == fields.size()) {
+            return "";
+        }
+        String params = fields.subList(0, first).stream()
+                .map(f -> Lowering.javaType(f.type(), types) + " " + f.name())
+                .collect(Collectors.joining(", "));
+        StringBuilder args = new StringBuilder();
+        for (int i = 0; i < fields.size(); i++) {
+            args.append(i > 0 ? ", " : "").append(i < first
+                    ? fields.get(i).name()
+                    : Lowering.javaValue(fields.get(i).defaultValue().orElseThrow()));
+        }
+        return "\n    public " + entity.name() + "(" + params + ") {\n"
+                + "        this(" + args + ");\n    }\n";
+    }
+
     // ----- service -----------------------------------------------------------
 
-    private String serviceSource(String pkg, Ast.Module module, Ast.Service service, Map<String, String> bodies) {
+    private String serviceSource(String pkg, Ast.Module module, Ast.Service service, Map<String, String> bodies,
+                                 Map<String, Ast.TypeDecl> types) {
         boolean web = !module.views().isEmpty();
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(pkg).append(";\n\n");
@@ -131,7 +184,16 @@ public final class ProjectStager {
             if (body == null) {
                 throw new IllegalStateException("no resolved body for " + key);
             }
-            sb.append("\n    public ").append(signature(m)).append(" {\n");
+            sb.append("\n    public ").append(signature(m, types)).append(" {\n");
+            // Refined parameters are guarded before the (synthesized) body runs, so no body
+            // can be reached with a value that breaks the parameter's declared predicate.
+            for (Ast.Param p : m.params()) {
+                String guard = Lowering.javaCheck(p.name(), p.type(), types,
+                        service.name() + "." + m.name() + " parameter " + p.name());
+                if (!guard.isEmpty()) {
+                    sb.append(indent(guard.strip(), "        ")).append('\n');
+                }
+            }
             sb.append(indent(body.strip(), "        ")).append('\n');
             sb.append("    }\n");
         }
@@ -139,16 +201,16 @@ public final class ProjectStager {
         return sb.toString();
     }
 
-    private String signature(Ast.Method m) {
+    private String signature(Ast.Method m, Map<String, Ast.TypeDecl> types) {
         String params = m.params().stream()
-                .map(p -> Lowering.javaType(p.type()) + " " + p.name())
+                .map(p -> Lowering.javaType(p.type(), types) + " " + p.name())
                 .collect(Collectors.joining(", "));
-        return Lowering.javaType(m.returnType()) + " " + m.name() + "(" + params + ")";
+        return Lowering.javaType(m.returnType(), types) + " " + m.name() + "(" + params + ")";
     }
 
     // ----- tests -------------------------------------------------------------
 
-    private String testSource(String pkg, Ast.Service service) {
+    private String testSource(String pkg, Ast.Module module, Ast.Service service) {
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(pkg).append(";\n\n");
         sb.append("import org.junit.jupiter.api.Test;\n");
@@ -161,8 +223,42 @@ public final class ProjectStager {
                 sb.append(testMethod(service, m, ex, ++n));
             }
         }
+        sb.append(opHelpers(SupportClasses.used(module).contains("Money")));
         sb.append("}\n");
         return sb.toString();
+    }
+
+    /**
+     * The helper methods contract expressions lower their operators to; javac's overload
+     * resolution gives each lowered type its correct semantics (primitive comparison for
+     * long, value equality for objects, currency-safe arithmetic for Money).
+     */
+    private static String opHelpers(boolean money) {
+        String base = """
+
+                    private static boolean eq(long a, long b) { return a == b; }
+                    private static boolean eq(boolean a, boolean b) { return a == b; }
+                    private static boolean eq(Object a, Object b) { return java.util.Objects.equals(a, b); }
+                    private static boolean lt(long a, long b) { return a < b; }
+                    private static boolean le(long a, long b) { return a <= b; }
+                    private static boolean gt(long a, long b) { return a > b; }
+                    private static boolean ge(long a, long b) { return a >= b; }
+                    private static <T extends Comparable<T>> boolean lt(T a, T b) { return a.compareTo(b) < 0; }
+                    private static <T extends Comparable<T>> boolean le(T a, T b) { return a.compareTo(b) <= 0; }
+                    private static <T extends Comparable<T>> boolean gt(T a, T b) { return a.compareTo(b) > 0; }
+                    private static <T extends Comparable<T>> boolean ge(T a, T b) { return a.compareTo(b) >= 0; }
+                    private static long plus(long a, long b) { return a + b; }
+                    private static long minus(long a, long b) { return a - b; }
+                    private static long times(long a, long b) { return a * b; }
+                    private static long div(long a, long b) { return a / b; }
+                """;
+        String moneyOps = """
+                    private static Money plus(Money a, Money b) { return a.plus(b); }
+                    private static Money minus(Money a, Money b) { return a.minus(b); }
+                    private static Money times(Money a, long b) { return a.times(b); }
+                    private static Money times(long a, Money b) { return b.times(a); }
+                """;
+        return money ? base + moneyOps : base;
     }
 
     private String testMethod(Ast.Service service, Ast.Method m, Ast.Example ex, int n) {

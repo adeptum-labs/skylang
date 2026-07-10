@@ -19,28 +19,36 @@
  * Contact: info@adeptum.se
  */
 
-grammar SkyLang;
+parser grammar SkyLangParser;
 
-/*
- * Thin-slice SkyLang grammar. Package is derived from the folder path by the
- * antlr4-maven-plugin (com/adeptum/skylang/front), so no @header is needed.
- *
- * Soft keywords ('a', 'with', 'and', and annotation names 'id'/'min') are matched
- * as plain IDs and interpreted in AstBuilder, so they never shadow identifiers
- * (e.g. a parameter may legitimately be named 'a').
- */
+options { tokenVocab = SkyLangLexer; }
+
+// Package is derived from the folder path by the antlr4-maven-plugin
+// (com/adeptum/skylang/front), so no @header is needed.
 
 module_ : MODULE ID decl* EOF ;
 
-decl : entity | service | view ;
+decl : entity | service | view | typeDecl ;
+
+// ----- named refined types ---------------------------------------------------
+
+typeDecl : TYPE ID ASSIGN refinedType ;
+
+refinedType
+    : ID LPAREN range RPAREN  # rangeRefinement   // type Percentage = Int(0..100)
+    | ID MATCHING REGEX       # regexRefinement   // type Slug = Text matching /^[a-z]+$/
+    | ID WHERE expr           # whereRefinement   // type PositiveMoney = Money where amount > 0
+    ;
+
+range : lo=INT? DOTDOT hi=INT? ;
 
 // ----- entities -------------------------------------------------------------
 
 entity : ENTITY ID LBRACE field* RBRACE ;
 
-field : ID type annotation* ;
+field : ID type annotation* (ASSIGN expr)? ;
 
-annotation : AT ID (LPAREN INT RPAREN)? ;   // @id  |  @min(0)
+annotation : AT ID (LPAREN INT RPAREN)? ;   // @id  |  @unique  |  @min(0)
 
 // ----- services & methods ---------------------------------------------------
 
@@ -52,8 +60,10 @@ params : param (COMMA param)* ;
 param  : ID type ;
 
 type
-    : ID               # namedType    // Int | Text | an entity name
-    | LBRACK ID RBRACK # listType      // [Product] — a list of an entity
+    : ID LT type (COMMA type)* GT # genericType   // Maybe<User> | Map<Slug, Product>
+    | ID LPAREN range RPAREN      # rangedType    // Int(0..100) | Text(1..120)
+    | ID                          # namedType     // Int | Text | an entity or declared type name
+    | LBRACK type RBRACK          # listType      // [Product] — shorthand for List<Product>
     ;
 
 clause
@@ -113,62 +123,10 @@ expr
     | expr op=(PLUS | MINUS) expr               # addExpr
     | expr op=(EQ | NEQ | LT | LE | GT | GE) expr   # cmpExpr
     | expr op=(AND | OR) expr                    # logicExpr
+    | MONEY                                      # moneyLit
     | INT                                        # intLit
     | STRING                                     # strLit
+    | TRUE                                       # trueLit
+    | FALSE                                      # falseLit
     | ID                                         # nameExpr
     ;
-
-// ----- lexer ----------------------------------------------------------------
-
-MODULE   : 'module' ;
-ENTITY   : 'entity' ;
-SERVICE  : 'service' ;
-INTENT   : 'intent' ;
-REQUIRES : 'requires' ;
-ENSURES  : 'ensures' ;
-EXAMPLE  : 'example' ;
-VIEW     : 'view' ;
-SHOWS    : 'shows' ;
-ACTION   : 'action' ;
-EXPECT   : 'expect' ;
-AT_KW    : 'at' ;
-AS       : 'as' ;
-OF       : 'of' ;
-ON       : 'on' ;
-HAS      : 'has' ;
-COLUMNS  : 'columns' ;
-ASK      : 'ask' ;
-IS       : 'is' ;
-APPEARS  : 'appears' ;
-IN       : 'in' ;
-
-ARROW  : '->' ;
-AT     : '@' ;
-LBRACE : '{' ;
-RBRACE : '}' ;
-LPAREN : '(' ;
-RPAREN : ')' ;
-LBRACK : '[' ;
-RBRACK : ']' ;
-COMMA  : ',' ;
-DOT    : '.' ;
-
-EQ  : '==' ;
-NEQ : '!=' ;
-LE  : '<=' ;
-GE  : '>=' ;
-LT  : '<' ;
-GT  : '>' ;
-PLUS  : '+' ;
-MINUS : '-' ;
-STAR  : '*' ;
-SLASH : '/' ;
-AND : 'and' ;
-OR  : 'or' ;
-
-INT    : [0-9]+ ;
-STRING : '"' ( ~["\\] | '\\' . )* '"' ;
-ID     : [a-zA-Z_] [a-zA-Z0-9_]* ;
-
-WS           : [ \t\r\n]+ -> skip ;
-LINE_COMMENT : '//' ~[\r\n]* -> skip ;

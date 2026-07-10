@@ -227,4 +227,381 @@ class TypeCheckerTest {
                 """)));
         assertTrue(e.getMessage().contains("sidebar"));
     }
+
+    // ----- the chapter-3 type surface -----------------------------------------
+
+    @Test
+    void acceptsTheFullTypeSurface() {
+        assertDoesNotThrow(() -> check("""
+                module bank
+                type Slug     = Text matching /^[a-z0-9-]{1,64}$/
+                type Quantity = Int(1..)
+                type PositiveMoney = Money where amount > 0
+                entity Account {
+                  id        Int             @id
+                  owner     Email           @unique
+                  name      Text(1..120)
+                  balance   Money
+                  secret    Secret<Bytes>
+                  opened    Instant
+                  active    Bool            = true
+                  tags      Set<Text>
+                  aliases   Map<Text, Text>
+                }
+                service Accounts {
+                  find(slug Slug) -> Maybe<Account>
+                    intent "Find by slug."
+                  fee(units Quantity) -> Money
+                    intent   "The fee for that many units."
+                    requires units > 0
+                    example  fee(3) -> 9.99eur
+                }
+                """));
+    }
+
+    @Test
+    void rejectsRangeLiteralOutOfBounds() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                type Percentage = Int(0..100)
+                service S {
+                  f(p Percentage) -> Int
+                    intent  "x"
+                    example f(150) -> 1
+                }
+                """));
+        assertTrue(e.getMessage().contains("0..100"), e.getMessage());
+    }
+
+    @Test
+    void rejectsTextLengthLiteralOutOfBounds() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(s Text(1..3)) -> Int
+                    intent  "x"
+                    example f("abcd") -> 1
+                }
+                """));
+        assertTrue(e.getMessage().contains("1..3"), e.getMessage());
+    }
+
+    @Test
+    void checksRegexLiteralsAtCompileTime() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                type Slug = Text matching /^[a-z0-9-]{1,64}$/
+                service S {
+                  f(s Slug) -> Int  intent "x"  example f("good-slug") -> 1
+                }
+                """));
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                type Slug = Text matching /^[a-z0-9-]{1,64}$/
+                service S {
+                  f(s Slug) -> Int  intent "x"  example f("Bad Slug!") -> 1
+                }
+                """));
+        assertTrue(e.getMessage().contains("Slug"), e.getMessage());
+    }
+
+    @Test
+    void namedTypesAreNominal() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                type Percentage = Int(0..100)
+                type Quantity   = Int(1..)
+                service S {
+                  f(p Percentage, q Quantity) -> Bool
+                    intent   "x"
+                    requires p == q
+                }
+                """));
+        assertTrue(e.getMessage().contains("Percentage"), e.getMessage());
+    }
+
+    @Test
+    void refinedTypesWidenToTheirBase() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                type Quantity = Int(1..)
+                service S {
+                  f(q Quantity) -> Int
+                    intent   "x"
+                    requires q > 0
+                    ensures  result == q + 1
+                }
+                """));
+    }
+
+    @Test
+    void moneyArithmeticIsRestricted() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                service S {
+                  f(price Money, fee Money, times Int) -> Money
+                    intent   "x"
+                    requires price < fee
+                    ensures  result == price + fee * times
+                }
+                """));
+        CheckException plus = assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(price Money) -> Money  intent "x"  ensures result == price + 1
+                }
+                """));
+        assertTrue(plus.getMessage().contains("Money"), plus.getMessage());
+        CheckException times = assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(price Money, fee Money) -> Money  intent "x"  ensures result == price * fee
+                }
+                """));
+        assertTrue(times.getMessage().contains("Money"), times.getMessage());
+    }
+
+    @Test
+    void rejectsCrossCurrencyLiterals() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f() -> Bool  intent "x"  ensures 9.99eur == 9.99usd
+                }
+                """));
+        assertTrue(e.getMessage().contains("currenc"), e.getMessage());
+    }
+
+    @Test
+    void instantsCompareButDoNotAdd() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                service S {
+                  f(a Instant, b Instant) -> Bool  intent "x"  ensures result == (a < b)
+                }
+                """));
+        assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(a Instant, b Instant) -> Instant  intent "x"  ensures result == a + b
+                }
+                """));
+    }
+
+    @Test
+    void rejectsArithmeticOnMaybe() {
+        assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(x Maybe<Int>) -> Int  intent "x"  ensures result == x + 1
+                }
+                """));
+    }
+
+    @Test
+    void rejectsSecretInViewColumnsAndAsk() {
+        CheckException column = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity User { id Int  password Secret<Text> }
+                service Users { all() -> [User]  intent "all" }
+                view V {
+                  shows Users.all() as a table of (id, password)
+                }
+                """));
+        assertTrue(column.getMessage().contains("Secret"), column.getMessage());
+        CheckException ask = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity User { id Int  password Secret<Text> }
+                service Users {
+                  all() -> [User]  intent "all"
+                  set(id Int, password Secret<Text>) -> User  intent "set"
+                }
+                view V {
+                  shows  Users.all() as a table of (id)
+                  action "Set" on row -> Users.set(row.id, ask Secret<Text>)
+                }
+                """));
+        assertTrue(ask.getMessage().contains("prompt"), ask.getMessage());
+    }
+
+    @Test
+    void rejectsNestedSecret() {
+        assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { x Secret<Secret<Text>> }
+                service S { f() -> Int  intent "x" }
+                """));
+    }
+
+    @Test
+    void acceptsAskWithConvertedAndRefinedTypes() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                type Quantity = Int(1..)
+                entity Order { id Int }
+                service Orders {
+                  all() -> [Order]  intent "all"
+                  pay(id Int, amount Money, units Quantity, contact Email) -> Order  intent "pay"
+                }
+                view V {
+                  shows  Orders.all() as a table of (id)
+                  action "Pay" on row -> Orders.pay(row.id, ask Money, ask Quantity, ask Email)
+                }
+                """));
+    }
+
+    @Test
+    void rejectsAskThatWouldNeedARuntimeProof() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                type Quantity = Int(1..)
+                entity Order { id Int }
+                service Orders {
+                  all() -> [Order]  intent "all"
+                  pay(id Int, units Quantity) -> Order  intent "pay"
+                }
+                view V {
+                  shows  Orders.all() as a table of (id)
+                  action "Pay" on row -> Orders.pay(row.id, ask Int)
+                }
+                """));
+        assertTrue(e.getMessage().contains("Quantity"), e.getMessage());
+    }
+
+    @Test
+    void rejectsUniqueOnUnsuitableFields() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { pw Secret<Text> @unique }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("@unique"), e.getMessage());
+    }
+
+    @Test
+    void checksFieldDefaults() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity E { active Bool = true  fee Money = 9.99eur  note Text = "none" }
+                service S { f() -> Int  intent "x" }
+                """));
+        CheckException range = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { stock Int(0..10) = 20 }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(range.getMessage().contains("0..10"), range.getMessage());
+        CheckException mismatch = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { name Text = 5 }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(mismatch.getMessage().contains("Text"), mismatch.getMessage());
+        CheckException member = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { role Text = Role.Member }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(member.getMessage().contains("literal"), member.getMessage());
+    }
+
+    @Test
+    void rejectsNowUntilTheClockEffectExists() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { createdAt Instant = now }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("clock"), e.getMessage());
+    }
+
+    @Test
+    void nowRemainsAValidParameterName() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                service S {
+                  f(now Int) -> Int  intent "x"  requires now > 0
+                }
+                """));
+    }
+
+    @Test
+    void rejectsEntityShadowingABuiltinType() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Money { id Int }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("Money"), e.getMessage());
+    }
+
+    @Test
+    void validatesTypeDeclarations() {
+        assertTrue(assertThrows(CheckException.class, () -> check("""
+                module m
+                type X = Int(0..100)
+                type X = Int(1..)
+                service S { f() -> Int  intent "x" }
+                """)).getMessage().contains("duplicate"));
+        assertTrue(assertThrows(CheckException.class, () -> check("""
+                module m
+                type X = Widget(0..100)
+                service S { f() -> Int  intent "x" }
+                """)).getMessage().contains("Widget"));
+        assertTrue(assertThrows(CheckException.class, () -> check("""
+                module m
+                type X = Text matching /[unclosed/
+                service S { f() -> Int  intent "x" }
+                """)).getMessage().contains("regular expression"));
+        assertTrue(assertThrows(CheckException.class, () -> check("""
+                module m
+                type X = Money(0..100)
+                service S { f() -> Int  intent "x" }
+                """)).getMessage().contains("Money"));
+        assertTrue(assertThrows(CheckException.class, () -> check("""
+                module m
+                type X = Int matching /a/
+                service S { f() -> Int  intent "x" }
+                """)).getMessage().contains("matching"));
+    }
+
+    @Test
+    void validatesWherePredicates() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                type PositiveMoney = Money where amount > 0
+                service S { f(p PositiveMoney) -> Money  intent "x" }
+                """));
+        assertThrows(CheckException.class, () -> check("""
+                module m
+                type Bad = Money where bogus > 0
+                service S { f() -> Int  intent "x" }
+                """));
+    }
+
+    @Test
+    void acceptsGenericListAsViewQuerySource() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Order { id Int }
+                service Orders { all() -> List<Order>  intent "all" }
+                view V {
+                  shows Orders.all() as a table of (id)
+                }
+                """));
+    }
+
+    @Test
+    void minRequiresAnIntBase() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity E { stock Int(0..100) @min(0) }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { balance Money @min(0) }
+                service S { f() -> Int  intent "x" }
+                """));
+    }
 }

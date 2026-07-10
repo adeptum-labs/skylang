@@ -144,7 +144,7 @@ class ParsingTest {
         Ast.ExprArg first = assertInstanceOf(Ast.ExprArg.class, action.args().get(0));
         assertInstanceOf(Ast.MemberExpr.class, first.value());
         Ast.AskArg second = assertInstanceOf(Ast.AskArg.class, action.args().get(1));
-        assertEquals("Int", second.type().name());
+        assertEquals("Int", assertInstanceOf(Ast.TypeRef.class, second.type()).name());
 
         assertEquals(1, view.expects().size());
         Ast.ExpectColumns cols = assertInstanceOf(Ast.ExpectColumns.class, view.expects().get(0));
@@ -156,8 +156,9 @@ class ParsingTest {
     void parsesListReturnType() {
         Ast.Module m = Parsing.parse(SHOP_VIEW, "shop.sky");
         Ast.Method all = m.services().get(0).methods().get(0);
-        assertTrue(all.returnType().list());
-        assertEquals("Product", all.returnType().name());
+        Ast.TypeRef returnType = assertInstanceOf(Ast.TypeRef.class, all.returnType());
+        assertTrue(returnType.list());
+        assertEquals("Product", returnType.name());
     }
 
     @Test
@@ -174,5 +175,186 @@ class ParsingTest {
         assertEquals("compact", style.value());
         Ast.AppearsColumnOrder order = assertInstanceOf(Ast.AppearsColumnOrder.class, view.appears().get(2));
         assertEquals(List.of("name", "stock"), order.columns());
+    }
+
+    // ----- the chapter-3 type surface -----------------------------------------
+
+    @Test
+    void parsesTypeDeclarations() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                type Slug        = Text matching /^[a-z0-9-]{1,64}$/
+                type Percentage  = Int(0..100)
+                type Quantity    = Int(1..)
+                type PositiveMoney = Money where amount > 0
+                """, "t.sky");
+
+        assertEquals(4, m.types().size());
+
+        Ast.TypeDecl slug = m.types().get(0);
+        assertEquals("Slug", slug.name());
+        assertEquals("Text", slug.base());
+        Ast.Matching matching = assertInstanceOf(Ast.Matching.class, slug.refinement());
+        assertEquals("^[a-z0-9-]{1,64}$", matching.regex());
+
+        Ast.TypeDecl percentage = m.types().get(1);
+        assertEquals("Int", percentage.base());
+        Ast.Range range = assertInstanceOf(Ast.Range.class, percentage.refinement());
+        assertEquals(0, range.lo().getAsLong());
+        assertEquals(100, range.hi().getAsLong());
+
+        Ast.Range open = assertInstanceOf(Ast.Range.class, m.types().get(2).refinement());
+        assertEquals(1, open.lo().getAsLong());
+        assertTrue(open.hi().isEmpty());
+
+        Ast.TypeDecl positive = m.types().get(3);
+        assertEquals("Money", positive.base());
+        Ast.Where where = assertInstanceOf(Ast.Where.class, positive.refinement());
+        Ast.BinExpr pred = assertInstanceOf(Ast.BinExpr.class, where.predicate());
+        assertEquals(">", pred.op());
+    }
+
+    @Test
+    void parsesRefinedGenericAndCollectionFieldTypes() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity User {
+                  name     Text(1..120)
+                  email    Email @unique
+                  password Secret<Bytes>
+                  tags     Set<Text>
+                  prices   Map<Text, Money>
+                  friend   Maybe<User>
+                }
+                """, "t.sky");
+
+        List<Ast.Field> fields = m.entities().get(0).fields();
+
+        Ast.RangedType name = assertInstanceOf(Ast.RangedType.class, fields.get(0).type());
+        assertEquals("Text", name.base());
+        assertEquals(1, name.lo().getAsLong());
+        assertEquals(120, name.hi().getAsLong());
+
+        Ast.Field email = fields.get(1);
+        assertEquals("Email", assertInstanceOf(Ast.TypeRef.class, email.type()).name());
+        assertTrue(email.unique());
+
+        Ast.GenericType password = assertInstanceOf(Ast.GenericType.class, fields.get(2).type());
+        assertEquals("Secret", password.name());
+        assertEquals("Bytes", assertInstanceOf(Ast.TypeRef.class, password.args().get(0)).name());
+
+        assertEquals("Set", assertInstanceOf(Ast.GenericType.class, fields.get(3).type()).name());
+
+        Ast.GenericType prices = assertInstanceOf(Ast.GenericType.class, fields.get(4).type());
+        assertEquals("Map", prices.name());
+        assertEquals(2, prices.args().size());
+
+        assertEquals("Maybe", assertInstanceOf(Ast.GenericType.class, fields.get(5).type()).name());
+    }
+
+    @Test
+    void parsesFieldDefaults() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Account {
+                  active    Bool    = true
+                  fee       Money   = 9.99eur
+                  note      Text    = "none"
+                  createdAt Instant = now
+                }
+                """, "t.sky");
+
+        List<Ast.Field> fields = m.entities().get(0).fields();
+        Ast.BoolLit active = assertInstanceOf(Ast.BoolLit.class, fields.get(0).defaultValue().orElseThrow());
+        assertTrue(active.value());
+        Ast.MoneyLit fee = assertInstanceOf(Ast.MoneyLit.class, fields.get(1).defaultValue().orElseThrow());
+        assertEquals("9.99", fee.amount().toPlainString());
+        assertEquals("EUR", fee.currency());
+        assertInstanceOf(Ast.StrLit.class, fields.get(2).defaultValue().orElseThrow());
+        Ast.NameExpr now = assertInstanceOf(Ast.NameExpr.class, fields.get(3).defaultValue().orElseThrow());
+        assertEquals("now", now.name());
+    }
+
+    @Test
+    void parsesGeneralizedListShorthand() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Box {
+                  labels [Text]
+                  finds  [Maybe<Box>]
+                }
+                """, "t.sky");
+
+        Ast.TypeRef labels = assertInstanceOf(Ast.TypeRef.class, m.entities().get(0).fields().get(0).type());
+        assertTrue(labels.list());
+        assertEquals("Text", labels.name());
+
+        Ast.GenericType finds = assertInstanceOf(Ast.GenericType.class, m.entities().get(0).fields().get(1).type());
+        assertEquals("List", finds.name());
+        assertEquals("Maybe", assertInstanceOf(Ast.GenericType.class, finds.args().get(0)).name());
+    }
+
+    @Test
+    void parsesMoneyAndBoolLiteralsInClauses() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                service Billing {
+                  fee(active Bool) -> Money
+                    intent   "The flat fee."
+                    requires active == true
+                    example  fee(true) -> 9.99eur
+                }
+                """, "t.sky");
+
+        Ast.Method fee = m.services().get(0).methods().get(0);
+        assertEquals("Money", assertInstanceOf(Ast.TypeRef.class, fee.returnType()).name());
+        Ast.BinExpr requires = assertInstanceOf(Ast.BinExpr.class, fee.requires().get(0));
+        assertInstanceOf(Ast.BoolLit.class, requires.right());
+        Ast.Example example = fee.examples().get(0);
+        assertInstanceOf(Ast.BoolLit.class, example.call().args().get(0));
+        Ast.ExprResult result = assertInstanceOf(Ast.ExprResult.class, example.result());
+        Ast.MoneyLit lit = assertInstanceOf(Ast.MoneyLit.class, result.value());
+        assertEquals("9.99", lit.amount().toPlainString());
+        assertEquals("EUR", lit.currency());
+    }
+
+    @Test
+    void parsesAskWithRefinedType() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Product {
+                  id Int
+                }
+                service Billing {
+                  pay(id Int, amount Money) -> Product
+                    intent "Pay."
+                }
+                view Pay at "/pay" {
+                  shows  Billing.all() as a table of (id)
+                  action "Pay" on row -> Billing.pay(row.id, ask Money)
+                }
+                """, "t.sky");
+
+        Ast.AskArg ask = assertInstanceOf(Ast.AskArg.class, m.views().get(0).actions().get(0).args().get(1));
+        assertEquals("Money", assertInstanceOf(Ast.TypeRef.class, ask.type()).name());
+    }
+
+    @Test
+    void legacyFieldToStringIsUnchanged() {
+        Ast.Field legacy = new Ast.Field("stock", new Ast.TypeRef("Int"), false, java.util.OptionalLong.of(0));
+        assertEquals("Field[name=stock, type=TypeRef[name=Int, list=false], id=false, min=OptionalLong[0]]",
+                legacy.toString());
+    }
+
+    @Test
+    void rejectsUnknownAnnotationAndMalformedTypeDecl() {
+        assertThrows(IllegalArgumentException.class, () -> Parsing.parse("""
+                module t
+                entity E { x Int @nope }
+                """, "t.sky"));
+        assertThrows(SkyParseException.class, () -> Parsing.parse("""
+                module t
+                type X = Text matching 5
+                """, "t.sky"));
     }
 }

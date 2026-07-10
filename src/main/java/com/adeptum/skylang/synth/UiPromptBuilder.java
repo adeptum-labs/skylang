@@ -25,6 +25,7 @@ import com.adeptum.skylang.backend.Lowering;
 import com.adeptum.skylang.front.ast.Ast;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -41,7 +42,8 @@ public final class UiPromptBuilder {
     /** The always-available standard-component vocabulary; profiles may widen it (PrimeFaces, OmniFaces). */
     public static final List<String> STANDARD = List.of(
             "h:form", "h:dataTable", "h:column", "h:outputText", "h:outputLabel",
-            "h:inputText", "h:commandButton", "f:facet");
+            "h:inputText", "h:commandButton", "f:facet",
+            "f:converter", "f:validateLongRange", "f:validateLength", "f:validateRegex");
 
     private static final String SYSTEM_BASE = """
             You are the UI-synthesis backend of the SkyLang compiler, targeting the
@@ -53,8 +55,12 @@ public final class UiPromptBuilder {
             - Give every component a stable, explicit id.
             - Every input and command must carry an accessible label.
             - Render only the fields named by the projection and the actions — nothing else.
+            - Never render, bind, or otherwise reach a Secret field; entities expose no getters for them.
             - Bind only to properties that exist on the backing bean.
             - Use only the components listed under "Component vocabulary".
+            - Each prompted input names its converter or validator under "Actions": nest exactly
+              that tag inside the h:inputText (e.g. <f:converter converterId="sky.money"/> for a
+              Money input, <f:converter converterId="sky.instant"/> for an Instant input).
             - To place a control in a region, wrap it in <h:panelGroup styleClass="REGION">.
             - To give a table a style (e.g. a density), set styleClass="STYLE" on the h:dataTable.
             - Render the table columns in the order requested under "Appearance".
@@ -66,11 +72,12 @@ public final class UiPromptBuilder {
 
     public String user(Ast.Module module, Ast.View view) {
         StringBuilder sb = new StringBuilder();
+        Map<String, Ast.TypeDecl> types = Lowering.typesOf(module);
 
         sb.append("// Entities in scope (their Java record shapes):\n");
         for (Ast.Entity e : module.entities()) {
             String components = e.fields().stream()
-                    .map(f -> Lowering.javaType(f.type()) + " " + f.name())
+                    .map(f -> Lowering.javaType(f.type(), types) + " " + f.name())
                     .collect(Collectors.joining(", "));
             sb.append("record ").append(e.name()).append("(").append(components).append(")\n");
         }
@@ -89,7 +96,9 @@ public final class UiPromptBuilder {
         if (!view.actions().isEmpty()) {
             sb.append("Actions:\n");
             for (Ast.Action a : view.actions()) {
-                String args = a.args().stream().map(this::renderArg).collect(Collectors.joining(", "));
+                String args = a.args().stream()
+                        .map(arg -> renderArg(arg, types))
+                        .collect(Collectors.joining(", "));
                 sb.append("  \"").append(a.label()).append("\" on a row -> ")
                         .append(a.service()).append('.').append(a.method())
                         .append('(').append(args).append(")\n");
@@ -132,11 +141,50 @@ public final class UiPromptBuilder {
         return text.substring(bodyStart + 1, end).strip();
     }
 
-    private String renderArg(Ast.ActionArg arg) {
+    private String renderArg(Ast.ActionArg arg, Map<String, Ast.TypeDecl> types) {
         return switch (arg) {
             case Ast.ExprArg ea -> exprText(ea.value());
-            case Ast.AskArg ak -> "ask " + ak.type().name();
+            case Ast.AskArg ak -> {
+                String hint = askHint(ak.type(), types);
+                yield "ask " + ak.type().sky() + (hint.isEmpty() ? "" : " (input: " + hint + ")");
+            }
         };
+    }
+
+    /** The converter or validator tag a prompted input of this type must carry. */
+    private static String askHint(Ast.Type type, Map<String, Ast.TypeDecl> types) {
+        return switch (type) {
+            case Ast.RangedType r -> rangeHint(r.base(), r.lo(), r.hi());
+            case Ast.TypeRef ref -> {
+                if (ref.list()) {
+                    yield "";
+                }
+                Ast.TypeDecl d = types.get(ref.name());
+                if (d != null) {
+                    yield switch (d.refinement()) {
+                        case Ast.Range r -> rangeHint(d.base(), r.lo(), r.hi());
+                        case Ast.Matching m -> "<f:validateRegex pattern=\"" + m.regex() + "\"/>";
+                        case Ast.Where ignored -> "";
+                    };
+                }
+                yield switch (ref.name()) {
+                    case "Money" -> "<f:converter converterId=\"sky.money\"/>";
+                    case "Instant" -> "<f:converter converterId=\"sky.instant\"/>";
+                    case "Email" -> "<f:validateRegex pattern=\""
+                            + com.adeptum.skylang.types.Builtins.EMAIL_REGEX + "\"/>";
+                    default -> "";
+                };
+            }
+            case Ast.GenericType ignored -> "";
+        };
+    }
+
+    private static String rangeHint(String base, java.util.OptionalLong lo, java.util.OptionalLong hi) {
+        String tag = base.equals("Int") ? "f:validateLongRange" : "f:validateLength";
+        StringBuilder sb = new StringBuilder("<").append(tag);
+        lo.ifPresent(b -> sb.append(" minimum=\"").append(b).append('"'));
+        hi.ifPresent(b -> sb.append(" maximum=\"").append(b).append('"'));
+        return sb.append("/>").toString();
     }
 
     private String exprText(Ast.Expr e) {
@@ -145,6 +193,8 @@ public final class UiPromptBuilder {
             case Ast.MemberExpr m -> exprText(m.target()) + "." + m.field();
             case Ast.IntLit i -> Long.toString(i.value());
             case Ast.StrLit s -> "\"" + s.value() + "\"";
+            case Ast.BoolLit b -> Boolean.toString(b.value());
+            case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
             case Ast.CallExpr c -> c.callee() + "(...)";
             case Ast.BinExpr b -> exprText(b.left()) + " " + b.op() + " " + exprText(b.right());
         };

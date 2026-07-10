@@ -36,6 +36,7 @@ import java.util.OptionalLong;
 public final class AstBuilder {
 
     public Ast.Module build(SkyLangParser.Module_Context ctx) {
+        List<Ast.TypeDecl> types = new ArrayList<>();
         List<Ast.Entity> entities = new ArrayList<>();
         List<Ast.Service> services = new ArrayList<>();
         List<Ast.View> views = new ArrayList<>();
@@ -44,11 +45,39 @@ public final class AstBuilder {
                 entities.add(entity(decl.entity()));
             } else if (decl.service() != null) {
                 services.add(service(decl.service()));
+            } else if (decl.typeDecl() != null) {
+                types.add(typeDecl(decl.typeDecl()));
             } else {
                 views.add(view(decl.view()));
             }
         }
-        return new Ast.Module(ctx.ID().getText(), entities, services, views);
+        return new Ast.Module(ctx.ID().getText(), types, entities, services, views);
+    }
+
+    // ----- named refined types -------------------------------------------------
+
+    private Ast.TypeDecl typeDecl(SkyLangParser.TypeDeclContext ctx) {
+        String name = ctx.ID().getText();
+        return switch (ctx.refinedType()) {
+            case SkyLangParser.RangeRefinementContext r ->
+                    new Ast.TypeDecl(name, r.ID().getText(), range(r.range()));
+            case SkyLangParser.RegexRefinementContext r ->
+                    new Ast.TypeDecl(name, r.ID().getText(), new Ast.Matching(regex(r.REGEX().getText())));
+            case SkyLangParser.WhereRefinementContext r ->
+                    new Ast.TypeDecl(name, r.ID().getText(), new Ast.Where(expr(r.expr())));
+            default -> throw new IllegalStateException("unhandled refinement: " + ctx.refinedType().getClass());
+        };
+    }
+
+    private static Ast.Range range(SkyLangParser.RangeContext ctx) {
+        OptionalLong lo = ctx.lo == null ? OptionalLong.empty() : OptionalLong.of(Long.parseLong(ctx.lo.getText()));
+        OptionalLong hi = ctx.hi == null ? OptionalLong.empty() : OptionalLong.of(Long.parseLong(ctx.hi.getText()));
+        return new Ast.Range(lo, hi);
+    }
+
+    /** Strip the slash delimiters from a REGEX token and resolve escaped slashes. */
+    private static String regex(String raw) {
+        return raw.substring(1, raw.length() - 1).replace("\\/", "/");
     }
 
     // ----- entities ----------------------------------------------------------
@@ -63,11 +92,13 @@ public final class AstBuilder {
 
     private Ast.Field field(SkyLangParser.FieldContext ctx) {
         boolean id = false;
+        boolean unique = false;
         OptionalLong min = OptionalLong.empty();
         for (SkyLangParser.AnnotationContext a : ctx.annotation()) {
             String name = a.ID().getText();
             switch (name) {
                 case "id" -> id = true;
+                case "unique" -> unique = true;
                 case "min" -> {
                     if (a.INT() == null) {
                         throw new IllegalArgumentException("@min requires an integer argument, e.g. @min(0)");
@@ -77,7 +108,8 @@ public final class AstBuilder {
                 default -> throw new IllegalArgumentException("unknown annotation @" + name);
             }
         }
-        return new Ast.Field(ctx.ID().getText(), type(ctx.type()), id, min);
+        Optional<Ast.Expr> defaultValue = ctx.expr() == null ? Optional.empty() : Optional.of(expr(ctx.expr()));
+        return new Ast.Field(ctx.ID().getText(), type(ctx.type()), id, min, unique, defaultValue);
     }
 
     // ----- services & methods ------------------------------------------------
@@ -119,11 +151,28 @@ public final class AstBuilder {
                 intent, requires, ensures, examples);
     }
 
-    private Ast.TypeRef type(SkyLangParser.TypeContext ctx) {
-        if (ctx instanceof SkyLangParser.ListTypeContext list) {
-            return new Ast.TypeRef(list.ID().getText(), true);
-        }
-        return new Ast.TypeRef(((SkyLangParser.NamedTypeContext) ctx).ID().getText());
+    private Ast.Type type(SkyLangParser.TypeContext ctx) {
+        return switch (ctx) {
+            case SkyLangParser.NamedTypeContext named -> new Ast.TypeRef(named.ID().getText());
+            case SkyLangParser.RangedTypeContext ranged -> {
+                Ast.Range r = range(ranged.range());
+                yield new Ast.RangedType(ranged.ID().getText(), r.lo(), r.hi());
+            }
+            case SkyLangParser.GenericTypeContext generic -> {
+                List<Ast.Type> args = new ArrayList<>();
+                for (SkyLangParser.TypeContext a : generic.type()) {
+                    args.add(type(a));
+                }
+                yield new Ast.GenericType(generic.ID().getText(), args);
+            }
+            // [E] stays a legacy list TypeRef (its string form feeds frozen spec hashes);
+            // a complex element type generalizes to List<T>.
+            case SkyLangParser.ListTypeContext list ->
+                    list.type() instanceof SkyLangParser.NamedTypeContext named
+                            ? new Ast.TypeRef(named.ID().getText(), true)
+                            : new Ast.GenericType("List", List.of(type(list.type())));
+            default -> throw new IllegalStateException("unhandled type node: " + ctx.getClass().getSimpleName());
+        };
     }
 
     // ----- views -------------------------------------------------------------
@@ -265,12 +314,22 @@ public final class AstBuilder {
             case SkyLangParser.LogicExprContext c -> new Ast.BinExpr(c.op.getText(), expr(c.expr(0)), expr(c.expr(1)));
             case SkyLangParser.IntLitContext c -> new Ast.IntLit(Long.parseLong(c.INT().getText()));
             case SkyLangParser.StrLitContext c -> new Ast.StrLit(unquote(c.STRING().getText()));
+            case SkyLangParser.MoneyLitContext c -> moneyLit(c.MONEY().getText());
+            case SkyLangParser.TrueLitContext ignored -> new Ast.BoolLit(true);
+            case SkyLangParser.FalseLitContext ignored -> new Ast.BoolLit(false);
             case SkyLangParser.NameExprContext c -> new Ast.NameExpr(c.ID().getText());
             default -> throw new IllegalStateException("unhandled expr node: " + ctx.getClass().getSimpleName());
         };
     }
 
     // ----- helpers -----------------------------------------------------------
+
+    /** Split a MONEY token like {@code 9.99eur} into its exact amount and upper-cased currency. */
+    private static Ast.MoneyLit moneyLit(String raw) {
+        String amount = raw.substring(0, raw.length() - 3);
+        String currency = raw.substring(raw.length() - 3).toUpperCase(java.util.Locale.ROOT);
+        return new Ast.MoneyLit(new java.math.BigDecimal(amount), currency);
+    }
 
     /** Strip the surrounding double quotes from a STRING token and resolve simple escapes. */
     private static String unquote(String raw) {

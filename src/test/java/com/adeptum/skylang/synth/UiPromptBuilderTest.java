@@ -105,4 +105,46 @@ class UiPromptBuilderTest {
         String system = prompts.system(UiPromptBuilder.STANDARD);
         assertTrue(system.contains("styleClass"));
     }
+
+    // ----- the chapter-3 type surface -----------------------------------------
+
+    private static final String PAY_SRC = """
+            module shop
+            type Quantity = Int(1..)
+            entity Order { id Int  total Money }
+            service Orders {
+              all() -> [Order]  intent "all"
+              pay(id Int, amount Money, units Quantity, contact Email, when Instant) -> Order  intent "pay"
+            }
+            view Pay at "/pay" {
+              shows  Orders.all() as a table of (id)
+              action "Pay" on row -> Orders.pay(row.id, ask Money, ask Quantity, ask Email, ask Instant)
+            }
+            """;
+
+    @Test
+    void userPromptDerivesConvertersAndValidatorsFromAskTypes() {
+        Ast.Module m = Parsing.parse(PAY_SRC, "shop.sky");
+        String user = prompts.user(m, m.views().get(0));
+        assertTrue(user.contains("sky.money"), "a Money input needs the staged Money converter");
+        assertTrue(user.contains("sky.instant"), "an Instant input needs the staged Instant converter");
+        assertTrue(user.contains("f:validateLongRange") && user.contains("minimum=\"1\""),
+                "a ranged Int input derives its range validator");
+        assertTrue(user.contains("f:validateRegex"), "an Email input derives its shape validator");
+    }
+
+    @Test
+    void systemPromptCarriesConverterAndSecretRules() {
+        String system = prompts.system(UiPromptBuilder.STANDARD);
+        assertTrue(system.contains("f:converter"), "the converter tag must be in the vocabulary rules");
+        assertTrue(system.contains("Secret"), "the Secret exclusion rule must be stated");
+    }
+
+    @Test
+    void standardVocabularyCoversConvertersAndValidators() {
+        assertTrue(UiPromptBuilder.STANDARD.contains("f:converter"));
+        assertTrue(UiPromptBuilder.STANDARD.contains("f:validateLongRange"));
+        assertTrue(UiPromptBuilder.STANDARD.contains("f:validateLength"));
+        assertTrue(UiPromptBuilder.STANDARD.contains("f:validateRegex"));
+    }
 }

@@ -21,44 +21,92 @@
 
 package com.adeptum.skylang.types;
 
+import com.adeptum.skylang.front.ast.Ast;
+
+import java.util.List;
+import java.util.OptionalLong;
+import java.util.stream.Collectors;
+
 /**
- * A resolved SkyLang type in the thin slice: the primitives {@code Int}/{@code Text},
- * the contract-only {@code Bool}, an entity type carrying its name, or a {@code list} of one
- * of those (e.g. {@code [Product]}). Identity is by ({@code name}, {@code list}).
+ * A resolved SkyLang type: a primitive, an entity, a declared refined type (nominal),
+ * an inline range refinement (structural), or a parameterised container. Refined types
+ * erase to their base for operator typing and lowering; their predicates are enforced
+ * at construction points.
  */
-public record Ty(String name, boolean list) {
+public sealed interface Ty permits Ty.Prim, Ty.EntityTy, Ty.NamedTy, Ty.AnonRefined, Ty.GenericTy {
 
-    public static final Ty INT = new Ty("Int", false);
-    public static final Ty TEXT = new Ty("Text", false);
-    public static final Ty BOOL = new Ty("Bool", false);
+    Prim INT = new Prim("Int");
+    Prim TEXT = new Prim("Text");
+    Prim BOOL = new Prim("Bool");
+    Prim MONEY = new Prim("Money");
+    Prim INSTANT = new Prim("Instant");
+    Prim BYTES = new Prim("Bytes");
 
-    public Ty(String name) {
-        this(name, false);
+    record Prim(String name) implements Ty {
+        @Override
+        public String toString() {
+            return name;
+        }
     }
 
-    public static Ty entity(String name) {
-        return new Ty(name, false);
+    record EntityTy(String name) implements Ty {
+        @Override
+        public String toString() {
+            return name;
+        }
     }
 
-    /** A list whose element type has the given name, e.g. {@code list("Product")} is {@code [Product]}. */
-    public static Ty list(String element) {
-        return new Ty(element, true);
+    /** A declared refined type ({@code type Slug = ...}): nominal — two names never mix. */
+    record NamedTy(String name, Prim base, Ast.Refinement refinement) implements Ty {
+        @Override
+        public String toString() {
+            return name;
+        }
     }
 
-    public boolean isInt() {
-        return this.equals(INT);
+    /** An inline refinement like {@code Int(0..100)}: structural — identity is base plus bounds. */
+    record AnonRefined(Prim base, OptionalLong lo, OptionalLong hi) implements Ty {
+        @Override
+        public String toString() {
+            return base.name() + "(" + (lo.isPresent() ? lo.getAsLong() : "") + ".."
+                    + (hi.isPresent() ? hi.getAsLong() : "") + ")";
+        }
     }
 
-    public boolean isText() {
-        return this.equals(TEXT);
+    /** {@code List<T>}, {@code Set<T>}, {@code Map<K,V>}, {@code Maybe<T>}, {@code Secret<T>}. */
+    record GenericTy(String kind, List<Ty> args) implements Ty {
+        @Override
+        public String toString() {
+            return kind + "<" + args.stream().map(Ty::toString).collect(Collectors.joining(", ")) + ">";
+        }
     }
 
-    public boolean isBool() {
-        return this.equals(BOOL);
+    static Ty entity(String name) {
+        return new EntityTy(name);
     }
 
-    @Override
-    public String toString() {
-        return list ? "[" + name + "]" : name;
+    static Ty list(Ty element) {
+        return new GenericTy("List", List.of(element));
+    }
+
+    /** The representation type operators and lowering see: refinements strip to their base. */
+    default Ty erased() {
+        return switch (this) {
+            case NamedTy n -> n.base();
+            case AnonRefined a -> a.base();
+            default -> this;
+        };
+    }
+
+    default boolean isInt() {
+        return erased().equals(INT);
+    }
+
+    default boolean isBool() {
+        return erased().equals(BOOL);
+    }
+
+    default boolean isSecret() {
+        return this instanceof GenericTy g && g.kind().equals("Secret");
     }
 }

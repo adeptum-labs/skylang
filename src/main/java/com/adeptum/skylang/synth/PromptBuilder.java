@@ -39,8 +39,20 @@ public final class PromptBuilder {
             Rules:
             - Output ONLY the Java statements that go inside the method body — no signature, no class,
               no markdown fences, no commentary.
-            - Assume Int lowers to long, Text to String, and each entity to a Java record whose
+            - Type lowering: Int -> long, Text -> String, Bool -> boolean, Email -> String,
+              Instant -> java.time.Instant, Maybe<T> -> java.util.Optional<T>,
+              List/Set/Map -> java.util.List/Set/Map, and each entity to a Java record whose
               components are its fields in declaration order (accessed via component methods, e.g. p.stock()).
+            - Money is a class in the same package: Money.of("9.99", "EUR"), a.plus(b), a.minus(b),
+              a.times(3L), a.amount(), a.currency(), and it is Comparable. Currencies must match;
+              never multiply Money by Money and never convert Money to a floating-point number.
+            - Bytes is a class in the same package: Bytes.of(byte[]), Bytes.ofUtf8("..."),
+              b.toByteArray(), b.size().
+            - Secret<T> wraps a value that must never be logged, printed, rendered, or serialized;
+              its toString() is masked. Call reveal() only when the contract needs the raw value,
+              and never pass the revealed value anywhere it could be recorded.
+            - Declared refined types erase to their base type in Java; their predicates are already
+              enforced by guards before the body runs, so assume every parameter satisfies its type.
             - Records are immutable: to "change" a field, construct a new record value.
             - The body must satisfy every `requires`, `ensures`, and `example`.
             """;
@@ -51,20 +63,29 @@ public final class PromptBuilder {
 
     public String user(Ast.Module module, Ast.Service service, Ast.Method method) {
         StringBuilder sb = new StringBuilder();
+        var types = Lowering.typesOf(module);
+
+        if (!module.types().isEmpty()) {
+            sb.append("// Declared refined types (predicates enforced at construction; erased in Java):\n");
+            for (Ast.TypeDecl d : module.types()) {
+                sb.append(skyTypeDecl(d)).append('\n');
+            }
+            sb.append('\n');
+        }
 
         sb.append("// Entities in scope (their Java record shapes):\n");
         for (Ast.Entity e : module.entities()) {
             String components = e.fields().stream()
-                    .map(f -> Lowering.javaType(f.type()) + " " + f.name())
+                    .map(f -> Lowering.javaType(f.type(), types) + " " + f.name())
                     .collect(Collectors.joining(", "));
             sb.append("record ").append(e.name()).append("(").append(components).append(")\n");
         }
 
         sb.append("\n// Method to implement (Java signature):\n");
         String params = method.params().stream()
-                .map(p -> Lowering.javaType(p.type()) + " " + p.name())
+                .map(p -> Lowering.javaType(p.type(), types) + " " + p.name())
                 .collect(Collectors.joining(", "));
-        sb.append("public ").append(Lowering.javaType(method.returnType())).append(' ')
+        sb.append("public ").append(Lowering.javaType(method.returnType(), types)).append(' ')
                 .append(method.name()).append('(').append(params).append(")\n\n");
 
         method.intent().ifPresent(intent -> sb.append("Intent: ").append(intent).append("\n\n"));
@@ -117,10 +138,22 @@ public final class PromptBuilder {
         };
     }
 
+    private String skyTypeDecl(Ast.TypeDecl d) {
+        String refinement = switch (d.refinement()) {
+            case Ast.Range r -> d.base() + "(" + (r.lo().isPresent() ? r.lo().getAsLong() : "")
+                    + ".." + (r.hi().isPresent() ? r.hi().getAsLong() : "") + ")";
+            case Ast.Matching m -> d.base() + " matching /" + m.regex() + "/";
+            case Ast.Where w -> d.base() + " where " + sky(w.predicate());
+        };
+        return "type " + d.name() + " = " + refinement;
+    }
+
     private String sky(Ast.Expr expr) {
         return switch (expr) {
             case Ast.IntLit i -> Long.toString(i.value());
             case Ast.StrLit s -> "\"" + s.value() + "\"";
+            case Ast.BoolLit b -> Boolean.toString(b.value());
+            case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
             case Ast.NameExpr n -> n.name();
             case Ast.MemberExpr m -> sky(m.target()) + "." + m.field();
             case Ast.CallExpr c -> c.callee() + "("

@@ -101,6 +101,11 @@ public final class FacesViewStager {
                 }
             }
 
+            for (String converter : convertersNeeded(module)) {
+                String source = converter.equals("Money") ? MONEY_CONVERTER : INSTANT_CONVERTER;
+                Files.writeString(java.resolve(converter + "Converter.java"), source.formatted(pkg));
+            }
+
             Path test = buildDir.resolve("src/test/java").resolve(pkg);
             Files.createDirectories(test);
             Files.writeString(test.resolve("ViewHarness.java"), VIEW_HARNESS.formatted(pkg));
@@ -153,12 +158,63 @@ public final class FacesViewStager {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    /** Which prompted input types need a staged Faces converter: Money and/or Instant. */
+    private static java.util.Set<String> convertersNeeded(Ast.Module module) {
+        Map<String, Ast.TypeDecl> types = Lowering.typesOf(module);
+        java.util.Set<String> needed = new java.util.LinkedHashSet<>();
+        for (Ast.View v : module.views()) {
+            for (Ast.Action a : v.actions()) {
+                for (Ast.ActionArg arg : a.args()) {
+                    if (arg instanceof Ast.AskArg ask) {
+                        String erased = erasedName(ask.type(), types);
+                        if (erased.equals("Money") || erased.equals("Instant")) {
+                            needed.add(erased);
+                        }
+                    }
+                }
+            }
+        }
+        return needed;
+    }
+
+    /** The base type name a prompted type erases to, resolving declared refined types. */
+    private static String erasedName(Ast.Type type, Map<String, Ast.TypeDecl> types) {
+        return switch (type) {
+            case Ast.TypeRef ref -> {
+                Ast.TypeDecl d = types.get(ref.name());
+                yield d != null ? d.base() : ref.name();
+            }
+            case Ast.RangedType r -> r.base();
+            case Ast.GenericType g -> g.name();
+        };
+    }
+
+    /** A form value that satisfies the prompted type, for driving inputs in the interaction lane. */
+    private static String sample(Ast.Type type, Map<String, Ast.TypeDecl> types) {
+        if (type instanceof Ast.RangedType r && r.base().equals("Int") && r.lo().isPresent()) {
+            return Long.toString(Math.max(r.lo().getAsLong(), 1));
+        }
+        if (type instanceof Ast.TypeRef ref && types.get(ref.name()) != null
+                && types.get(ref.name()).refinement() instanceof Ast.Range range
+                && types.get(ref.name()).base().equals("Int") && range.lo().isPresent()) {
+            return Long.toString(Math.max(range.lo().getAsLong(), 1));
+        }
+        return switch (erasedName(type, types)) {
+            case "Money" -> "9.99 EUR";
+            case "Instant" -> "2026-01-01T00:00:00Z";
+            case "Email" -> "a@example.com";
+            case "Text" -> "sample";
+            default -> "1";
+        };
+    }
+
     /**
      * Generate the interaction lane: each view is driven in a real (headless) browser — it must render
      * a table, and its first action, when clicked, must not error the JSF postback. Opt-in via SKY_UI,
      * so it stays out of the default build.
      */
     private static String interactionTest(String pkg, Ast.Module module) {
+        Map<String, Ast.TypeDecl> types = Lowering.typesOf(module);
         StringBuilder methods = new StringBuilder();
         for (Ast.View view : module.views()) {
             String lower = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1);
@@ -174,8 +230,13 @@ public final class FacesViewStager {
                     .append(view.name()).append(".xhtml\");\n");
             methods.append("                assertNotNull(driver.findElement(By.tagName(\"table\")), \"view ")
                     .append(view.name()).append(" should render a table in a real browser\");\n");
-            methods.append("                for (WebElement input : driver.findElements(By.cssSelector(\"input[type='text']\"))) {\n");
-            methods.append("                    input.sendKeys(\"1\");\n                }\n");
+            // Text inputs are the clicked action's prompted arguments, in order; each gets a
+            // value that satisfies its declared type so converters and validators accept it.
+            methods.append("                String[] samples = {").append(askSamples(view, types)).append("};\n");
+            methods.append("                java.util.List<WebElement> inputs = driver.findElements(By.cssSelector(\"input[type='text']\"));\n");
+            methods.append("                for (int i = 0; i < inputs.size(); i++) {\n");
+            methods.append("                    inputs.get(i).sendKeys(i < samples.length ? samples[i] : \"1\");\n");
+            methods.append("                }\n");
             if (!view.actions().isEmpty()) {
                 String label = escape(view.actions().get(0).label());
                 methods.append("                driver.findElement(By.xpath(\"(//input[@value='").append(label)
@@ -449,6 +510,90 @@ public final class FacesViewStager {
                         assertEquals(200, response.statusCode(), () -> "render failed:\\n" + response.body());
                         return response.body();
                     }
+                }
+            }
+            """;
+
+    /** The sample values for a view's first action's prompted arguments, as a Java array body. */
+    private static String askSamples(Ast.View view, Map<String, Ast.TypeDecl> types) {
+        if (view.actions().isEmpty()) {
+            return "";
+        }
+        return view.actions().get(0).args().stream()
+                .filter(Ast.AskArg.class::isInstance)
+                .map(a -> "\"" + escape(sample(((Ast.AskArg) a).type(), types)) + "\"")
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
+    private static final String MONEY_CONVERTER = """
+            package %s;
+
+            import jakarta.faces.component.UIComponent;
+            import jakarta.faces.context.FacesContext;
+            import jakarta.faces.convert.Converter;
+            import jakarta.faces.convert.ConverterException;
+            import jakarta.faces.convert.FacesConverter;
+
+            /** Converts between "9.99 EUR" form input and the staged Money type. */
+            @FacesConverter("sky.money")
+            public class MoneyConverter implements Converter<Money> {
+
+                @Override
+                public Money getAsObject(FacesContext context, UIComponent component, String value) {
+                    if (value == null || value.isBlank()) {
+                        return null;
+                    }
+                    String text = value.strip();
+                    if (text.length() < 4) {
+                        throw new ConverterException("expected an amount with a currency, e.g. 9.99 EUR");
+                    }
+                    String amount = text.substring(0, text.length() - 3).strip();
+                    String currency = text.substring(text.length() - 3).toUpperCase(java.util.Locale.ROOT);
+                    try {
+                        return Money.of(amount, currency);
+                    } catch (RuntimeException e) {
+                        throw new ConverterException("expected an amount with a currency, e.g. 9.99 EUR", e);
+                    }
+                }
+
+                @Override
+                public String getAsString(FacesContext context, UIComponent component, Money value) {
+                    return value == null ? "" : value.amount().toPlainString() + " " + value.currency().getCurrencyCode();
+                }
+            }
+            """;
+
+    private static final String INSTANT_CONVERTER = """
+            package %s;
+
+            import jakarta.faces.component.UIComponent;
+            import jakarta.faces.context.FacesContext;
+            import jakarta.faces.convert.Converter;
+            import jakarta.faces.convert.ConverterException;
+            import jakarta.faces.convert.FacesConverter;
+
+            import java.time.Instant;
+            import java.time.format.DateTimeParseException;
+
+            /** Converts between ISO-8601 form input (2026-01-01T00:00:00Z) and java.time.Instant. */
+            @FacesConverter("sky.instant")
+            public class InstantConverter implements Converter<Instant> {
+
+                @Override
+                public Instant getAsObject(FacesContext context, UIComponent component, String value) {
+                    if (value == null || value.isBlank()) {
+                        return null;
+                    }
+                    try {
+                        return Instant.parse(value.strip());
+                    } catch (DateTimeParseException e) {
+                        throw new ConverterException("expected an ISO-8601 instant, e.g. 2026-01-01T00:00:00Z", e);
+                    }
+                }
+
+                @Override
+                public String getAsString(FacesContext context, UIComponent component, Instant value) {
+                    return value == null ? "" : value.toString();
                 }
             }
             """;

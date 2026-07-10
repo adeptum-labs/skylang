@@ -23,45 +23,39 @@ package com.adeptum.skylang.types;
 
 import com.adeptum.skylang.front.ast.Ast;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * The hard-layer checker: it validates types, contracts, and examples deterministically,
  * with no model involvement. {@code sky check} runs exactly this. Fails fast on the first
  * problem with a human-readable message.
+ *
+ * <p>Refined types erase to their base for operators; a refined value flows freely to its
+ * base (widening) while the reverse needs a literal the checker can prove fits. Declared
+ * type names are nominal: two named types never mix even over the same base.
  */
 public final class TypeChecker {
 
     /** entity name -> (field name -> type), in declaration order. */
     private final Map<String, LinkedHashMap<String, Ty>> entities = new HashMap<>();
 
-    public void check(Ast.Module module) {
-        // Pass 1: register entities and validate their fields.
-        for (Ast.Entity e : module.entities()) {
-            if (entities.containsKey(e.name())) {
-                throw new CheckException("duplicate entity '" + e.name() + "'");
-            }
-            entities.put(e.name(), new LinkedHashMap<>());
-        }
-        for (Ast.Entity e : module.entities()) {
-            LinkedHashMap<String, Ty> fields = entities.get(e.name());
-            for (Ast.Field f : e.fields()) {
-                Ty ty = resolveType(f.type(), "field '" + e.name() + "." + f.name() + "'");
-                if (f.min().isPresent() && !ty.isInt()) {
-                    throw new CheckException("@min is only valid on Int fields, but "
-                            + e.name() + "." + f.name() + " is " + ty);
-                }
-                if (fields.put(f.name(), ty) != null) {
-                    throw new CheckException("duplicate field '" + e.name() + "." + f.name() + "'");
-                }
-            }
-        }
+    /** declared refined types ({@code type Slug = ...}), in declaration order. */
+    private final Map<String, Ty.NamedTy> typeDecls = new LinkedHashMap<>();
 
-        // Pass 2: check every method and index its signature for view resolution.
+    public void check(Ast.Module module) {
+        registerTypeDecls(module);
+        registerEntities(module);
+
+        // Check every method and index its signature for view resolution.
         Map<String, Map<String, MethodSig>> services = new HashMap<>();
         for (Ast.Service s : module.services()) {
             Map<String, MethodSig> methods = services.computeIfAbsent(s.name(), k -> new HashMap<>());
@@ -71,10 +65,126 @@ public final class TypeChecker {
             }
         }
 
-        // Pass 3: check every view against the entities and the service signatures.
+        // Check every view against the entities and the service signatures.
         for (Ast.View v : module.views()) {
             checkView(v, services);
         }
+    }
+
+    // ----- declared types ------------------------------------------------------
+
+    private void registerTypeDecls(Ast.Module module) {
+        for (Ast.TypeDecl d : module.types()) {
+            String where = "type '" + d.name() + "'";
+            if (Builtins.isReserved(d.name())) {
+                throw new CheckException(where + " shadows the built-in type " + d.name());
+            }
+            if (typeDecls.containsKey(d.name())) {
+                throw new CheckException("duplicate type '" + d.name() + "'");
+            }
+            Ty.Prim base = Builtins.prim(d.base())
+                    .orElseThrow(() -> new CheckException(where + ": unknown base type '" + d.base() + "'"));
+            switch (d.refinement()) {
+                case Ast.Range r -> {
+                    requireRangeBase(base, d.base(), where);
+                    validateRange(r.lo(), r.hi(), where);
+                }
+                case Ast.Matching m -> {
+                    if (!base.equals(Ty.TEXT)) {
+                        throw new CheckException(where + ": matching needs a Text base, not " + d.base());
+                    }
+                    compileRegex(m.regex(), where);
+                }
+                case Ast.Where w -> {
+                    Ty t = infer(w.predicate(), whereEnv(base, where), where + " where");
+                    if (!t.isBool()) {
+                        throw new CheckException(where + ": the where predicate must be boolean, got " + t);
+                    }
+                }
+            }
+            typeDecls.put(d.name(), new Ty.NamedTy(d.name(), base, d.refinement()));
+        }
+    }
+
+    /** The names a {@code where} predicate may mention: the value itself, or Money's parts. */
+    private static Map<String, Ty> whereEnv(Ty.Prim base, String where) {
+        if (base.equals(Ty.MONEY)) {
+            return Map.of("amount", Ty.INT);
+        }
+        if (base.equals(Ty.INT) || base.equals(Ty.TEXT)) {
+            return Map.of("value", base);
+        }
+        throw new CheckException(where + ": a where refinement is not supported on " + base);
+    }
+
+    private static void requireRangeBase(Ty.Prim base, String baseName, String where) {
+        if (!base.equals(Ty.INT) && !base.equals(Ty.TEXT)) {
+            throw new CheckException(where + ": a range refinement needs an Int or Text base, not " + baseName);
+        }
+    }
+
+    private static void validateRange(OptionalLong lo, OptionalLong hi, String where) {
+        if (lo.isEmpty() && hi.isEmpty()) {
+            throw new CheckException(where + ": a range needs at least one bound");
+        }
+        if (lo.isPresent() && hi.isPresent() && lo.getAsLong() > hi.getAsLong()) {
+            throw new CheckException(where + ": range lower bound exceeds the upper bound");
+        }
+    }
+
+    private static Pattern compileRegex(String regex, String where) {
+        try {
+            return Pattern.compile(regex);
+        } catch (PatternSyntaxException e) {
+            throw new CheckException(where + ": invalid regular expression: " + e.getMessage());
+        }
+    }
+
+    // ----- entities ------------------------------------------------------------
+
+    private void registerEntities(Ast.Module module) {
+        for (Ast.Entity e : module.entities()) {
+            if (Builtins.isReserved(e.name())) {
+                throw new CheckException("entity '" + e.name() + "' shadows the built-in type " + e.name());
+            }
+            if (typeDecls.containsKey(e.name())) {
+                throw new CheckException("entity '" + e.name() + "' collides with the type of the same name");
+            }
+            if (entities.containsKey(e.name())) {
+                throw new CheckException("duplicate entity '" + e.name() + "'");
+            }
+            entities.put(e.name(), new LinkedHashMap<>());
+        }
+        for (Ast.Entity e : module.entities()) {
+            LinkedHashMap<String, Ty> fields = entities.get(e.name());
+            for (Ast.Field f : e.fields()) {
+                String where = "field '" + e.name() + "." + f.name() + "'";
+                Ty ty = resolveType(f.type(), where);
+                if (f.min().isPresent() && !ty.isInt()) {
+                    throw new CheckException("@min is only valid on Int fields, but "
+                            + e.name() + "." + f.name() + " is " + ty);
+                }
+                if (f.unique() && ty instanceof Ty.GenericTy) {
+                    throw new CheckException("@unique is not valid on " + ty + " fields ("
+                            + e.name() + "." + f.name() + ")");
+                }
+                f.defaultValue().ifPresent(v -> checkDefault(where, v, ty));
+                if (fields.put(f.name(), ty) != null) {
+                    throw new CheckException("duplicate field '" + e.name() + "." + f.name() + "'");
+                }
+            }
+        }
+    }
+
+    private void checkDefault(String where, Ast.Expr value, Ty fieldTy) {
+        if (value instanceof Ast.NameExpr n && n.name().equals("now")) {
+            throw new CheckException(where + ": '= now' requires the clock effect, which is not yet implemented");
+        }
+        if (!isLiteral(value)) {
+            throw new CheckException(where + ": only literal defaults are supported");
+        }
+        Ty vt = infer(value, Map.of(), where + " default");
+        fits(where + " default", value, vt, fieldTy);
     }
 
     // ----- views -------------------------------------------------------------
@@ -104,23 +214,21 @@ public final class TypeChecker {
         checkArgCount(where + " shows", q.service() + "." + q.method(), q.args().size(), querySig.params().size());
         for (int i = 0; i < q.args().size(); i++) {
             Ty actual = infer(q.args().get(i), Map.of(), where + " shows argument " + (i + 1));
-            if (!actual.equals(querySig.params().get(i))) {
-                throw new CheckException(where + " shows argument " + (i + 1) + " is " + actual
-                        + " but " + q.service() + "." + q.method() + " expects " + querySig.params().get(i));
-            }
+            fits(where + " shows argument " + (i + 1), q.args().get(i), actual, querySig.params().get(i));
         }
-        Ty ret = querySig.returnType();
-        if (!ret.list() || !entities.containsKey(ret.name())) {
+        if (!(querySig.returnType() instanceof Ty.GenericTy list && list.kind().equals("List")
+                && list.args().get(0) instanceof Ty.EntityTy row)) {
             throw new CheckException(where + " shows: " + q.service() + "." + q.method()
-                    + " must return a list of an entity (e.g. [Product]) to drive a view, but returns " + ret);
+                    + " must return a list of an entity (e.g. [Product]) to drive a view, but returns "
+                    + querySig.returnType());
         }
-        String rowType = ret.name();
+        String rowType = row.name();
         LinkedHashMap<String, Ty> rowFields = entities.get(rowType);
 
-        // Projected columns must be fields of the row entity.
+        // Projected columns must be renderable fields of the row entity.
         if (v.shows().projection().isPresent()) {
             for (String col : v.shows().projection().get().columns()) {
-                requireField(where + " shows", rowType, rowFields, col);
+                requireRenderableField(where + " shows", rowType, rowFields, col);
             }
         }
 
@@ -131,14 +239,12 @@ public final class TypeChecker {
             checkArgCount(actionWhere, a.service() + "." + a.method(), a.args().size(), sig.params().size());
             Map<String, Ty> env = Map.of(a.rowVar(), Ty.entity(rowType));
             for (int i = 0; i < a.args().size(); i++) {
+                String argWhere = actionWhere + " argument " + (i + 1);
                 Ty expected = sig.params().get(i);
-                Ty actual = switch (a.args().get(i)) {
-                    case Ast.ExprArg ea -> infer(ea.value(), env, actionWhere + " argument " + (i + 1));
-                    case Ast.AskArg ak -> resolveType(ak.type(), actionWhere + " argument " + (i + 1));
-                };
-                if (!actual.equals(expected)) {
-                    throw new CheckException(actionWhere + " argument " + (i + 1) + " is " + actual
-                            + " but " + a.service() + "." + a.method() + " expects " + expected);
+                switch (a.args().get(i)) {
+                    case Ast.ExprArg ea ->
+                            fits(argWhere, ea.value(), infer(ea.value(), env, argWhere), expected);
+                    case Ast.AskArg ak -> fits(argWhere, null, resolveAskType(ak.type(), argWhere), expected);
                 }
             }
         }
@@ -148,7 +254,7 @@ public final class TypeChecker {
             switch (e) {
                 case Ast.ExpectColumns ec -> {
                     for (String col : ec.columns()) {
-                        requireField(where + " expect", rowType, rowFields, col);
+                        requireRenderableField(where + " expect", rowType, rowFields, col);
                     }
                 }
                 case Ast.ExpectActionKind ak -> {
@@ -177,11 +283,21 @@ public final class TypeChecker {
                 }
                 case Ast.AppearsColumnOrder co -> {
                     for (String col : co.columns()) {
-                        requireField(where + " appears", rowType, rowFields, col);
+                        requireRenderableField(where + " appears", rowType, rowFields, col);
                     }
                 }
             }
         }
+    }
+
+    /** The types a view may prompt the user for: text- or number-shaped values with converters. */
+    private Ty resolveAskType(Ast.Type type, String where) {
+        Ty t = resolveType(type, where);
+        Ty e = t.erased();
+        if (!e.equals(Ty.INT) && !e.equals(Ty.TEXT) && !e.equals(Ty.MONEY) && !e.equals(Ty.INSTANT)) {
+            throw new CheckException(where + ": cannot prompt for " + t);
+        }
+        return t;
     }
 
     private MethodSig lookup(Map<String, Map<String, MethodSig>> services, String service, String method, String where) {
@@ -202,9 +318,13 @@ public final class TypeChecker {
         }
     }
 
-    private static void requireField(String where, String entity, Map<String, Ty> fields, String field) {
-        if (!fields.containsKey(field)) {
+    private static void requireRenderableField(String where, String entity, Map<String, Ty> fields, String field) {
+        Ty ty = fields.get(field);
+        if (ty == null) {
             throw new CheckException(where + ": '" + field + "' is not a field of " + entity);
+        }
+        if (ty.isSecret()) {
+            throw new CheckException(where + ": Secret field '" + field + "' cannot be rendered");
         }
     }
 
@@ -261,23 +381,20 @@ public final class TypeChecker {
         }
         List<Ty> paramTypes = List.copyOf(params.values());
         for (int i = 0; i < args.size(); i++) {
-            Ty argTy = infer(args.get(i), Map.of(), where + " example argument " + (i + 1));
-            if (!argTy.equals(paramTypes.get(i))) {
-                throw new CheckException(where + " example argument " + (i + 1) + " is " + argTy
-                        + " but parameter '" + m.params().get(i).name() + "' is " + paramTypes.get(i));
-            }
+            String argWhere = where + " example argument " + (i + 1);
+            Ty argTy = infer(args.get(i), Map.of(), argWhere);
+            fits(argWhere, args.get(i), argTy, paramTypes.get(i));
         }
 
         switch (ex.result()) {
             case Ast.ExprResult er -> {
-                Ty rt = infer(er.value(), Map.of(), where + " example result");
-                if (!rt.equals(returnType)) {
-                    throw new CheckException(where + " example result is " + rt
-                            + " but the method returns " + returnType);
-                }
+                String resultWhere = where + " example result";
+                Ty rt = infer(er.value(), Map.of(), resultWhere);
+                fits(resultWhere, er.value(), rt, returnType);
             }
             case Ast.EntityResult ent -> {
-                if (!ent.typeName().equals(returnType.name()) || !entities.containsKey(ent.typeName())) {
+                if (!(returnType instanceof Ty.EntityTy et) || !ent.typeName().equals(et.name())
+                        || !entities.containsKey(ent.typeName())) {
                     throw new CheckException(where + " example expects a " + ent.typeName()
                             + " but the method returns " + returnType);
                 }
@@ -288,11 +405,9 @@ public final class TypeChecker {
                         throw new CheckException(where + " example refers to unknown field '"
                                 + ent.typeName() + "." + fe.field() + "'");
                     }
-                    Ty valTy = infer(fe.expected(), Map.of(), where + " example field '" + fe.field() + "'");
-                    if (!valTy.equals(fieldTy)) {
-                        throw new CheckException(where + " example field '" + fe.field() + "' expects "
-                                + fieldTy + " but got " + valTy);
-                    }
+                    String feWhere = where + " example field '" + fe.field() + "'";
+                    Ty valTy = infer(fe.expected(), Map.of(), feWhere);
+                    fits(feWhere, fe.expected(), valTy, fieldTy);
                 }
             }
         }
@@ -304,20 +419,25 @@ public final class TypeChecker {
         return switch (expr) {
             case Ast.IntLit ignored -> Ty.INT;
             case Ast.StrLit ignored -> Ty.TEXT;
+            case Ast.BoolLit ignored -> Ty.BOOL;
+            case Ast.MoneyLit ignored -> Ty.MONEY;
             case Ast.NameExpr n -> {
                 Ty t = env.get(n.name());
                 if (t == null) {
+                    if (n.name().equals("now")) {
+                        throw new CheckException(where
+                                + ": 'now' requires the clock effect, which is not yet implemented");
+                    }
                     throw new CheckException(where + ": unknown name '" + n.name() + "'");
                 }
                 yield t;
             }
             case Ast.MemberExpr me -> {
                 Ty target = infer(me.target(), env, where);
-                LinkedHashMap<String, Ty> fields = entities.get(target.name());
-                if (fields == null) {
+                if (!(target instanceof Ty.EntityTy et)) {
                     throw new CheckException(where + ": cannot read field '" + me.field() + "' of non-entity " + target);
                 }
-                Ty ft = fields.get(me.field());
+                Ty ft = entities.get(et.name()).get(me.field());
                 if (ft == null) {
                     throw new CheckException(where + ": " + target + " has no field '" + me.field() + "'");
                 }
@@ -341,11 +461,9 @@ public final class TypeChecker {
                     + " field(s) but got " + ce.args().size());
         }
         for (int i = 0; i < ce.args().size(); i++) {
-            Ty at = infer(ce.args().get(i), env, where);
-            if (!at.equals(fieldTypes.get(i))) {
-                throw new CheckException(where + ": " + ce.callee() + " field " + (i + 1)
-                        + " expects " + fieldTypes.get(i) + " but got " + at);
-            }
+            String argWhere = where + ": " + ce.callee() + " field " + (i + 1);
+            Ty at = infer(ce.args().get(i), env, argWhere);
+            fits(argWhere, ce.args().get(i), at, fieldTypes.get(i));
         }
         return Ty.entity(ce.callee());
     }
@@ -353,55 +471,246 @@ public final class TypeChecker {
     private Ty inferBinary(Ast.BinExpr be, Map<String, Ty> env, String where) {
         Ty l = infer(be.left(), env, where);
         Ty r = infer(be.right(), env, where);
+        // Declared type names are nominal: Percentage and Quantity never mix, even over Int.
+        if (l instanceof Ty.NamedTy ln && r instanceof Ty.NamedTy rn && !ln.name().equals(rn.name())) {
+            throw new CheckException(where + ": cannot mix " + l + " and " + r);
+        }
+        if (be.left() instanceof Ast.MoneyLit ml && be.right() instanceof Ast.MoneyLit mr
+                && !ml.currency().equals(mr.currency())) {
+            throw new CheckException(where + ": money literals have different currencies ("
+                    + ml.currency() + " vs " + mr.currency() + ")");
+        }
+        Ty le = l.erased();
+        Ty re = r.erased();
         return switch (be.op()) {
-            case "+", "-", "*", "/" -> {
-                requireInt(l, be.op(), where);
-                requireInt(r, be.op(), where);
-                yield Ty.INT;
+            case "+", "-" -> {
+                if (le.equals(Ty.INT) && re.equals(Ty.INT)) {
+                    yield Ty.INT;
+                }
+                if (le.equals(Ty.MONEY) && re.equals(Ty.MONEY)) {
+                    yield Ty.MONEY;
+                }
+                throw new CheckException(where + ": operator '" + be.op() + "' cannot combine " + l + " and " + r);
+            }
+            case "*" -> {
+                if (le.equals(Ty.INT) && re.equals(Ty.INT)) {
+                    yield Ty.INT;
+                }
+                if (le.equals(Ty.MONEY) && re.equals(Ty.MONEY)) {
+                    throw new CheckException(where + ": Money cannot be multiplied by Money");
+                }
+                if ((le.equals(Ty.MONEY) && re.equals(Ty.INT)) || (le.equals(Ty.INT) && re.equals(Ty.MONEY))) {
+                    yield Ty.MONEY;
+                }
+                throw new CheckException(where + ": operator '*' cannot combine " + l + " and " + r);
+            }
+            case "/" -> {
+                if (le.equals(Ty.MONEY) || re.equals(Ty.MONEY)) {
+                    throw new CheckException(where
+                            + ": Money division must handle the remainder explicitly and is not supported");
+                }
+                if (le.equals(Ty.INT) && re.equals(Ty.INT)) {
+                    yield Ty.INT;
+                }
+                throw new CheckException(where + ": operator '/' cannot combine " + l + " and " + r);
             }
             case "<", "<=", ">", ">=" -> {
-                requireInt(l, be.op(), where);
-                requireInt(r, be.op(), where);
+                boolean ordered = le.equals(re)
+                        && (le.equals(Ty.INT) || le.equals(Ty.MONEY) || le.equals(Ty.INSTANT));
+                if (!ordered) {
+                    throw new CheckException(where + ": operator '" + be.op()
+                            + "' cannot compare " + l + " and " + r);
+                }
                 yield Ty.BOOL;
             }
             case "==", "!=" -> {
-                if (!l.equals(r)) {
+                if (!le.equals(re)) {
                     throw new CheckException(where + ": cannot compare " + l + " " + be.op() + " " + r);
                 }
                 yield Ty.BOOL;
             }
             case "and", "or" -> {
-                requireBool(l, be.op(), where);
-                requireBool(r, be.op(), where);
+                if (!l.isBool() || !r.isBool()) {
+                    throw new CheckException(where + ": operator '" + be.op() + "' requires a boolean, got "
+                            + (l.isBool() ? r : l));
+                }
                 yield Ty.BOOL;
             }
             default -> throw new CheckException(where + ": unknown operator '" + be.op() + "'");
         };
     }
 
-    private static void requireInt(Ty t, String op, String where) {
-        if (!t.isInt()) {
-            throw new CheckException(where + ": operator '" + op + "' requires Int, got " + t);
-        }
-    }
+    // ----- type resolution and fitting ----------------------------------------
 
-    private static void requireBool(Ty t, String op, String where) {
-        if (!t.isBool()) {
-            throw new CheckException(where + ": operator '" + op + "' requires a boolean, got " + t);
-        }
-    }
-
-    private Ty resolveType(Ast.TypeRef ref, String where) {
-        Ty base = switch (ref.name()) {
-            case "Int" -> Ty.INT;
-            case "Text" -> Ty.TEXT;
-            default -> {
-                if (entities.containsKey(ref.name())) {
-                    yield Ty.entity(ref.name());
+    private Ty resolveType(Ast.Type type, String where) {
+        return switch (type) {
+            case Ast.TypeRef ref -> {
+                Ty t = resolveName(ref.name(), where);
+                yield ref.list() ? Ty.list(t) : t;
+            }
+            case Ast.RangedType r -> {
+                Ty.Prim base = Builtins.prim(r.base())
+                        .orElseThrow(() -> new CheckException(where + ": unknown type '" + r.base() + "'"));
+                requireRangeBase(base, r.base(), where);
+                validateRange(r.lo(), r.hi(), where);
+                yield new Ty.AnonRefined(base, r.lo(), r.hi());
+            }
+            case Ast.GenericType g -> {
+                int arity = Builtins.genericArity(g.name())
+                        .orElseThrow(() -> new CheckException(where + ": unknown type '" + g.name() + "'"));
+                if (g.args().size() != arity) {
+                    throw new CheckException(where + ": " + g.name() + " takes " + arity
+                            + " type argument(s) but got " + g.args().size());
                 }
-                throw new CheckException(where + ": unknown type '" + ref.name() + "'");
+                List<Ty> args = new ArrayList<>();
+                for (Ast.Type a : g.args()) {
+                    args.add(resolveType(a, where));
+                }
+                if (g.name().equals("Secret") && containsSecret(args.get(0))) {
+                    throw new CheckException(where + ": Secret cannot wrap another Secret");
+                }
+                yield new Ty.GenericTy(g.name(), args);
             }
         };
-        return ref.list() ? Ty.list(base.name()) : base;
+    }
+
+    private Ty resolveName(String name, String where) {
+        Optional<Ty> builtin = Builtins.resolve(name);
+        if (builtin.isPresent()) {
+            return builtin.get();
+        }
+        Ty.NamedTy declared = typeDecls.get(name);
+        if (declared != null) {
+            return declared;
+        }
+        if (entities.containsKey(name)) {
+            return Ty.entity(name);
+        }
+        throw new CheckException(where + ": unknown type '" + name + "'");
+    }
+
+    private static boolean containsSecret(Ty ty) {
+        return ty.isSecret()
+                || (ty instanceof Ty.GenericTy g && g.args().stream().anyMatch(TypeChecker::containsSecret));
+    }
+
+    /**
+     * A value of type {@code actual} may be used where {@code expected} is wanted: exactly,
+     * or by widening a refined type to its base. The reverse never holds without a literal.
+     */
+    private static boolean assignable(Ty actual, Ty expected) {
+        if (actual.equals(expected)) {
+            return true;
+        }
+        return switch (actual) {
+            case Ty.NamedTy n -> assignable(n.base(), expected);
+            case Ty.AnonRefined a -> assignable(a.base(), expected);
+            default -> false;
+        };
+    }
+
+    /**
+     * Require {@code actual} to fit {@code expected}; a literal {@code value} may narrow
+     * into a refined expected type when the checker can prove the predicate holds.
+     */
+    private void fits(String where, Ast.Expr value, Ty actual, Ty expected) {
+        if (assignable(actual, expected)) {
+            return;
+        }
+        if (value != null && isLiteral(value) && assignable(actual, expected.erased())) {
+            checkLiteralFit(where, value, expected);
+            return;
+        }
+        throw new CheckException(where + " is " + actual + " but expected " + expected);
+    }
+
+    private static boolean isLiteral(Ast.Expr e) {
+        return e instanceof Ast.IntLit || e instanceof Ast.StrLit
+                || e instanceof Ast.BoolLit || e instanceof Ast.MoneyLit;
+    }
+
+    /** A human-readable form of a refined type including its predicate, for error messages. */
+    private static String describe(Ty ty) {
+        if (ty instanceof Ty.NamedTy n) {
+            String rule = switch (n.refinement()) {
+                case Ast.Range r -> n.base().name() + "(" + (r.lo().isPresent() ? r.lo().getAsLong() : "")
+                        + ".." + (r.hi().isPresent() ? r.hi().getAsLong() : "") + ")";
+                case Ast.Matching m -> n.base().name() + " matching /" + m.regex() + "/";
+                case Ast.Where w -> n.base().name() + " where ...";
+            };
+            return n.name() + " (" + rule + ")";
+        }
+        return ty.toString();
+    }
+
+    /** Prove a literal satisfies a refined type's predicate, or fail the check. */
+    private void checkLiteralFit(String where, Ast.Expr value, Ty expected) {
+        Ast.Refinement refinement = switch (expected) {
+            case Ty.NamedTy n -> n.refinement();
+            case Ty.AnonRefined a -> new Ast.Range(a.lo(), a.hi());
+            default -> null;
+        };
+        if (refinement == null) {
+            throw new CheckException(where + " does not fit " + describe(expected));
+        }
+        boolean ok = switch (refinement) {
+            case Ast.Range r -> switch (value) {
+                case Ast.IntLit i -> inRange(i.value(), r);
+                case Ast.StrLit s -> inRange(s.value().length(), r);
+                default -> false;
+            };
+            case Ast.Matching m ->
+                    value instanceof Ast.StrLit s && compileRegex(m.regex(), where).matcher(s.value()).matches();
+            // Statically decidable only for Money-sign style predicates; anything else is
+            // accepted here and enforced by the generated construction checks at runtime.
+            case Ast.Where w -> !(value instanceof Ast.MoneyLit ml)
+                    || evalMoneyWhere(w.predicate(), ml.amount()).orElse(true);
+        };
+        if (!ok) {
+            throw new CheckException(where + ": " + literalText(value) + " does not fit " + describe(expected));
+        }
+    }
+
+    private static boolean inRange(long v, Ast.Range r) {
+        return (r.lo().isEmpty() || v >= r.lo().getAsLong()) && (r.hi().isEmpty() || v <= r.hi().getAsLong());
+    }
+
+    /** Evaluate an {@code amount <op> n} predicate against a money literal, if it has that shape. */
+    private static Optional<Boolean> evalMoneyWhere(Ast.Expr pred, BigDecimal amount) {
+        if (!(pred instanceof Ast.BinExpr be)) {
+            return Optional.empty();
+        }
+        if (be.op().equals("and") || be.op().equals("or")) {
+            Optional<Boolean> l = evalMoneyWhere(be.left(), amount);
+            Optional<Boolean> r = evalMoneyWhere(be.right(), amount);
+            if (l.isEmpty() || r.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(be.op().equals("and") ? l.get() && r.get() : l.get() || r.get());
+        }
+        if (!(be.left() instanceof Ast.NameExpr n && n.name().equals("amount"))
+                || !(be.right() instanceof Ast.IntLit i)) {
+            return Optional.empty();
+        }
+        int cmp = amount.compareTo(BigDecimal.valueOf(i.value()));
+        return switch (be.op()) {
+            case ">" -> Optional.of(cmp > 0);
+            case ">=" -> Optional.of(cmp >= 0);
+            case "<" -> Optional.of(cmp < 0);
+            case "<=" -> Optional.of(cmp <= 0);
+            case "==" -> Optional.of(cmp == 0);
+            case "!=" -> Optional.of(cmp != 0);
+            default -> Optional.empty();
+        };
+    }
+
+    private static String literalText(Ast.Expr value) {
+        return switch (value) {
+            case Ast.IntLit i -> Long.toString(i.value());
+            case Ast.StrLit s -> "\"" + s.value() + "\"";
+            case Ast.BoolLit b -> Boolean.toString(b.value());
+            case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
+            default -> value.toString();
+        };
     }
 }

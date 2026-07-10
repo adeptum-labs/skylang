@@ -351,4 +351,133 @@ class PipelineTest {
     private static PrintStream quiet() {
         return new PrintStream(new ByteArrayOutputStream());
     }
+
+    // ----- the chapter-3 type surface -----------------------------------------
+
+    private static final String BANK = """
+            module bank
+            type Sku = Text matching /^[A-Z0-9-]{4,16}$/
+            entity Account {
+              id      Int   @id
+              owner   Email @unique
+              name    Text(1..120)
+              balance Money
+              active  Bool = true
+            }
+            service Accounts {
+              open(owner Email, name Text(1..120)) -> Account
+                intent "Open an account with a zero balance."
+              deposit(a Account, amount Money) -> Account
+                intent  "Return a copy with the amount added."
+                ensures result.balance == a.balance + amount
+                example deposit(Account(1, "a@example.com", "Main", 0eur, true), 9.99eur) -> a Account with balance 9.99eur
+            }
+            """;
+
+    private static Ast.Module checkedBankModule() {
+        Ast.Module m = Parsing.parse(BANK, "bank.sky");
+        new TypeChecker().check(m);
+        return m;
+    }
+
+    @Test
+    void stagedProjectCarriesTheTypeSystem(@TempDir Path root) throws Exception {
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS)
+                .build(checkedBankModule(), root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String account = Files.readString(buildDir.resolve("src/main/java/bank/Account.java"));
+        assertTrue(account.contains(
+                        "public record Account(long id, String owner, String name, Money balance, boolean active)"),
+                "the entity should lower field types through the full mapping");
+        assertTrue(account.contains("name.length()"), "the Text range should be checked at construction");
+        assertTrue(account.contains("matches"), "the Email shape should be checked at construction");
+        assertTrue(account.contains("@unique"), "the advisory @unique constraint should be documented");
+        assertTrue(account.contains("public Account(long id, String owner, String name, Money balance)"),
+                "trailing defaulted fields should get an omitting constructor");
+
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/bank/Money.java")),
+                "the Money support class should be staged when used");
+        assertFalse(Files.exists(buildDir.resolve("src/main/java/bank/Secret.java")),
+                "unused support classes must not be staged");
+        assertFalse(Files.exists(buildDir.resolve("src/main/java/bank/Bytes.java")),
+                "unused support classes must not be staged");
+
+        String accounts = Files.readString(buildDir.resolve("src/main/java/bank/Accounts.java"));
+        assertTrue(accounts.contains("matches") && accounts.contains("IllegalArgumentException"),
+                "refined parameters should be guarded at the top of the staged method");
+
+        String tests = Files.readString(buildDir.resolve("src/test/java/bank/AccountsTest.java"));
+        assertTrue(tests.contains("Money.of(\"9.99\", \"EUR\")"), "money literals should lower exactly");
+        assertTrue(tests.contains("plus(") && tests.contains("eq("),
+                "contract operators should lower through the overloaded helpers");
+    }
+
+    private static final String PAY_VIEW = """
+            module shop
+            entity Order { id Int  total Money }
+            service Orders {
+              all() -> [Order]  intent "all"
+              pay(id Int, amount Money, when Instant) -> Order  intent "pay"
+            }
+            view Pay at "/pay" {
+              shows  Orders.all() as a table of (id)
+              action "Pay" on row -> Orders.pay(row.id, ask Money, ask Instant)
+            }
+            """;
+
+    @Test
+    void promptedMoneyAndInstantInputsStageTheirConverters(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(PAY_VIEW, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String money = Files.readString(buildDir.resolve("src/main/java/shop/MoneyConverter.java"));
+        assertTrue(money.contains("sky.money"), "the Money converter must register under sky.money");
+        String instant = Files.readString(buildDir.resolve("src/main/java/shop/InstantConverter.java"));
+        assertTrue(instant.contains("sky.instant"), "the Instant converter must register under sky.instant");
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/shop/Money.java")),
+                "an ask Money input needs the Money support class");
+
+        String interaction = Files.readString(buildDir.resolve("src/test/java/shop/ViewsInteractionTest.java"));
+        assertTrue(interaction.contains("9.99 EUR"), "the interaction lane needs a valid Money sample");
+        assertTrue(interaction.contains("2026-01-01T00:00:00Z"), "the interaction lane needs a valid Instant sample");
+    }
+
+    @Test
+    void viewsWithoutConvertedInputsStageNoConverters(@TempDir Path root) {
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(checkedViewModule(), root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertFalse(Files.exists(buildDir.resolve("src/main/java/shop/MoneyConverter.java")),
+                "a view prompting only for Int must not stage converters");
+        assertFalse(Files.exists(buildDir.resolve("src/main/java/shop/InstantConverter.java")),
+                "a view prompting only for Int must not stage converters");
+    }
+
+    @Test
+    void secretFieldsStayOutOfTheWebSurface(@TempDir Path root) throws Exception {
+        String source = SHOP_VIEW.replace("stock Int @min(0)", "stock Int @min(0)  password Secret<Text>");
+        Ast.Module module = Parsing.parse(source, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String product = Files.readString(buildDir.resolve("src/main/java/shop/Product.java"));
+        assertTrue(product.contains("getName"), "ordinary fields keep their Faces getters");
+        assertFalse(product.contains("getPassword"), "Secret fields must not expose a Faces getter");
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/shop/Secret.java")),
+                "the Secret support class should be staged when used");
+    }
 }
