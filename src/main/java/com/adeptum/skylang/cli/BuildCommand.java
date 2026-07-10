@@ -54,7 +54,8 @@ public final class BuildCommand implements Callable<Integer> {
     @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file to build.")
     Path file;
 
-    @Option(names = "--profile", description = "Target profile (default: jvm-jakarta).", defaultValue = "jvm-jakarta")
+    @Option(names = "--profile",
+            description = "Target profile (default: the sky.project manifest, else jvm-jakarta).")
     String profile;
 
     @Option(names = "--recheck",
@@ -82,14 +83,14 @@ public final class BuildCommand implements Callable<Integer> {
 
         Path root = file.toAbsolutePath().getParent();
         Path lockPath = root.resolve("sky.lock");
-        Path buildDir = root.resolve("build").resolve(profile);
 
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);   // resolved lazily on first synth
         Verifier verifier = new MavenVerifier();
 
         try {
+            String active = ActiveProfile.resolve(profile, file);
             return new Pipeline(llm, verifier, Math.max(0, attempts - 1))
-                    .build(module, lockPath, buildDir, System.out, System.err, recheck);
+                    .build(module, lockPath, root.resolve("build").resolve(active), System.out, System.err, recheck);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());
             return 1;

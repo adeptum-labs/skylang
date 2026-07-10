@@ -50,7 +50,8 @@ public final class PreviewCommand implements Callable<Integer> {
     @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file to preview.")
     Path file;
 
-    @Option(names = "--profile", description = "Target profile (default: jvm-jakarta).", defaultValue = "jvm-jakarta")
+    @Option(names = "--profile",
+            description = "Target profile (default: the sky.project manifest, else jvm-jakarta).")
     String profile;
 
     @Option(names = "--port", description = "Studio control port (default: 4599).", defaultValue = "4599")
@@ -72,11 +73,11 @@ public final class PreviewCommand implements Callable<Integer> {
 
         Path root = file.toAbsolutePath().getParent();
         Path lockPath = root.resolve("sky.lock");
-        Path buildDir = root.resolve("build").resolve(profile);
 
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);   // resolved lazily; frozen views need no key
 
         try {
+            Path buildDir = root.resolve("build").resolve(ActiveProfile.resolve(profile, file));
             return new PreviewSession(llm).run(module, file, lockPath, buildDir, port, "mvn", System.out, System.err);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());

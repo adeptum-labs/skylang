@@ -53,7 +53,8 @@ public final class FreezeCommand implements Callable<Integer> {
     @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file to refreeze.")
     Path file;
 
-    @Option(names = "--profile", description = "Target profile (default: jvm-jakarta).", defaultValue = "jvm-jakarta")
+    @Option(names = "--profile",
+            description = "Target profile (default: the sky.project manifest, else jvm-jakarta).")
     String profile;
 
     @Option(names = "--attempts", description = "Candidates per method before giving up (default: 5).",
@@ -85,8 +86,9 @@ public final class FreezeCommand implements Callable<Integer> {
 
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
+            String active = ActiveProfile.resolve(profile, file);
             return new Pipeline(llm, new MavenVerifier(), Math.max(0, attempts - 1))
-                    .build(module, lockPath, root.resolve("build").resolve(profile), System.out, System.err);
+                    .build(module, lockPath, root.resolve("build").resolve(active), System.out, System.err);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());
             return 1;

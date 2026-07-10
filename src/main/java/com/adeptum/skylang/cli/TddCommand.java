@@ -57,7 +57,8 @@ public final class TddCommand implements Callable<Integer> {
     @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file to watch.")
     Path file;
 
-    @Option(names = "--profile", description = "Target profile (default: jvm-jakarta).", defaultValue = "jvm-jakarta")
+    @Option(names = "--profile",
+            description = "Target profile (default: the sky.project manifest, else jvm-jakarta).")
     String profile;
 
     @Option(names = "--once", description = "Run a single cycle instead of watching (for scripts).")
@@ -115,8 +116,9 @@ public final class TddCommand implements Callable<Integer> {
         Path root = file.toAbsolutePath().getParent();
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
+            String active = ActiveProfile.resolve(profile, file);
             int code = new Pipeline(llm, new MavenVerifier(), Math.max(0, attempts - 1))
-                    .build(module, root.resolve("sky.lock"), root.resolve("build").resolve(profile),
+                    .build(module, root.resolve("sky.lock"), root.resolve("build").resolve(active),
                             System.out, System.err);
             System.out.println(code == 0
                     ? "  green — examples, specs and contracts hold; fresh bodies frozen"
