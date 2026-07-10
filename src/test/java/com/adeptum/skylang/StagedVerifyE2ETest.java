@@ -113,6 +113,75 @@ class StagedVerifyE2ETest {
         assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
     }
 
+    private static final String SHELF = """
+            module shelf
+            entity Book { id Int @id  title Text  copies Int @min(0) }
+            entity Member { id Int @id  email Email @unique }
+            entity NotFound { }
+            entity BadInput { }
+            entity DuplicateEmail { requested Email }
+            service Library uses db {
+              lend(id Int, copies Int) -> Book
+                intent  "Decrease the stored book's copies by the amount."
+                raises  BadInput when copies <= 0
+                raises  NotFound when no book has that id
+              reserve(id Int, days Int) -> Book
+                intent   "The stored book, reserved for that many days."
+                requires days > 0
+              register(email Email) -> Member
+                intent "Create the member unless the address is taken."
+                raises DuplicateEmail when email already registered
+              donate(book Book, copies Int) -> Book
+                intent  "Add donated copies and persist the book."
+                ensures result.copies == old(book.copies) + copies
+                example donate(Book(1, "Odyssey", 5), 3) -> a Book with copies 8
+              totalCopies() -> Int
+                intent  "Total copies across the shelf."
+                ensures result == sum of (b.copies for b in all books)
+                example totalCopies() -> 0
+            }
+            """;
+
+    private static StubLlm shelfStub() {
+        return new StubLlm((system, user) -> {
+            if (user.contains("public Book lend")) {
+                return """
+                        if (copies <= 0) throw new BadInput();
+                        Book book = db.findBook(id).orElseThrow(NotFound::new);
+                        return db.save(new Book(book.id(), book.title(), book.copies() - copies));
+                        """;
+            }
+            if (user.contains("public Book reserve")) {
+                return "return db.findBook(id).orElseThrow(NotFound::new);";
+            }
+            if (user.contains("public Member register")) {
+                return """
+                        if (db.allMembers().stream().anyMatch(m -> m.email().equals(email))) {
+                            throw new DuplicateEmail(email);
+                        }
+                        return db.save(new Member(db.allMembers().size() + 1, email));
+                        """;
+            }
+            if (user.contains("public Book donate")) {
+                return "return db.save(new Book(book.id(), book.title(), book.copies() + copies));";
+            }
+            return "return db.allBooks().stream().mapToLong(Book::copies).sum();";
+        });
+    }
+
+    @Test
+    void chapterFiveContractsPassEndToEnd(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(SHELF, "shelf.sky");
+        new TypeChecker().check(module);
+
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(shelfStub(), new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
+    }
+
     private static final String BANK = """
             module bank
             type Quantity = Int(1..)

@@ -645,6 +645,119 @@ class PipelineTest {
         assertEquals(2, healsItself.calls());
     }
 
+    private static final String LIBRARY = """
+            module library
+            entity Book { id Int @id  title Text(1..120)  copies Int @min(0) }
+            entity Member { id Int @id  email Email @unique }
+            entity NotFound { }
+            entity BadInput { }
+            entity DuplicateEmail { requested Email }
+            service Shelf uses db {
+              lend(id Int, copies Int) -> Book
+                intent   "Decrease the stored book's copies."
+                raises   NotFound when no book has that id
+                raises   BadInput when copies <= 0
+              reserve(id Int, days Int) -> Book
+                intent   "Reserve the book for that many days."
+                requires days > 0
+              register(email Email) -> Member
+                intent "Create the member."
+                raises DuplicateEmail when email already registered
+            }
+            """;
+
+    @Test
+    void errorsLowerToExceptionsAndRaisesToTests(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(LIBRARY, "library.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String notFound = Files.readString(buildDir.resolve("src/main/java/library/NotFound.java"));
+        assertTrue(notFound.contains("extends RuntimeException"), "errors lower to exceptions");
+        String duplicate = Files.readString(buildDir.resolve("src/main/java/library/DuplicateEmail.java"));
+        assertTrue(duplicate.contains("requested()"), "error fields carry the caller's context");
+        assertFalse(Files.exists(buildDir.resolve("src/main/java/library/NotFoundJpa.java")),
+                "errors are not data and must not be persisted");
+
+        String shelf = Files.readString(buildDir.resolve("src/main/java/library/Shelf.java"));
+        assertTrue(shelf.contains("requires: days > 0") && shelf.contains("IllegalArgumentException"),
+                "requires lowers to a guard before the body");
+
+        String tests = Files.readString(buildDir.resolve("src/test/java/library/ShelfTest.java"));
+        assertTrue(tests.contains("assertThrows(NotFound.class"),
+                "an existence raises becomes a test against the empty store");
+        assertTrue(tests.contains("assertThrows(BadInput.class"),
+                "a comparison raises becomes a boundary-witness test");
+        assertTrue(tests.contains("assertThrows(DuplicateEmail.class"),
+                "a uniqueness raises becomes a seeded-duplicate test");
+        assertTrue(tests.contains("assertThrows(IllegalArgumentException.class"),
+                "a requires guard gets its own boundary test");
+    }
+
+    private static final String WAREHOUSE = """
+            module warehouse
+            entity Product { id Int @id  name Text  stock Int @min(0) }
+            service Stock uses db {
+              restock(id Int, units Int) -> Product
+                intent  "Add units to the stored product's stock and persist it."
+                ensures result.stock == old(result.stock) + units
+                example restock(1, 3) -> a Product with stock 8
+              totalStock() -> Int
+                intent  "The total stock across the store."
+                ensures result == sum of (p.stock for p in all products)
+                example totalStock() -> 0
+              outOfStock() -> Int
+                intent  "How many stored products are out of stock."
+                ensures result == count of (p for p in all products where p.stock == 0)
+                example outOfStock() -> 0
+              bigger(a Int, b Int) -> Int
+                intent  "The larger of the two."
+                ensures result == max(a, b)
+                example bigger(2, 5) -> 5
+            }
+            service Helpers {
+              double(x Int) -> Int
+                intent  "Twice the value."
+                example double(2) -> 4
+            }
+            service Sums {
+              quadruple(x Int) -> Int
+                intent  "Four times the value."
+                ensures result == double(double(x))
+                example quadruple(2) -> 8
+            }
+            """;
+
+    @Test
+    void oldAggregatesAndHelpersLowerIntoTests(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse(WAREHOUSE, "warehouse.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String stock = Files.readString(buildDir.resolve("src/test/java/warehouse/StockTest.java"));
+        assertTrue(stock.contains("db.findProduct(id).orElseThrow()"),
+                "old(result...) snapshots the stored row before the call");
+        assertTrue(stock.contains("__old0"), "old() lowers to a pre-call snapshot variable");
+        assertTrue(stock.contains("sumOf(") && stock.contains(".stream()"),
+                "sum of lowers to a stream fold through the dispatching helper");
+        assertTrue(stock.contains("db.allProducts()"), "'all products' reads the store under test");
+        assertTrue(stock.contains(".filter(") && stock.contains(".count()"),
+                "count of lowers to a filtered count");
+        assertTrue(stock.contains("max(a, b)"), "max lowers through the overloaded helpers");
+
+        String sums = Files.readString(buildDir.resolve("src/test/java/warehouse/SumsTest.java"));
+        assertTrue(sums.contains("new Helpers().double(new Helpers().double(x))"),
+                "effect-free helper calls lower to service calls");
+    }
+
     @Test
     void bankRebuildStaysFrozen(@TempDir Path root) {
         Path lock = root.resolve("sky.lock");

@@ -92,8 +92,11 @@ public final class ProjectStager {
             }
             boolean web = !module.views().isEmpty();
             java.util.Set<String> values = Lowering.valueEntities(module);
+            java.util.Set<String> errors = errorEntities(module);
             for (Ast.Entity e : module.entities()) {
-                Files.writeString(main.resolve(e.name() + ".java"), entitySource(pkg, e, web, types, values));
+                Files.writeString(main.resolve(e.name() + ".java"), errors.contains(e.name())
+                        ? errorSource(pkg, e, types)
+                        : entitySource(pkg, e, web, types, values));
             }
             for (Ast.Service s : module.services()) {
                 Files.writeString(main.resolve(s.name() + ".java"), serviceSource(pkg, module, s, bodies, types));
@@ -199,6 +202,48 @@ public final class ProjectStager {
         return type instanceof Ast.GenericType g && g.name().equals("Secret");
     }
 
+    /** The entities named in raises clauses: failure types, lowered to exceptions. */
+    public static java.util.Set<String> errorEntities(Ast.Module module) {
+        java.util.Set<String> errors = new java.util.LinkedHashSet<>();
+        for (Ast.Service s : module.services()) {
+            for (Ast.Method m : s.methods()) {
+                m.raises().forEach(r -> errors.add(r.error()));
+            }
+        }
+        return errors;
+    }
+
+    /** An error entity: an exception carrying the context fields the caller needs. */
+    private String errorSource(String pkg, Ast.Entity entity, Map<String, Ast.TypeDecl> types) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(pkg).append(";\n\n");
+        sb.append("/** Raised as declared by the raises contracts naming it. */\n");
+        sb.append("public class ").append(entity.name()).append(" extends RuntimeException {\n");
+        for (Ast.Field f : entity.fields()) {
+            sb.append("\n    private final ").append(Lowering.javaType(f.type(), types))
+                    .append(' ').append(f.name()).append(";\n");
+        }
+        String params = entity.fields().stream()
+                .map(f -> Lowering.javaType(f.type(), types) + " " + f.name())
+                .collect(Collectors.joining(", "));
+        String message = entity.fields().isEmpty()
+                ? "\"" + entity.name() + "\""
+                : "\"" + entity.name() + ": \" + " + entity.fields().stream()
+                        .map(f -> f.name()).collect(Collectors.joining(" + \", \" + "));
+        sb.append("\n    public ").append(entity.name()).append("(").append(params).append(") {\n");
+        sb.append("        super(").append(message).append(");\n");
+        for (Ast.Field f : entity.fields()) {
+            sb.append("        this.").append(f.name()).append(" = ").append(f.name()).append(";\n");
+        }
+        sb.append("    }\n");
+        for (Ast.Field f : entity.fields()) {
+            sb.append("\n    public ").append(Lowering.javaType(f.type(), types)).append(' ')
+                    .append(f.name()).append("() {\n        return ").append(f.name()).append(";\n    }\n");
+        }
+        sb.append("}\n");
+        return sb.toString();
+    }
+
     private static String entityJavadoc(Ast.Entity entity) {
         String unique = entity.fields().stream()
                 .filter(Ast.Field::unique)
@@ -270,8 +315,19 @@ public final class ProjectStager {
                     sb.append(indent(guard.strip(), "        ")).append('\n');
                 }
             }
+            // A requires clause is the caller's obligation, enforced as a guard.
+            java.util.Set<String> values = Lowering.valueEntities(module);
+            for (Ast.Expr req : m.requires()) {
+                sb.append("        if (!(").append(Lowering.exprToJava(req, Map.of(), values))
+                        .append(")) throw new IllegalArgumentException(")
+                        .append(Lowering.javaString("requires: " + Lowering.skyText(req))).append(");\n");
+            }
             sb.append(indent(body.strip(), "        ")).append('\n');
             sb.append("    }\n");
+        }
+        boolean guarded = service.methods().stream().anyMatch(m -> !m.requires().isEmpty());
+        if (guarded) {
+            sb.append(opHelpers(SupportClasses.used(module).contains("Money")));
         }
         sb.append("}\n");
         return sb.toString();
@@ -331,15 +387,157 @@ public final class ProjectStager {
         sb.append("import static org.junit.jupiter.api.Assertions.*;\n\n");
         sb.append("public class ").append(service.name()).append("Test {\n");
 
+        Map<String, Ast.TypeDecl> types = Lowering.typesOf(module);
         for (Ast.Method m : service.methods()) {
             int n = 0;
             for (Ast.Example ex : m.examples()) {
-                sb.append(testMethod(service, m, ex, ++n, values));
+                sb.append(testMethod(service, m, ex, ++n, module));
+            }
+            int k = 0;
+            for (Ast.Raise r : m.raises()) {
+                sb.append(raiseTest(service, m, r, ++k, module, types));
+            }
+            int g = 0;
+            for (Ast.Expr req : m.requires()) {
+                sb.append(requiresTest(service, m, req, ++g, module, types));
             }
         }
         sb.append(opHelpers(SupportClasses.used(module).contains("Money")));
         sb.append("}\n");
         return sb.toString();
+    }
+
+    /** The effect wiring for one test: a fresh store kept in a local so the test can seed it. */
+    private static String construction(Ast.Service service) {
+        StringBuilder sb = new StringBuilder();
+        if (service.uses().contains("db")) {
+            sb.append("        Db db = TestEffects.db();\n");
+        }
+        String wiring = service.uses().stream()
+                .map(e -> e.equals("db") ? "db" : "TestEffects." + e + "()")
+                .collect(Collectors.joining(", "));
+        sb.append("        ").append(service.name()).append(" svc = new ").append(service.name())
+                .append("(").append(wiring).append(");\n");
+        return sb.toString();
+    }
+
+    /** Default arguments for a witness test, or null when one of them is underivable. */
+    private static Map<String, String> witnessArgs(Ast.Method m, Ast.Module module,
+                                                   Map<String, Ast.TypeDecl> types) {
+        Map<String, String> args = new LinkedHashMap<>();
+        for (Ast.Param p : m.params()) {
+            String value = Lowering.defaultJavaValue(p.type(), types, module);
+            if (value == null) {
+                return null;
+            }
+            args.put(p.name(), value);
+        }
+        return args;
+    }
+
+    /**
+     * A raises contract becomes a test with a derivable witness: an empty store for the
+     * existence phrase, a seeded duplicate for the uniqueness phrase, a boundary value for a
+     * simple comparison. An underivable condition generates no test and stays prompt-only.
+     */
+    private String raiseTest(Ast.Service service, Ast.Method m, Ast.Raise r, int k,
+                             Ast.Module module, Map<String, Ast.TypeDecl> types) {
+        Map<String, String> args = witnessArgs(m, module, types);
+        if (args == null) {
+            return "";
+        }
+        String seed = "";
+        String condition;
+        switch (r.condition()) {
+            case Ast.NoSuch ns -> condition = "no " + ns.entityWord() + " has that " + ns.fieldWord();
+            case Ast.AlreadyRegistered ar -> {
+                String param = ((Ast.NameExpr) ar.value()).name();
+                String seeded = seedFor(param, module, types);
+                if (seeded == null) {
+                    return "";
+                }
+                seed = "        db.save(" + seeded + ");\n";
+                condition = param + " already registered";
+            }
+            case Ast.CondExpr ce -> {
+                if (!m.requires().isEmpty()) {
+                    return "";   // a witness could break the requires guard first
+                }
+                String witness = comparisonWitness(ce.expr(), false);
+                if (witness == null) {
+                    return "";
+                }
+                args.put(((Ast.NameExpr) ((Ast.BinExpr) ce.expr()).left()).name(), witness);
+                condition = Lowering.skyText(ce.expr());
+            }
+            default -> {
+                return "";
+            }
+        }
+        return "\n    @Test\n    void " + m.name() + "_raises_" + r.error() + "_" + k + "() {\n"
+                + construction(service) + seed
+                + "        assertThrows(" + r.error() + ".class, () -> svc." + m.name() + "("
+                + String.join(", ", args.values()) + "), "
+                + Lowering.javaString("raises " + r.error() + " when " + condition) + ");\n    }\n";
+    }
+
+    /** A requires guard gets a boundary test: a violating input must be turned away. */
+    private String requiresTest(Ast.Service service, Ast.Method m, Ast.Expr req, int g,
+                                Ast.Module module, Map<String, Ast.TypeDecl> types) {
+        Map<String, String> args = witnessArgs(m, module, types);
+        String witness = args == null ? null : comparisonWitness(req, true);
+        if (witness == null) {
+            return "";
+        }
+        args.put(((Ast.NameExpr) ((Ast.BinExpr) req).left()).name(), witness);
+        return "\n    @Test\n    void " + m.name() + "_requires_" + g + "() {\n"
+                + construction(service)
+                + "        assertThrows(IllegalArgumentException.class, () -> svc." + m.name() + "("
+                + String.join(", ", args.values()) + "), "
+                + Lowering.javaString("requires: " + Lowering.skyText(req)) + ");\n    }\n";
+    }
+
+    /**
+     * A boundary value for {@code param <op> literal}: satisfying the comparison for a raises
+     * witness, violating it for a requires witness. Anything more complex returns null.
+     */
+    private static String comparisonWitness(Ast.Expr expr, boolean violate) {
+        if (!(expr instanceof Ast.BinExpr be) || !(be.left() instanceof Ast.NameExpr)
+                || !(be.right() instanceof Ast.IntLit lit)) {
+            return null;
+        }
+        String op = violate ? negate(be.op()) : be.op();
+        Long value = switch (op) {
+            case "<" -> lit.value() - 1;
+            case "<=", ">=", "==" -> lit.value();
+            case ">", "!=" -> lit.value() + 1;
+            default -> null;
+        };
+        return value == null ? null : value + "L";
+    }
+
+    private static String negate(String op) {
+        return switch (op) {
+            case "<" -> ">=";
+            case "<=" -> ">";
+            case ">" -> "<=";
+            case ">=" -> "<";
+            case "==" -> "!=";
+            case "!=" -> "==";
+            default -> op;
+        };
+    }
+
+    /** A stored row whose @unique field equals the witness argument of the same name. */
+    private static String seedFor(String param, Ast.Module module, Map<String, Ast.TypeDecl> types) {
+        for (Ast.Entity e : module.entities()) {
+            boolean unique = e.fields().stream().anyMatch(f -> f.unique() && f.name().equals(param));
+            boolean root = e.fields().stream().anyMatch(Ast.Field::id);
+            if (unique && root) {
+                return Lowering.defaultJavaValue(new Ast.TypeRef(e.name()), types, module);
+            }
+        }
+        return null;
     }
 
     /**
@@ -365,6 +563,10 @@ public final class ProjectStager {
                     private static long minus(long a, long b) { return a - b; }
                     private static long times(long a, long b) { return a * b; }
                     private static long div(long a, long b) { return a / b; }
+                    private static long max(long a, long b) { return Math.max(a, b); }
+                    private static long min(long a, long b) { return Math.min(a, b); }
+                    private static <T extends Comparable<T>> T max(T a, T b) { return a.compareTo(b) >= 0 ? a : b; }
+                    private static <T extends Comparable<T>> T min(T a, T b) { return a.compareTo(b) <= 0 ? a : b; }
                 """;
         String moneyOps = """
                     private static Money plus(Money a, Money b) { return a.plus(b); }
@@ -372,19 +574,34 @@ public final class ProjectStager {
                     private static Money times(Money a, long b) { return a.times(b); }
                     private static Money times(long a, Money b) { return b.times(a); }
                 """;
-        return money ? base + moneyOps : base;
+        // sumOf dispatches on the element at runtime; the Money variant needs the Money class.
+        String longSum = """
+                    private static long sumOf(java.util.List<Object> items) {
+                        long total = 0;
+                        for (Object item : items) { total += (Long) item; }
+                        return total;
+                    }
+                """;
+        String dispatchingSum = """
+                    private static Object sumOf(java.util.List<Object> items) {
+                        long total = 0;
+                        Money moneyTotal = null;
+                        for (Object item : items) {
+                            if (item instanceof Money m) { moneyTotal = moneyTotal == null ? m : moneyTotal.plus(m); }
+                            else { total += (Long) item; }
+                        }
+                        return moneyTotal != null ? moneyTotal : total;
+                    }
+                """;
+        return money ? base + moneyOps + dispatchingSum : base + longSum;
     }
 
-    private String testMethod(Ast.Service service, Ast.Method m, Ast.Example ex, int n,
-                              java.util.Set<String> values) {
+    private String testMethod(Ast.Service service, Ast.Method m, Ast.Example ex, int n, Ast.Module module) {
+        java.util.Set<String> values = Lowering.valueEntities(module);
         Map<String, String> env = new LinkedHashMap<>();
         StringBuilder sb = new StringBuilder();
         sb.append("\n    @Test\n    void ").append(m.name()).append("_example_").append(n).append("() {\n");
-        String wiring = service.uses().stream()
-                .map(e -> "TestEffects." + e + "()")
-                .collect(Collectors.joining(", "));
-        sb.append("        ").append(service.name()).append(" svc = new ").append(service.name())
-                .append("(").append(wiring).append(");\n");
+        sb.append(construction(service));
 
         List<Ast.Expr> args = ex.call().args();
         for (int i = 0; i < m.params().size(); i++) {
@@ -393,15 +610,37 @@ public final class ProjectStager {
                     .append(Lowering.javaValue(args.get(i), values)).append(";\n");
             env.put(name, name);
         }
+
+        // old(...) values are snapshotted before the call; old(result...) reads the stored
+        // row the method will return, found by its id parameter.
+        Map<String, String> oldNames = new LinkedHashMap<>();
+        collectOld(m.ensures(), oldNames);
+        if (oldNames.keySet().stream().anyMatch(k -> k.contains("result"))) {
+            String entity = ((Ast.TypeRef) m.returnType()).name();
+            String idParam = module.entities().stream().filter(e -> e.name().equals(entity))
+                    .flatMap(e -> e.fields().stream()).filter(Ast.Field::id)
+                    .map(Ast.Field::name).findFirst().orElseThrow();
+            sb.append("        var __before = db.find").append(entity).append("(")
+                    .append(idParam).append(").orElseThrow();\n");
+            env.put("__before", "__before");
+        }
+        int snapshot = 0;
+        for (Map.Entry<String, String> old : oldNames.entrySet()) {
+            old.setValue("__old" + snapshot++);
+        }
+        java.util.Set<String> emitted = new java.util.HashSet<>();
+        for (Ast.Expr ens : m.ensures()) {
+            emitSnapshotWalk(ens, oldNames, env, module, sb, emitted);
+        }
         env.put("result", "result");
 
         String argNames = m.params().stream().map(Ast.Param::name).collect(Collectors.joining(", "));
         sb.append("        var result = svc.").append(m.name()).append("(").append(argNames).append(");\n");
 
         for (Ast.Expr ens : m.ensures()) {
-            String cond = Lowering.exprToJava(ens, env, values);
+            String cond = Lowering.exprToJava(replaceOld(ens, oldNames), env, module);
             sb.append("        assertTrue(").append(cond).append(", ")
-                    .append(Lowering.javaString("ensures: " + cond)).append(");\n");
+                    .append(Lowering.javaString("ensures: " + Lowering.skyText(ens))).append(");\n");
         }
 
         switch (ex.result()) {
@@ -418,6 +657,83 @@ public final class ProjectStager {
 
         sb.append("    }\n");
         return sb.toString();
+    }
+
+    /** Index each distinct old(...) by its written form; the value becomes its snapshot name. */
+    private static void collectOld(List<Ast.Expr> ensures, Map<String, String> oldNames) {
+        for (Ast.Expr e : ensures) {
+            walkOld(e, oldNames);
+        }
+    }
+
+    private static void walkOld(Ast.Expr e, Map<String, String> oldNames) {
+        switch (e) {
+            case Ast.OldExpr o -> oldNames.putIfAbsent(Lowering.skyText(o.value()), null);
+            case Ast.BinExpr b -> {
+                walkOld(b.left(), oldNames);
+                walkOld(b.right(), oldNames);
+            }
+            case Ast.NotExpr n -> walkOld(n.value(), oldNames);
+            case Ast.MemberExpr m -> walkOld(m.target(), oldNames);
+            case Ast.CallExpr c -> c.args().forEach(a -> walkOld(a, oldNames));
+            default -> {
+            }
+        }
+    }
+
+    private static void emitSnapshotWalk(Ast.Expr e, Map<String, String> oldNames, Map<String, String> env,
+                                         Ast.Module module, StringBuilder sb, java.util.Set<String> emitted) {
+        switch (e) {
+            case Ast.OldExpr o -> {
+                String key = Lowering.skyText(o.value());
+                if (emitted.add(key)) {
+                    Ast.Expr snapshot = renameResult(o.value());
+                    sb.append("        var ").append(oldNames.get(key)).append(" = ")
+                            .append(Lowering.exprToJava(snapshot, env, module)).append(";\n");
+                }
+            }
+            case Ast.BinExpr b -> {
+                emitSnapshotWalk(b.left(), oldNames, env, module, sb, emitted);
+                emitSnapshotWalk(b.right(), oldNames, env, module, sb, emitted);
+            }
+            case Ast.NotExpr n -> emitSnapshotWalk(n.value(), oldNames, env, module, sb, emitted);
+            case Ast.MemberExpr m -> emitSnapshotWalk(m.target(), oldNames, env, module, sb, emitted);
+            case Ast.CallExpr c -> c.args().forEach(a -> emitSnapshotWalk(a, oldNames, env, module, sb, emitted));
+            default -> {
+            }
+        }
+    }
+
+    /** Inside a snapshot, `result` means the row as it was before the call. */
+    private static Ast.Expr renameResult(Ast.Expr e) {
+        return switch (e) {
+            case Ast.NameExpr n -> n.name().equals("result") ? new Ast.NameExpr("__before") : n;
+            case Ast.MemberExpr m -> new Ast.MemberExpr(renameResult(m.target()), m.field());
+            case Ast.BinExpr b -> new Ast.BinExpr(b.op(), renameResult(b.left()), renameResult(b.right()));
+            case Ast.NotExpr n -> new Ast.NotExpr(renameResult(n.value()));
+            case Ast.CallExpr c -> new Ast.CallExpr(c.callee(),
+                    c.args().stream().map(ProjectStager::renameResult).toList());
+            default -> e;
+        };
+    }
+
+    /** Swap every old(...) for its snapshot variable before lowering the assertion. */
+    private static Ast.Expr replaceOld(Ast.Expr e, Map<String, String> oldNames) {
+        return switch (e) {
+            case Ast.OldExpr o -> new Ast.NameExpr(oldNames.get(Lowering.skyText(o.value())));
+            case Ast.BinExpr b -> new Ast.BinExpr(b.op(), replaceOld(b.left(), oldNames),
+                    replaceOld(b.right(), oldNames));
+            case Ast.NotExpr n -> new Ast.NotExpr(replaceOld(n.value(), oldNames));
+            case Ast.MemberExpr m -> new Ast.MemberExpr(replaceOld(m.target(), oldNames), m.field());
+            case Ast.CallExpr c -> new Ast.CallExpr(c.callee(),
+                    c.args().stream().map(a -> replaceOld(a, oldNames)).toList());
+            case Ast.EmptyCheck ec -> new Ast.EmptyCheck(replaceOld(ec.value(), oldNames));
+            case Ast.AggExpr a -> new Ast.AggExpr(a.kind(), replaceOld(a.value(), oldNames), a.var(),
+                    a.source() instanceof Ast.SourceExpr s
+                            ? new Ast.SourceExpr(replaceOld(s.expr(), oldNames)) : a.source(),
+                    a.where().map(w -> replaceOld(w, oldNames)));
+            default -> e;
+        };
     }
 
     // ----- helpers -----------------------------------------------------------

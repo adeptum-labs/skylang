@@ -51,9 +51,10 @@ public final class JpaStager {
         Map<String, Ast.TypeDecl> types = Lowering.typesOf(module);
         List<Ast.Entity> roots = new ArrayList<>();
         List<Ast.Entity> components = new ArrayList<>();
+        java.util.Set<String> errors = ProjectStager.errorEntities(module);
         for (Ast.Entity e : module.entities()) {
-            if (!e.values().isEmpty()) {
-                continue;
+            if (!e.values().isEmpty() || errors.contains(e.name())) {
+                continue;   // value sets persist as text; errors are failures, not data
             }
             (e.fields().stream().anyMatch(Ast.Field::id) ? roots : components).add(e);
         }
