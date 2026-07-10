@@ -30,6 +30,7 @@ import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.synth.PromptBuilder;
 import com.adeptum.skylang.synth.UiPromptBuilder;
+import com.adeptum.skylang.verify.EffectLinter;
 import com.adeptum.skylang.verify.VerificationResult;
 import com.adeptum.skylang.verify.Verifier;
 import com.adeptum.skylang.verify.ViewVerifier;
@@ -135,7 +136,9 @@ public final class Pipeline {
             if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
                 u.body = frozen.get().body();
             } else {
-                u.body = synthesize(module, u);
+                if (!resolveBody(module, u, out, err)) {
+                    return 1;
+                }
                 u.fresh = true;
                 anyFresh = true;
             }
@@ -214,6 +217,30 @@ public final class Pipeline {
     private String synthesize(Ast.Module module, Unit u) {
         String reply = client.complete(prompts.system(), prompts.user(module, u.service, u.method));
         return prompts.extractBody(reply);
+    }
+
+    /**
+     * Synthesize a body and hold it to the service's effects budget, regenerating until
+     * it stays inside or the attempts run out. Nothing outside the budget may reach the
+     * staged project, let alone the freeze store.
+     */
+    private boolean resolveBody(Ast.Module module, Unit u, PrintStream out, PrintStream err) {
+        u.body = synthesize(module, u);
+        List<String> violations = EffectLinter.violations(u.body, u.service.uses());
+        int attempts = 0;
+        while (!violations.isEmpty() && attempts < maxRegenerations) {
+            attempts++;
+            out.println("  " + u.key + " broke its effects budget " + violations
+                    + " — regenerating (attempt " + attempts + ")");
+            u.body = synthesize(module, u);
+            violations = EffectLinter.violations(u.body, u.service.uses());
+        }
+        if (!violations.isEmpty()) {
+            err.println("build failed: " + u.key + " reaches outside its effects budget:");
+            violations.forEach(v -> err.println("  " + v));
+            return false;
+        }
+        return true;
     }
 
     /** Synthesize a view and re-synthesize until its expectations hold or the attempts run out. */

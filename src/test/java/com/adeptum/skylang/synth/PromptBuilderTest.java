@@ -25,6 +25,7 @@ import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.ast.Ast;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PromptBuilderTest {
@@ -92,5 +93,55 @@ class PromptBuilderTest {
         String user = prompts.user(m, m.services().get(0), m.services().get(0).methods().get(1));
         assertTrue(user.contains("java.util.Optional<Account> find(String owner)"),
                 "Maybe and Email must lower in the signature");
+    }
+
+    // ----- the chapter-4 surface: effects and values ---------------------------
+
+    private static final String STORE = """
+            module store
+            entity Status { name Text @id  values Open, Closed }
+            entity Order { id Int @id  status Status  total Money }
+            service Orders uses db, clock {
+              place(total Money) -> Order
+                intent "Persist a new open order."
+            }
+            service Pure {
+              square(x Int) -> Int
+                intent "x times x."
+            }
+            """;
+
+    private static Ast.Module store() {
+        return Parsing.parse(STORE, "store.sky");
+    }
+
+    @Test
+    void systemPromptStatesTheEffectsDiscipline() {
+        String system = prompts.system();
+        assertTrue(system.contains("effect"), "the budget rule must be stated");
+        assertTrue(system.contains("clock.instant()"), "time comes from the clock handle");
+        assertTrue(system.contains("Instant.now") && system.contains("System.currentTimeMillis"),
+                "the raw time APIs must be named as forbidden");
+    }
+
+    @Test
+    void userPromptListsTheBudgetAndTheStore() {
+        Ast.Module m = store();
+        String user = prompts.user(m, m.services().get(0), m.services().get(0).methods().get(0));
+        assertTrue(user.contains("db.save(") && user.contains("db.findOrder(")
+                        && user.contains("db.allOrders()") && user.contains("db.deleteOrder("),
+                "the db handle's store surface must be spelled out");
+        assertTrue(user.contains("clock.instant()"), "the clock handle must be listed");
+        assertFalse(user.contains("http.get"), "undeclared effects must not be offered");
+        assertTrue(user.contains("Status.Open") && user.contains("Status.Closed"),
+                "value constants must be listed");
+    }
+
+    @Test
+    void pureServicesAreToldTheyHaveNoEffects() {
+        Ast.Module m = store();
+        String user = prompts.user(m, m.services().get(1), m.services().get(1).methods().get(0));
+        assertTrue(user.contains("no effects"), "a service without a budget is pure computation");
+        assertFalse(user.contains("db.save"), "no handles may be offered to a pure service");
     }
 }

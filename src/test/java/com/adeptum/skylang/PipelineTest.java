@@ -616,6 +616,36 @@ class PipelineTest {
     }
 
     @Test
+    void bodyOutsideItsBudgetFailsTheBuild(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(NOTIFY, "notify.sky");
+        new TypeChecker().check(module);
+        var err = new ByteArrayOutputStream();
+
+        int code = new Pipeline(new StubLlm("return !java.time.Instant.now().toString().isEmpty();"),
+                ALWAYS_PASS).build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                quiet(), new PrintStream(err));
+
+        assertEquals(1, code, "a body reaching outside its effects budget must fail the build");
+        assertTrue(err.toString().contains("clock.instant()"), err.toString());
+    }
+
+    @Test
+    void lintFailuresRegenerateBeforeFailing(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(NOTIFY, "notify.sky");
+        new TypeChecker().check(module);
+        var attempts = new java.util.concurrent.atomic.AtomicInteger();
+        StubLlm healsItself = new StubLlm((system, user) ->
+                attempts.incrementAndGet() == 1 ? "return !java.time.Instant.now().toString().isEmpty();"
+                        : "return true;");
+
+        int code = new Pipeline(healsItself, ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code, "a lint violation should trigger regeneration, not immediate failure");
+        assertEquals(2, healsItself.calls());
+    }
+
+    @Test
     void bankRebuildStaysFrozen(@TempDir Path root) {
         Path lock = root.resolve("sky.lock");
         Path buildDir = root.resolve("build/jvm-jakarta");

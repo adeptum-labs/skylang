@@ -53,6 +53,13 @@ public final class PromptBuilder {
               and never pass the revealed value anywhere it could be recorded.
             - Declared refined types erase to their base type in Java; their predicates are already
               enforced by guards before the body runs, so assume every parameter satisfies its type.
+            - The service declares an effects budget; the body may reach outside pure computation
+              ONLY through the effect handles listed under "Effects available". Never use raw
+              alternatives: no java.net or java.net.http, no JDBC, no file IO, no mail APIs, and
+              no Instant.now(), System.currentTimeMillis(), or new java.util.Date() — the current
+              time, when budgeted, is clock.instant().
+            - An enum-like entity's instance set is closed: use its listed constants (Role.Member),
+              never its constructor.
             - Records are immutable: to "change" a field, construct a new record value.
             - The body must satisfy every `requires`, `ensures`, and `example`.
             """;
@@ -78,8 +85,15 @@ public final class PromptBuilder {
             String components = e.fields().stream()
                     .map(f -> Lowering.javaType(f.type(), types) + " " + f.name())
                     .collect(Collectors.joining(", "));
-            sb.append("record ").append(e.name()).append("(").append(components).append(")\n");
+            sb.append("record ").append(e.name()).append("(").append(components).append(")");
+            if (!e.values().isEmpty()) {
+                sb.append("  // closed set, constants: ").append(e.values().stream()
+                        .map(v -> e.name() + "." + v).collect(Collectors.joining(", ")));
+            }
+            sb.append('\n');
         }
+
+        sb.append('\n').append(effectsAvailable(module, service));
 
         sb.append("\n// Method to implement (Java signature):\n");
         String params = method.params().stream()
@@ -136,6 +150,40 @@ public final class PromptBuilder {
                 yield "a " + ent.typeName() + (fields.isEmpty() ? "" : " with " + fields);
             }
         };
+    }
+
+    /** The declared budget as concrete handles, or the statement that the body is pure. */
+    private String effectsAvailable(Ast.Module module, Ast.Service service) {
+        if (service.uses().isEmpty()) {
+            return "// Effects available: none — this service has no effects; the body is pure computation.\n";
+        }
+        StringBuilder sb = new StringBuilder("// Effects available (the fields below are the ONLY way out):\n");
+        for (String effect : service.uses()) {
+            switch (effect) {
+                case "db" -> {
+                    sb.append("//   db — the store:");
+                    for (Ast.Entity e : module.entities()) {
+                        boolean root = e.values().isEmpty() && e.fields().stream().anyMatch(Ast.Field::id);
+                        if (root) {
+                            String idType = Lowering.javaType(
+                                    e.fields().stream().filter(Ast.Field::id).findFirst().orElseThrow().type(),
+                                    Lowering.typesOf(module));
+                            sb.append(" db.save(").append(e.name()).append("), db.find").append(e.name())
+                                    .append('(').append(idType).append("), db.all").append(e.name())
+                                    .append("s(), db.delete").append(e.name()).append('(').append(idType)
+                                    .append(");");
+                        }
+                    }
+                    sb.append(" save a referenced entity before the entity that references it.\n");
+                }
+                case "clock" -> sb.append("//   clock — java.time.Clock; the current time is clock.instant().\n");
+                case "mail" -> sb.append("//   mail — mail.send(to, subject, body).\n");
+                case "http" -> sb.append("//   http — http.get(url) returning the response body.\n");
+                default -> {
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private String skyTypeDecl(Ast.TypeDecl d) {
