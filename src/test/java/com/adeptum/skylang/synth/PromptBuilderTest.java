@@ -166,6 +166,30 @@ class PromptBuilderTest {
         assertTrue(system.contains("old("), "old() semantics must be explained");
     }
 
+    private static final String LEDGER = """
+            module ledger
+            entity Account { id Int @id  balance Money }
+            entity Overdrawn { }
+            service Bank uses db {
+              drain(a Account) -> Account
+                spec "rejects an empty account" {
+                  given a.balance == 0eur
+                  when  drain(a)
+                  then  raises Overdrawn
+                        a.balance == 0eur
+                }
+            }
+            """;
+
+    @Test
+    void userPromptRendersSpecsAsScenarios() {
+        Ast.Module m = Parsing.parse(LEDGER, "ledger.sky");
+        String user = prompts.user(m, m.services().get(0), m.services().get(0).methods().get(0));
+        assertTrue(user.contains("\"rejects an empty account\""), "the spec title must reach the generator");
+        assertTrue(user.contains("given a.balance == 0eur"), "the given state must reach the generator");
+        assertTrue(user.contains("raises Overdrawn"), "the then outcome must reach the generator");
+    }
+
     @Test
     void pureServicesAreToldTheyHaveNoEffects() {
         Ast.Module m = store();

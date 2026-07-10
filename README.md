@@ -121,10 +121,21 @@ plus a boundary test. `ensures` gains `old(...)` (pre-call snapshots, including
 (`sum of (p.stock for p in all products)`, `count of (... where ...)`, `max`/`min`), and
 calls to effect-free helper methods.
 
+Test-driven synthesis is native. A method may be driven by tests alone — `intent` stays the
+only optional driver. `spec "title" { given ... when ... then ... }` blocks pin multi-step
+scenarios: `given` constructs and seeds witness rows (equality pins; unpinned unique fields
+get distinct samples; underivable fields must be pinned — the checker says which), `when`
+performs the call, and `then` mixes `raises` with assertions that re-read stored state, so
+"unchanged after rejection" works verbatim. Examples grow the same power: `example
+restock(7, 3) on a Product with stock 5 -> stock 8` seeds a row and asserts result fields,
+and `-> raises BadInput` asserts the failure. `sky tdd` watches the file and reruns the
+red-green cycle on save, regenerating only the methods whose specification changed
+(`--once` for scripts).
+
 Not yet implemented (deferred): `policy`, `page`/`flow`, the dependency `requires` registry,
-`spec` blocks (given/when/then), native `java { }` blocks, property-based `ensures`,
-prose-form example arguments, a Jakarta Mail binding for the `mail` effect, and persistence
-for `Map` fields and lists of identified entities.
+native `java { }` blocks, property-based `ensures`, prose-form example arguments, a Jakarta
+Mail binding for the `mail` effect, and persistence for `Map` fields and lists of
+identified entities.
 
 ## Build & run
 

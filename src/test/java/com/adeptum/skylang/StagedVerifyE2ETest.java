@@ -182,6 +182,61 @@ class StagedVerifyE2ETest {
         assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
     }
 
+    private static final String LEDGER = """
+            module ledger
+            entity Account { id Int @id  balance Money }
+            entity Receipt { id Int @id  amount Money }
+            entity InsufficientFunds { }
+            service Bank uses db {
+              transfer(from Account, to Account, amount Money) -> Receipt
+                spec "moves money atomically" {
+                  given from.balance == 100eur and to.balance == 0eur
+                  when  transfer(from, to, 30eur)
+                  then  from.balance == 70eur
+                        to.balance   == 30eur
+                }
+                spec "rejects overdraft" {
+                  given from.balance == 10eur
+                  when  transfer(from, to, 50eur)
+                  then  raises InsufficientFunds
+                        from.balance == 10eur
+                }
+              topUp(id Int, units Int) -> Account
+                intent  "Add that many euros to the stored account."
+                example topUp(7, 3) on a Account with balance 5eur -> balance 8eur
+            }
+            """;
+
+    private static final String TRANSFER_BODY = """
+            Account src = db.findAccount(from.id()).orElseThrow();
+            Account dst = db.findAccount(to.id()).orElseThrow();
+            if (amount.compareTo(src.balance()) > 0) throw new InsufficientFunds();
+            db.save(new Account(src.id(), src.balance().minus(amount)));
+            db.save(new Account(dst.id(), dst.balance().plus(amount)));
+            return db.save(new Receipt(src.id(), amount));
+            """;
+
+    private static final String TOP_UP_BODY = """
+            Account account = db.findAccount(id).orElseThrow();
+            return db.save(new Account(account.id(),
+                    account.balance().plus(Money.of(String.valueOf(units), "EUR"))));
+            """;
+
+    @Test
+    void specsPassEndToEnd(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(LEDGER, "ledger.sky");
+        new TypeChecker().check(module);
+
+        StubLlm stub = new StubLlm((system, user) ->
+                user.contains("public Receipt transfer") ? TRANSFER_BODY : TOP_UP_BODY);
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(stub, new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
+    }
+
     private static final String BANK = """
             module bank
             type Quantity = Int(1..)

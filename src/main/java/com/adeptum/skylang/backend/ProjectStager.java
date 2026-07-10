@@ -202,12 +202,22 @@ public final class ProjectStager {
         return type instanceof Ast.GenericType g && g.name().equals("Secret");
     }
 
-    /** The entities named in raises clauses: failure types, lowered to exceptions. */
+    /** The entities named as failures — by raises clauses, spec thens, or example results. */
     public static java.util.Set<String> errorEntities(Ast.Module module) {
         java.util.Set<String> errors = new java.util.LinkedHashSet<>();
         for (Ast.Service s : module.services()) {
             for (Ast.Method m : s.methods()) {
                 m.raises().forEach(r -> errors.add(r.error()));
+                m.examples().forEach(ex -> {
+                    if (ex.result() instanceof Ast.RaisesResult rr) {
+                        errors.add(rr.error());
+                    }
+                });
+                m.specs().forEach(spec -> spec.then().forEach(t -> {
+                    if (t instanceof Ast.ThenRaises tr) {
+                        errors.add(tr.error());
+                    }
+                }));
             }
         }
         return errors;
@@ -830,16 +840,30 @@ public final class ProjectStager {
             } else if (f.id()) {
                 args.add(f.type() instanceof Ast.TypeRef ref && ref.name().equals("Text")
                         ? "\"w" + id + "\"" : id + "L");
+            } else if (f.unique()) {
+                // Distinct witnesses must not collide on a unique column.
+                String javaType = Lowering.javaType(f.type(), types);
+                args.add(switch (javaType) {
+                    case "long" -> (1000 + id) + "L";
+                    case "String" -> f.type() instanceof Ast.TypeRef ref && ref.name().equals("Email")
+                            ? "\"w" + id + "@example.com\"" : "\"w" + id + "\"";
+                    default -> witnessFallback(entity, f, types, module);
+                });
             } else {
-                String fallback = Lowering.defaultJavaValue(f.type(), types, module);
-                if (fallback == null) {
-                    throw new IllegalStateException("cannot derive a witness for "
-                            + entity + "." + f.name() + " in a spec");
-                }
-                args.add(fallback);
+                args.add(witnessFallback(entity, f, types, module));
             }
         }
         return "new " + entity + "(" + String.join(", ", args) + ")";
+    }
+
+    private static String witnessFallback(String entity, Ast.Field f, Map<String, Ast.TypeDecl> types,
+                                          Ast.Module module) {
+        String fallback = Lowering.defaultJavaValue(f.type(), types, module);
+        if (fallback == null) {
+            throw new IllegalStateException("cannot derive a witness for "
+                    + entity + "." + f.name() + " in a spec");
+        }
+        return fallback;
     }
 
     private static void collectPostReads(Ast.Expr e, List<String> entityParams, java.util.Set<String> out) {

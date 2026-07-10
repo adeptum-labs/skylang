@@ -615,6 +615,29 @@ public final class TypeChecker {
             fits(where + " when argument " + (i + 1), arg, at, paramTypes.get(i));
         }
 
+        // Every entity witness the when-call names must be constructible: each field either
+        // pinned in given or of a type with a derivable sample value.
+        for (Ast.Param p : m.params()) {
+            boolean referenced = spec.when().args().stream()
+                    .anyMatch(a -> a instanceof Ast.NameExpr ne && ne.name().equals(p.name()));
+            if (!referenced || !(params.get(p.name()) instanceof Ty.EntityTy et)
+                    || valueSets.containsKey(et.name())) {
+                continue;
+            }
+            java.util.Set<String> pinned = pinnedFields(spec.given().orElse(null), p.name());
+            for (Ast.Entity e : moduleEntities) {
+                if (!e.name().equals(et.name())) {
+                    continue;
+                }
+                for (Ast.Field f : e.fields()) {
+                    if (!pinned.contains(f.name()) && !f.id() && !derivableWitness(f.type())) {
+                        throw new CheckException(where + ": pin " + p.name() + "." + f.name()
+                                + " in given — its type has no derivable witness value");
+                    }
+                }
+            }
+        }
+
         boolean raisesInSpec = spec.then().stream().anyMatch(t -> t instanceof Ast.ThenRaises);
         Map<String, Ty> env = new LinkedHashMap<>(params);
         if (!raisesInSpec) {
@@ -654,6 +677,40 @@ public final class TypeChecker {
         };
         Ty valueTy = infer(pin.right(), Map.of(), where);
         fits(where, pin.right(), valueTy, target);
+    }
+
+    /** The fields of one parameter that the given chain pins. */
+    private static java.util.Set<String> pinnedFields(Ast.Expr given, String param) {
+        java.util.Set<String> pinned = new java.util.HashSet<>();
+        collectPinned(given, param, pinned);
+        return pinned;
+    }
+
+    private static void collectPinned(Ast.Expr g, String param, java.util.Set<String> pinned) {
+        if (g == null) {
+            return;
+        }
+        if (g instanceof Ast.BinExpr and && and.op().equals("and")) {
+            collectPinned(and.left(), param, pinned);
+            collectPinned(and.right(), param, pinned);
+            return;
+        }
+        if (g instanceof Ast.BinExpr pin && pin.left() instanceof Ast.MemberExpr me
+                && me.target() instanceof Ast.NameExpr n && n.name().equals(param)) {
+            pinned.add(me.field());
+        }
+    }
+
+    /** True when the harness can invent a valid value of this type on its own. */
+    private boolean derivableWitness(Ast.Type type) {
+        if (type instanceof Ast.GenericType g) {
+            return !g.name().equals("Secret");
+        }
+        if (type instanceof Ast.TypeRef ref && !ref.list()) {
+            Ty.NamedTy declared = typeDecls.get(ref.name());
+            return declared == null || !(declared.refinement() instanceof Ast.Matching);
+        }
+        return true;
     }
 
     /** True when the assertion reads a field of an entity-typed parameter (stored state). */

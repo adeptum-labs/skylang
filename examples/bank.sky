@@ -65,6 +65,23 @@ service Accounts uses db, clock {
   totalBalance() -> Money
     intent  "The sum of every stored balance."
     ensures result == sum of (acc.balance for acc in all accounts)
+
+  transfer(from Account, to Account, amount PositiveMoney) -> Account
+    intent "Move the amount between the stored accounts and return the stored debited account."
+    spec "moves money atomically" {
+      given from.iban == "SE3550000000054910000003" and from.balance == 100eur
+        and to.iban   == "SE3550000000054910000004" and to.balance   == 0eur
+      when  transfer(from, to, 30eur)
+      then  from.balance == 70eur
+            to.balance   == 30eur
+    }
+    spec "rejects overdraft and leaves balances untouched" {
+      given from.iban == "SE3550000000054910000005" and from.balance == 10eur
+        and to.iban   == "SE3550000000054910000006"
+      when  transfer(from, to, 50eur)
+      then  raises InsufficientFunds
+            from.balance == 10eur
+    }
 }
 
 view AccountList at "/accounts" {

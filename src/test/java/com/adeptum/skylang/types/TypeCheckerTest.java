@@ -999,6 +999,29 @@ class TypeCheckerTest {
     }
 
     @Test
+    void specWitnessesMustBeDerivableOrPinned() {
+        String source = """
+                module m
+                type Iban = Text matching /^[A-Z]{2}[0-9]{22}$/
+                entity Account { id Int @id  iban Iban @unique  balance Money }
+                entity Overdrawn { }
+                service Bank uses db {
+                  drain(a Account) -> Account
+                    spec "drains" {
+                      %s
+                      when  drain(a)
+                      then  a.balance == 0eur
+                    }
+                }
+                """;
+        CheckException e = assertThrows(CheckException.class,
+                () -> check(source.formatted("given a.balance == 10eur")));
+        assertTrue(e.getMessage().contains("iban"), e.getMessage());
+        assertDoesNotThrow(() -> check(source.formatted(
+                "given a.balance == 10eur and a.iban == \"SE3550000000054910000003\"")));
+    }
+
+    @Test
     void memberDefaultsMustMatchTheFieldType() {
         CheckException e = assertThrows(CheckException.class, () -> check("""
                 module m

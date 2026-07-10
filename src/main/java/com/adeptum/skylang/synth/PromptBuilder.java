@@ -68,6 +68,9 @@ public final class PromptBuilder {
               means the stored row's field before the change. The body implements the transition;
               the harness snapshots the old values.
             - `requires` clauses are enforced by guards before the body runs; assume they hold.
+            - A spec's given describes rows already saved in the store; its then may assert the
+              stored state after the call, so persist every change the scenario expects — and
+              on a raised error, leave the store exactly as it was.
             - Records are immutable: to "change" a field, construct a new record value.
             - The body must satisfy every `requires`, `ensures`, `raises`, and `example`.
             """;
@@ -133,7 +136,25 @@ public final class PromptBuilder {
         if (!method.examples().isEmpty()) {
             sb.append("Examples (must pass):\n");
             for (Ast.Example ex : method.examples()) {
-                sb.append("  ").append(sky(ex.call())).append(" -> ").append(renderResult(ex.result())).append('\n');
+                sb.append("  ").append(sky(ex.call()));
+                ex.seed().ifPresent(seed -> sb.append(" on a ").append(seed.entityName())
+                        .append(" with ").append(seed.fields().stream()
+                                .map(fe -> fe.field() + " " + sky(fe.expected()))
+                                .collect(Collectors.joining(" and "))));
+                sb.append(" -> ").append(renderResult(ex.result())).append('\n');
+            }
+            sb.append('\n');
+        }
+        if (!method.specs().isEmpty()) {
+            sb.append("Specs (must pass):\n");
+            for (Ast.Spec spec : method.specs()) {
+                sb.append("  \"").append(spec.title()).append("\":");
+                spec.given().ifPresent(g -> sb.append(" given ").append(sky(g)));
+                sb.append(" when ").append(sky(spec.when())).append(" then ")
+                        .append(spec.then().stream().map(t -> switch (t) {
+                            case Ast.ThenRaises tr -> "raises " + tr.error();
+                            case Ast.ThenExpr te -> sky(te.expr());
+                        }).collect(Collectors.joining(" and "))).append('\n');
             }
             sb.append('\n');
         }
