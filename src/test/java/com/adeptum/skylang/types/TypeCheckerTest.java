@@ -878,6 +878,126 @@ class TypeCheckerTest {
         assertTrue(e.getMessage().contains("effect"), e.getMessage());
     }
 
+    // ----- the chapter-6 surface: spec blocks and seeded examples --------------
+
+    private static final String BANKING = """
+            module m
+            entity Account { id Int @id  balance Money }
+            entity Receipt { id Int @id  amount Money }
+            entity InsufficientFunds { }
+            entity BadInput { }
+            entity NotFound { }
+            entity Product { id Int @id  stock Int @min(0) }
+            service Bank uses db {
+            %s
+            }
+            """;
+
+    @Test
+    void acceptsSpecBlocksAndSeededExamples() {
+        assertDoesNotThrow(() -> check(BANKING.formatted("""
+              transfer(from Account, to Account, amount Money) -> Receipt
+                spec "moves money atomically" {
+                  given from.balance == 100eur and to.balance == 0eur
+                  when  transfer(from, to, 30eur)
+                  then  from.balance == 70eur
+                        to.balance   == 30eur
+                }
+                spec "rejects overdraft" {
+                  given from.balance == 10eur
+                  when  transfer(from, to, 50eur)
+                  then  raises InsufficientFunds
+                        from.balance == 10eur
+                }
+              restock(id Int, units Int) -> Product
+                example restock(7, 3) on a Product with stock 5 -> stock 8
+                example restock(7, 0) -> raises BadInput
+                example restock(999, 1) -> raises NotFound
+            """)));
+    }
+
+    @Test
+    void specsCountAsDrivers() {
+        assertDoesNotThrow(() -> check(BANKING.formatted("""
+              zero(a Account) -> Receipt
+                spec "zeroes" {
+                  when transfer2(a)
+                  then result.amount == 0eur
+                }
+            """.replace("transfer2", "zero"))));
+    }
+
+    @Test
+    void specWhenMustCallItsOwnMethod() {
+        CheckException e = assertThrows(CheckException.class, () -> check(BANKING.formatted("""
+              f(a Account) -> Receipt
+                spec "x" {
+                  when g(a)
+                  then result.amount == 0eur
+                }
+            """)));
+        assertTrue(e.getMessage().contains("f"), e.getMessage());
+    }
+
+    @Test
+    void specGivenMustPinStateWithEqualities() {
+        CheckException e = assertThrows(CheckException.class, () -> check(BANKING.formatted("""
+              f(a Account) -> Receipt
+                spec "x" {
+                  given a.balance > 10eur
+                  when  f(a)
+                  then  result.amount == 0eur
+                }
+            """)));
+        assertTrue(e.getMessage().contains("given"), e.getMessage());
+    }
+
+    @Test
+    void specResultIsUnavailableAfterRaises() {
+        CheckException e = assertThrows(CheckException.class, () -> check(BANKING.formatted("""
+              f(a Account) -> Receipt
+                spec "x" {
+                  given a.balance == 10eur
+                  when  f(a)
+                  then  raises InsufficientFunds
+                        result.amount == 0eur
+                }
+            """)));
+        assertTrue(e.getMessage().contains("result"), e.getMessage());
+    }
+
+    @Test
+    void seededExamplesNeedDbAndAnIdSource() {
+        CheckException db = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Product { id Int @id  stock Int }
+                service S {
+                  restock(id Int, units Int) -> Product
+                    example restock(7, 3) on a Product with stock 5 -> stock 8
+                }
+                """));
+        assertTrue(db.getMessage().contains("db"), db.getMessage());
+        CheckException id = assertThrows(CheckException.class, () -> check(BANKING.formatted("""
+              touch(units Int) -> Product
+                example touch(3) on a Product with stock 5 -> stock 8
+            """)));
+        assertTrue(id.getMessage().contains("id"), id.getMessage());
+    }
+
+    @Test
+    void extendedResultsAreValidated() {
+        CheckException unknown = assertThrows(CheckException.class, () -> check(BANKING.formatted("""
+              f(id Int) -> Product
+                example f(1) -> raises Mystery
+            """)));
+        assertTrue(unknown.getMessage().contains("Mystery"), unknown.getMessage());
+        CheckException field = assertThrows(CheckException.class, () -> check(BANKING.formatted("""
+              f(id Int) -> Product
+                example f(7) on a Product with stock 5 -> bogus 8
+            """)));
+        assertTrue(field.getMessage().contains("bogus"), field.getMessage());
+    }
+
     @Test
     void memberDefaultsMustMatchTheFieldType() {
         CheckException e = assertThrows(CheckException.class, () -> check("""

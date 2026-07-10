@@ -329,12 +329,24 @@ public final class TypeChecker {
         for (Ast.Service s : module.services()) {
             checkEffects(s);
             for (Ast.Method m : s.methods()) {
-                for (Ast.Raise r : m.raises()) {
-                    if (!entities.containsKey(r.error())) {
-                        throw new CheckException(s.name() + "." + m.name() + " raises unknown error '"
-                                + r.error() + "' — declare it as an entity");
+                java.util.List<String> named = new java.util.ArrayList<>();
+                m.raises().forEach(r -> named.add(r.error()));
+                m.examples().forEach(ex -> {
+                    if (ex.result() instanceof Ast.RaisesResult rr) {
+                        named.add(rr.error());
                     }
-                    errorEntities.add(r.error());
+                });
+                m.specs().forEach(spec -> spec.then().forEach(t -> {
+                    if (t instanceof Ast.ThenRaises tr) {
+                        named.add(tr.error());
+                    }
+                }));
+                for (String error : named) {
+                    if (!entities.containsKey(error)) {
+                        throw new CheckException(s.name() + "." + m.name() + " raises unknown error '"
+                                + error + "' — declare it as an entity");
+                    }
+                    errorEntities.add(error);
                 }
             }
         }
@@ -533,8 +545,9 @@ public final class TypeChecker {
         String where = service + "." + m.name();
         currentService = svc;
 
-        if (m.intent().isEmpty() && m.examples().isEmpty()) {
-            throw new CheckException(where + " has no driver: give it an intent and/or at least one example");
+        if (m.intent().isEmpty() && m.examples().isEmpty() && m.specs().isEmpty()) {
+            throw new CheckException(where
+                    + " has no driver: give it an intent, an example, or a spec");
         }
 
         Map<String, Ty> params = new LinkedHashMap<>();
@@ -576,9 +589,85 @@ public final class TypeChecker {
 
         // examples: concrete inputs (no parameter names in scope) -> expected result.
         for (Ast.Example ex : m.examples()) {
-            checkExample(where, m, params, returnType, ex);
+            checkExample(where, svc, m, params, returnType, ex);
+        }
+
+        // specs: given pins state, when performs the call, then asserts the outcome.
+        for (Ast.Spec spec : m.specs()) {
+            checkSpec(where + " spec \"" + spec.title() + "\"", svc, m, params, returnType, spec);
         }
         currentService = null;
+    }
+
+    private void checkSpec(String where, Ast.Service svc, Ast.Method m, Map<String, Ty> params,
+                           Ty returnType, Ast.Spec spec) {
+        spec.given().ifPresent(g -> checkGiven(where + " given", g, params));
+
+        if (!spec.when().callee().equals(m.name())) {
+            throw new CheckException(where + ": when must call " + m.name() + ", not '"
+                    + spec.when().callee() + "'");
+        }
+        checkArgCount(where + " when", m.name(), spec.when().args().size(), m.params().size());
+        List<Ty> paramTypes = List.copyOf(params.values());
+        for (int i = 0; i < spec.when().args().size(); i++) {
+            Ast.Expr arg = spec.when().args().get(i);
+            Ty at = infer(arg, params, where + " when argument " + (i + 1));
+            fits(where + " when argument " + (i + 1), arg, at, paramTypes.get(i));
+        }
+
+        boolean raisesInSpec = spec.then().stream().anyMatch(t -> t instanceof Ast.ThenRaises);
+        Map<String, Ty> env = new LinkedHashMap<>(params);
+        if (!raisesInSpec) {
+            env.put("result", returnType);
+        }
+        for (Ast.ThenAssert t : spec.then()) {
+            if (!(t instanceof Ast.ThenExpr te)) {
+                continue;
+            }
+            String twhere = where + " then";
+            Ty ty = infer(te.expr(), env, twhere);
+            if (!ty.isBool()) {
+                throw new CheckException(twhere + " must be a boolean assertion, got " + ty);
+            }
+            if (mentionsEntityParamField(te.expr(), params)) {
+                requireDb(twhere, svc, "asserting stored state after the call");
+            }
+        }
+    }
+
+    /** {@code given} builds the starting state: an and-chain of equality pins on parameters. */
+    private void checkGiven(String where, Ast.Expr g, Map<String, Ty> params) {
+        if (g instanceof Ast.BinExpr and && and.op().equals("and")) {
+            checkGiven(where, and.left(), params);
+            checkGiven(where, and.right(), params);
+            return;
+        }
+        if (!(g instanceof Ast.BinExpr pin) || !pin.op().equals("==")) {
+            throw new CheckException(where + " pins parameter state with '==' constraints joined by 'and'");
+        }
+        Ty target = switch (pin.left()) {
+            case Ast.NameExpr n when params.containsKey(n.name()) -> params.get(n.name());
+            case Ast.MemberExpr me when me.target() instanceof Ast.NameExpr n
+                    && params.containsKey(n.name()) -> infer(me, params, where);
+            default -> throw new CheckException(where
+                    + " pins a parameter or a parameter's field on the left of each '=='");
+        };
+        Ty valueTy = infer(pin.right(), Map.of(), where);
+        fits(where, pin.right(), valueTy, target);
+    }
+
+    /** True when the assertion reads a field of an entity-typed parameter (stored state). */
+    private boolean mentionsEntityParamField(Ast.Expr e, Map<String, Ty> params) {
+        return switch (e) {
+            case Ast.MemberExpr m -> m.target() instanceof Ast.NameExpr n
+                    && params.get(n.name()) instanceof Ty.EntityTy
+                    || mentionsEntityParamField(m.target(), params);
+            case Ast.BinExpr b ->
+                    mentionsEntityParamField(b.left(), params) || mentionsEntityParamField(b.right(), params);
+            case Ast.NotExpr n -> mentionsEntityParamField(n.value(), params);
+            case Ast.CallExpr c -> c.args().stream().anyMatch(a -> mentionsEntityParamField(a, params));
+            default -> false;
+        };
     }
 
     private void checkRaise(String where, Ast.Raise r, Map<String, Ty> params, Ast.Service svc) {
@@ -675,12 +764,13 @@ public final class TypeChecker {
         }
     }
 
-    private void checkExample(String where, Ast.Method m, Map<String, Ty> params,
+    private void checkExample(String where, Ast.Service svc, Ast.Method m, Map<String, Ty> params,
                               Ty returnType, Ast.Example ex) {
         if (!ex.call().callee().equals(m.name())) {
             throw new CheckException(where + " example calls '" + ex.call().callee()
                     + "' but the method is '" + m.name() + "'");
         }
+        ex.seed().ifPresent(seed -> checkSeed(where + " example seed", svc, m, seed));
         List<Ast.Expr> args = ex.call().args();
         if (args.size() != m.params().size()) {
             throw new CheckException(where + " example passes " + args.size()
@@ -694,10 +784,26 @@ public final class TypeChecker {
         }
 
         switch (ex.result()) {
-            case Ast.RaisesResult rr -> throw new CheckException(where
-                    + ": raises example results are not checkable yet");
-            case Ast.FieldsResult fr -> throw new CheckException(where
-                    + ": field-expectation results are not checkable yet");
+            case Ast.RaisesResult rr -> {
+                // Declared-ness is validated in the pre-pass; nothing further to type here.
+            }
+            case Ast.FieldsResult fr -> {
+                if (!(returnType instanceof Ty.EntityTy et)) {
+                    throw new CheckException(where + " example expects result fields but the method"
+                            + " returns " + returnType);
+                }
+                Map<String, Ty> fields = entities.get(et.name());
+                for (Ast.FieldExpect fe : fr.fields()) {
+                    Ty fieldTy = fields.get(fe.field());
+                    if (fieldTy == null) {
+                        throw new CheckException(where + " example refers to unknown field '"
+                                + et.name() + "." + fe.field() + "'");
+                    }
+                    String feWhere = where + " example field '" + fe.field() + "'";
+                    Ty valTy = infer(fe.expected(), Map.of(), feWhere);
+                    fits(feWhere, fe.expected(), valTy, fieldTy);
+                }
+            }
             case Ast.ExprResult er -> {
                 String resultWhere = where + " example result";
                 Ty rt = infer(er.value(), Map.of(), resultWhere);
@@ -721,6 +827,35 @@ public final class TypeChecker {
                     fits(feWhere, fe.expected(), valTy, fieldTy);
                 }
             }
+        }
+    }
+
+    /** {@code on a Product with stock 5}: a stored row the harness must be able to construct. */
+    private void checkSeed(String where, Ast.Service svc, Ast.Method m, Ast.Seed seed) {
+        requireDb(where, svc, "seeding stored state");
+        Map<String, Ty> fields = entities.get(seed.entityName());
+        if (fields == null || valueSets.containsKey(seed.entityName())
+                || !identified.contains(seed.entityName())) {
+            throw new CheckException(where + ": '" + seed.entityName()
+                    + "' must be an @id entity to seed");
+        }
+        for (Ast.FieldExpect fe : seed.fields()) {
+            Ty fieldTy = fields.get(fe.field());
+            if (fieldTy == null) {
+                throw new CheckException(where + ": '" + fe.field() + "' is not a field of "
+                        + seed.entityName());
+            }
+            Ty valTy = infer(fe.expected(), Map.of(), where);
+            fits(where + " field '" + fe.field() + "'", fe.expected(), valTy, fieldTy);
+        }
+        String idField = moduleEntities.stream().filter(e -> e.name().equals(seed.entityName()))
+                .flatMap(e -> e.fields().stream()).filter(Ast.Field::id)
+                .map(Ast.Field::name).findFirst().orElseThrow();
+        boolean pinned = seed.fields().stream().anyMatch(fe -> fe.field().equals(idField));
+        boolean fromParam = m.params().stream().anyMatch(p -> p.name().equals(idField));
+        if (!pinned && !fromParam) {
+            throw new CheckException(where + ": the seeded row needs its " + idField
+                    + " — pin it in the seed or take a parameter named '" + idField + "'");
         }
     }
 
