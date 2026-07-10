@@ -874,6 +874,77 @@ class PipelineTest {
         assertTrue(err.toString().contains("NoSecretsInLogs"), err.toString());
     }
 
+    private static final String CRYPTO = """
+            module crypto
+            service Hasher {
+              hash(input Bytes) -> Bytes
+                ensures result.length == 32
+                java {
+                  var md = java.security.MessageDigest.getInstance("SHA-256");
+                  return Bytes.of(md.digest(input.toByteArray()));
+                }
+            }
+            """;
+
+    @Test
+    void nativeBodiesBypassTheModelAndFreeze(@TempDir Path root) throws Exception {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        Ast.Module module = Parsing.parse(CRYPTO, "crypto.sky");
+        new TypeChecker().check(module);
+        StubLlm stub = new StubLlm("return null;");
+
+        int code = new Pipeline(stub, ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertEquals(0, stub.calls(), "a native body must never reach the model");
+        String hasher = Files.readString(buildDir.resolve("src/main/java/crypto/Hasher.java"));
+        assertTrue(hasher.contains("MessageDigest.getInstance(\"SHA-256\")"),
+                "the hand-written body is staged verbatim");
+        assertTrue(hasher.contains("throws Exception"),
+                "native bodies may use checked platform APIs");
+
+        StubLlm second = new StubLlm("return null;");
+        var verified = new java.util.concurrent.atomic.AtomicBoolean();
+        Verifier recording = dir -> {
+            verified.set(true);
+            return VerificationResult.pass();
+        };
+        assertEquals(0, new Pipeline(second, recording).build(module, lock, buildDir, quiet(), quiet()));
+        assertEquals(0, second.calls());
+        assertFalse(verified.get(), "an unchanged native body is frozen like any other");
+
+        Ast.Module edited = Parsing.parse(CRYPTO.replace("SHA-256", "SHA-512"), "crypto.sky");
+        new TypeChecker().check(edited);
+        assertEquals(0, new Pipeline(new StubLlm("return null;"), recording)
+                .build(edited, lock, buildDir, quiet(), quiet()));
+        assertTrue(verified.get(), "editing the native body must re-verify it");
+    }
+
+    @Test
+    void nativeBodiesAreHeldToTheBudget(@TempDir Path root) {
+        Ast.Module module = Parsing.parse("""
+                module crypto
+                service Stamper {
+                  stamp(input Text) -> Text
+                    ensures result == input
+                    java {
+                      return input + java.time.Instant.now();
+                    }
+                }
+                """, "crypto.sky");
+        new TypeChecker().check(module);
+        var err = new ByteArrayOutputStream();
+        StubLlm stub = new StubLlm("return null;");
+
+        int code = new Pipeline(stub, ALWAYS_PASS).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), new PrintStream(err));
+
+        assertEquals(1, code, "hand-written bodies obey the same effects budget");
+        assertEquals(0, stub.calls(), "a native violation must not trigger regeneration");
+        assertTrue(err.toString().contains("clock"), err.toString());
+    }
+
     @Test
     void bankRebuildStaysFrozen(@TempDir Path root) {
         Path lock = root.resolve("sky.lock");

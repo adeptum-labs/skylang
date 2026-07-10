@@ -135,6 +135,18 @@ public final class Pipeline {
             var frozen = lock.get(u.key);
             if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
                 u.body = frozen.get().body();
+            } else if (u.method.nativeBody().isPresent()) {
+                // The escape hatch: the body is the author's, never the model's — but the
+                // effects budget and the contracts hold for it all the same.
+                u.body = u.method.nativeBody().get();
+                List<String> violations = EffectLinter.violations(u.body, u.service.uses(), module);
+                if (!violations.isEmpty()) {
+                    err.println("build failed: " + u.key + " (native) reaches outside its effects budget:");
+                    violations.forEach(v -> err.println("  " + v));
+                    return 1;
+                }
+                u.fresh = true;
+                anyFresh = true;
             } else {
                 if (!resolveBody(module, u, out, err)) {
                     return 1;

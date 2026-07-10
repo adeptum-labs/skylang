@@ -324,7 +324,8 @@ public final class ProjectStager {
             if (body == null) {
                 throw new IllegalStateException("no resolved body for " + key);
             }
-            sb.append("\n    public ").append(signature(m, types)).append(" {\n");
+            sb.append("\n    public ").append(signature(m, types))
+                    .append(m.nativeBody().isPresent() ? " throws Exception" : "").append(" {\n");
             // Refined parameters are guarded before the (synthesized) body runs, so no body
             // can be reached with a value that breaks the parameter's declared predicate.
             for (Ast.Param p : m.params()) {
@@ -501,7 +502,7 @@ public final class ProjectStager {
                 return "";
             }
         }
-        return "\n    @Test\n    void " + m.name() + "_raises_" + r.error() + "_" + k + "() {\n"
+        return "\n    @Test\n    void " + m.name() + "_raises_" + r.error() + "_" + k + "() throws Exception {\n"
                 + construction(service) + seed
                 + "        assertThrows(" + r.error() + ".class, () -> svc." + m.name() + "("
                 + String.join(", ", args.values()) + "), "
@@ -517,7 +518,7 @@ public final class ProjectStager {
             return "";
         }
         args.put(((Ast.NameExpr) ((Ast.BinExpr) req).left()).name(), witness);
-        return "\n    @Test\n    void " + m.name() + "_requires_" + g + "() {\n"
+        return "\n    @Test\n    void " + m.name() + "_requires_" + g + "() throws Exception {\n"
                 + construction(service)
                 + "        assertThrows(IllegalArgumentException.class, () -> svc." + m.name() + "("
                 + String.join(", ", args.values()) + "), "
@@ -627,7 +628,7 @@ public final class ProjectStager {
         java.util.Set<String> values = Lowering.valueEntities(module);
         Map<String, String> env = new LinkedHashMap<>();
         StringBuilder sb = new StringBuilder();
-        sb.append("\n    @Test\n    void ").append(m.name()).append("_example_").append(n).append("() {\n");
+        sb.append("\n    @Test\n    void ").append(m.name()).append("_example_").append(n).append("() throws Exception {\n");
         sb.append(construction(service));
 
         List<Ast.Expr> args = ex.call().args();
@@ -741,7 +742,7 @@ public final class ProjectStager {
         spec.given().ifPresent(g -> collectPins(g, fieldPins, directPins));
 
         StringBuilder sb = new StringBuilder();
-        sb.append("\n    @Test\n    void ").append(m.name()).append("_spec_").append(n).append("() {\n");
+        sb.append("\n    @Test\n    void ").append(m.name()).append("_spec_").append(n).append("() throws Exception {\n");
         sb.append(construction(service));
 
         // Witness variables for the parameters the when-call names; sequential ids keep
