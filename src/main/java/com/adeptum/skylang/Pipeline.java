@@ -186,11 +186,14 @@ public final class Pipeline {
         if (anyFresh || anyViewFresh || recheck) {
             int attempts = 0;
             VerificationResult result = verifier.verify(buildDir);
-            while (!result.passed() && attempts < maxRegenerations) {
+            boolean regenerable = units.stream()
+                    .anyMatch(u -> u.fresh && u.method.nativeBody().isEmpty());
+            while (!result.passed() && regenerable && attempts < maxRegenerations) {
                 attempts++;
                 out.println("  verification failed — regenerating synthesized bodies (attempt " + attempts + ")");
                 for (Unit u : units) {
-                    if (u.fresh) {
+                    // A native body is the author's to fix; only model-written bodies regenerate.
+                    if (u.fresh && u.method.nativeBody().isEmpty()) {
                         u.body = synthesize(module, u);
                     }
                 }

@@ -901,8 +901,8 @@ class PipelineTest {
         String hasher = Files.readString(buildDir.resolve("src/main/java/crypto/Hasher.java"));
         assertTrue(hasher.contains("MessageDigest.getInstance(\"SHA-256\")"),
                 "the hand-written body is staged verbatim");
-        assertTrue(hasher.contains("throws Exception"),
-                "native bodies may use checked platform APIs");
+        assertTrue(hasher.contains("catch (Exception e)"),
+                "native bodies may use checked platform APIs without changing the signature");
 
         StubLlm second = new StubLlm("return null;");
         var verified = new java.util.concurrent.atomic.AtomicBoolean();
@@ -943,6 +943,20 @@ class PipelineTest {
         assertEquals(1, code, "hand-written bodies obey the same effects budget");
         assertEquals(0, stub.calls(), "a native violation must not trigger regeneration");
         assertTrue(err.toString().contains("clock"), err.toString());
+    }
+
+    @Test
+    void nativeVerifyFailuresDoNotRegenerate(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(CRYPTO, "crypto.sky");
+        new TypeChecker().check(module);
+        StubLlm stub = new StubLlm("return null;");
+        Verifier alwaysFail = dir -> VerificationResult.fail("digest length was wrong");
+
+        int code = new Pipeline(stub, alwaysFail).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(1, code, "a native body failing its contracts fails the build");
+        assertEquals(0, stub.calls(), "the model must never be asked to rewrite a native body");
     }
 
     @Test

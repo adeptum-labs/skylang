@@ -36,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * End-to-end proof that a synthesized body actually compiles and its generated ensures/example
@@ -268,6 +269,40 @@ class StagedVerifyE2ETest {
                         new PrintStream(out), new PrintStream(out));
 
         assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
+    }
+
+    private static final String BITS = """
+            module bits
+            service Bits {
+              popcount(value Int) -> Int
+                ensures result >= 0 and not (result > 64)
+                example popcount(7) -> 3
+                java {
+                  return Long.bitCount(value);
+                }
+              doublecount(value Int) -> Int
+                intent  "Twice the popcount of the value."
+                example doublecount(7) -> 6
+            }
+            """;
+
+    @Test
+    void nativeBodiesAreVerifiedEndToEnd(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(BITS, "bits.sky");
+        new TypeChecker().check(module);
+
+        StubLlm stub = new StubLlm((system, user) -> {
+            assertFalse(user.contains("popcount(value Int)") && user.contains("Long.bitCount"),
+                    "native methods never reach the model");
+            return "return popcount(value) * 2;";
+        });
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(stub, new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "staged verification failed:\n" + out.toString(StandardCharsets.UTF_8));
+        assertEquals(1, stub.calls(), "only the generated sibling should be synthesized");
     }
 
     private static final String BANK = """

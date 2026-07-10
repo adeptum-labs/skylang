@@ -142,10 +142,19 @@ adding one re-verifies the module. The profile contributes its own policy in the
 spirit: a `Secret` can never appear in a rendered view (no Faces getter, no column, no
 prompt). Unresolvable whenever-prose is a check error naming the two supported shapes.
 
+The escape hatch is open: `java { ... }` drops a hand-written Java body into a method. It
+compiles directly — the model is never involved and never asked to rewrite it — but it is
+verified against its contracts and examples like every generated body, held to the same
+effects budget and policies, and frozen under a spec hash that covers the body text, so
+editing the block re-verifies it. Native methods may use checked platform APIs (anything
+checked resurfaces unchecked), generated siblings may lean on them, and a module's
+portability stays visible at a grep: no `java` blocks means retargetable.
+
 Not yet implemented (deferred): `page`/`flow`, the dependency `requires` registry, further
-whenever-forms (audited deletes, money conservation, layer boundaries), native `java { }`
-blocks, property-based `ensures`, prose-form example arguments, a Jakarta Mail binding for
-the `mail` effect, and persistence for `Map` fields and lists of identified entities.
+whenever-forms (audited deletes, money conservation, layer boundaries), the `ts`/`py`
+native keywords (they arrive with their profiles), property-based `ensures`, prose-form
+example arguments, a Jakarta Mail binding for the `mail` effect, and persistence for `Map`
+fields and lists of identified entities.
 
 ## Build & run
 

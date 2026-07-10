@@ -324,8 +324,14 @@ public final class ProjectStager {
             if (body == null) {
                 throw new IllegalStateException("no resolved body for " + key);
             }
-            sb.append("\n    public ").append(signature(m, types))
-                    .append(m.nativeBody().isPresent() ? " throws Exception" : "").append(" {\n");
+            // A native body may use checked platform APIs without changing the signature
+            // its callers see; anything checked resurfaces unchecked.
+            if (m.nativeBody().isPresent()) {
+                body = "try {\n" + indent(body.strip(), "    ")
+                        + "\n} catch (RuntimeException e) {\n    throw e;\n"
+                        + "} catch (Exception e) {\n    throw new IllegalStateException(e);\n}";
+            }
+            sb.append("\n    public ").append(signature(m, types)).append(" {\n");
             // Refined parameters are guarded before the (synthesized) body runs, so no body
             // can be reached with a value that breaks the parameter's declared predicate.
             for (Ast.Param p : m.params()) {

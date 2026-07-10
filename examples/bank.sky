@@ -71,6 +71,14 @@ service Accounts uses db, clock {
   protect(a Account, password Password) -> Bool
     intent "Whether the password may guard the account."
 
+  // The escape hatch: a hand-written body, still verified against its contract.
+  checksum(input Bytes) -> Bytes
+    ensures result.length == 32
+    java {
+      var md = java.security.MessageDigest.getInstance("SHA-256");
+      return Bytes.of(md.digest(input.toByteArray()));
+    }
+
   lookup(id Int) -> Account
     intent "The stored account with that id."
     raises NotFound when no account has that id
