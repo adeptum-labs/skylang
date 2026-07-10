@@ -60,20 +60,32 @@ public final class TypeChecker {
     /** the entities that carry an @id field — store roots and relation targets. */
     private final java.util.Set<String> identified = new java.util.HashSet<>();
 
+    /** entities named in a raises clause — failure types, never usable as data. */
+    private final java.util.Set<String> errorEntities = new java.util.HashSet<>();
+
+    /** unqualified module methods callable from contracts, with their service's budget. */
+    private record Helper(MethodSig sig, List<String> uses, boolean ambiguous) {
+    }
+
+    private final Map<String, Helper> helpers = new HashMap<>();
+
+    /** the service whose method is being checked; aggregates and phrases consult its budget. */
+    private Ast.Service currentService;
+
     public void check(Ast.Module module) {
         registerTypeDecls(module);
         registerEntities(module);
         if (module.services().stream().anyMatch(s -> s.uses().contains("db"))) {
             validatePersistability(module);
         }
+        registerErrorsAndHelpers(module);
 
         // Check every method and index its signature for view resolution.
         Map<String, Map<String, MethodSig>> services = new HashMap<>();
         for (Ast.Service s : module.services()) {
-            checkEffects(s);
             Map<String, MethodSig> methods = services.computeIfAbsent(s.name(), k -> new HashMap<>());
             for (Ast.Method m : s.methods()) {
-                checkMethod(s.name(), m);
+                checkMethod(s, m);
                 methods.put(m.name(), signatureOf(s.name(), m));
             }
         }
@@ -155,7 +167,11 @@ public final class TypeChecker {
 
     // ----- entities ------------------------------------------------------------
 
+    /** the module's entities with their raw declarations, for phrase and @id lookups. */
+    private List<Ast.Entity> moduleEntities = List.of();
+
     private void registerEntities(Ast.Module module) {
+        moduleEntities = module.entities();
         for (Ast.Entity e : module.entities()) {
             if (Builtins.isReserved(e.name())) {
                 throw new CheckException("entity '" + e.name() + "' shadows the built-in type " + e.name());
@@ -303,6 +319,39 @@ public final class TypeChecker {
             throw new CheckException("entity '" + e.name() + "' declares a duplicate value");
         }
         valueSets.put(e.name(), e.values());
+    }
+
+    /**
+     * The pre-pass over services: validate budgets, mark the entities that raises clauses
+     * turn into error types, and index every method for contract helper calls.
+     */
+    private void registerErrorsAndHelpers(Ast.Module module) {
+        for (Ast.Service s : module.services()) {
+            checkEffects(s);
+            for (Ast.Method m : s.methods()) {
+                for (Ast.Raise r : m.raises()) {
+                    if (!entities.containsKey(r.error())) {
+                        throw new CheckException(s.name() + "." + m.name() + " raises unknown error '"
+                                + r.error() + "' — declare it as an entity");
+                    }
+                    errorEntities.add(r.error());
+                }
+            }
+        }
+        for (Ast.Service s : module.services()) {
+            for (Ast.Method m : s.methods()) {
+                boolean ambiguous = helpers.containsKey(m.name());
+                helpers.put(m.name(), new Helper(signatureOf(s.name(), m), s.uses(), ambiguous));
+            }
+        }
+        for (Ast.Entity e : module.entities()) {
+            for (Ast.Field f : e.fields()) {
+                if (f.type() instanceof Ast.TypeRef ref && errorEntities.contains(ref.name())) {
+                    throw new CheckException("field '" + e.name() + "." + f.name() + "': '" + ref.name()
+                            + "' is an error (named in raises) and cannot be used as data");
+                }
+            }
+        }
     }
 
     private static void checkEffects(Ast.Service s) {
@@ -479,8 +528,10 @@ public final class TypeChecker {
         }
     }
 
-    private void checkMethod(String service, Ast.Method m) {
+    private void checkMethod(Ast.Service svc, Ast.Method m) {
+        String service = svc.name();
         String where = service + "." + m.name();
+        currentService = svc;
 
         if (m.intent().isEmpty() && m.examples().isEmpty()) {
             throw new CheckException(where + " has no driver: give it an intent and/or at least one example");
@@ -513,9 +564,114 @@ public final class TypeChecker {
             }
         }
 
+        // raises: each names a declared error and a condition the checker can resolve.
+        for (Ast.Raise r : m.raises()) {
+            checkRaise(where + " raises " + r.error(), r, params, svc);
+        }
+
+        // old(result...) reads pre-call store state: it needs the db and a way to find the row.
+        if (m.ensures().stream().anyMatch(TypeChecker::mentionsOldResult)) {
+            requireOldResultShape(where, svc, m, returnType);
+        }
+
         // examples: concrete inputs (no parameter names in scope) -> expected result.
         for (Ast.Example ex : m.examples()) {
             checkExample(where, m, params, returnType, ex);
+        }
+        currentService = null;
+    }
+
+    private void checkRaise(String where, Ast.Raise r, Map<String, Ty> params, Ast.Service svc) {
+        switch (r.condition()) {
+            case Ast.CondExpr c -> {
+                Ty t = infer(c.expr(), params, where);
+                if (!t.isBool()) {
+                    throw new CheckException(where + ": the when-condition must be boolean, got " + t);
+                }
+            }
+            case Ast.NoSuch ns -> {
+                String entity = entityByWord(ns.entityWord());
+                if (entity == null) {
+                    throw new CheckException(where + ": cannot resolve 'no " + ns.entityWord()
+                            + " ...' — no entity matches '" + ns.entityWord()
+                            + "'. State the condition concretely.");
+                }
+                boolean field = entities.get(entity).containsKey(ns.fieldWord());
+                if (!field || !params.containsKey(ns.fieldWord())) {
+                    throw new CheckException(where + ": 'no " + ns.entityWord() + " has that "
+                            + ns.fieldWord() + "' needs a '" + ns.fieldWord() + "' field on " + entity
+                            + " and a matching parameter");
+                }
+                requireDb(where, svc, "the existence phrase");
+            }
+            case Ast.AlreadyRegistered ar -> {
+                if (!(ar.value() instanceof Ast.NameExpr n) || !params.containsKey(n.name())) {
+                    throw new CheckException(where + ": 'already registered' needs a parameter to check");
+                }
+                boolean unique = false;
+                for (Ast.Entity e : moduleEntities) {
+                    unique |= e.fields().stream().anyMatch(f -> f.unique() && f.name().equals(n.name()));
+                }
+                if (!unique) {
+                    throw new CheckException(where + ": 'already registered' needs an entity field named '"
+                            + n.name() + "' declared @unique");
+                }
+                requireDb(where, svc, "the uniqueness phrase");
+            }
+        }
+    }
+
+    private static void requireDb(String where, Ast.Service svc, String what) {
+        if (!svc.uses().contains("db")) {
+            throw new CheckException(where + ": " + what + " needs the db effect on the service");
+        }
+    }
+
+    /** Match a phrase word like "product" or "products" to a declared entity, case-insensitively. */
+    private String entityByWord(String word) {
+        String bare = word.toLowerCase(java.util.Locale.ROOT);
+        String singular = bare.endsWith("s") ? bare.substring(0, bare.length() - 1) : bare;
+        for (String name : entities.keySet()) {
+            String lower = name.toLowerCase(java.util.Locale.ROOT);
+            if (lower.equals(bare) || lower.equals(singular)) {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    private static boolean mentionsOldResult(Ast.Expr expr) {
+        return switch (expr) {
+            case Ast.OldExpr o -> mentionsResult(o.value());
+            case Ast.BinExpr b -> mentionsOldResult(b.left()) || mentionsOldResult(b.right());
+            case Ast.NotExpr n -> mentionsOldResult(n.value());
+            case Ast.MemberExpr m -> mentionsOldResult(m.target());
+            case Ast.CallExpr c -> c.args().stream().anyMatch(TypeChecker::mentionsOldResult);
+            default -> false;
+        };
+    }
+
+    private static boolean mentionsResult(Ast.Expr expr) {
+        return switch (expr) {
+            case Ast.NameExpr n -> n.name().equals("result");
+            case Ast.MemberExpr m -> mentionsResult(m.target());
+            case Ast.BinExpr b -> mentionsResult(b.left()) || mentionsResult(b.right());
+            default -> false;
+        };
+    }
+
+    /** {@code old(result...)} is a pre-call lookup: db plus a parameter naming the row's @id. */
+    private void requireOldResultShape(String where, Ast.Service svc, Ast.Method m, Ty returnType) {
+        requireDb(where + " ensures", svc, "old(result...)");
+        String idField = returnType instanceof Ty.EntityTy et
+                ? moduleEntities.stream().filter(e -> e.name().equals(et.name()))
+                        .flatMap(e -> e.fields().stream()).filter(Ast.Field::id)
+                        .map(Ast.Field::name).findFirst().orElse(null)
+                : null;
+        boolean locatable = idField != null && m.params().stream().anyMatch(p -> p.name().equals(idField));
+        if (!locatable) {
+            throw new CheckException(where + " ensures: old(result...) needs the method to return an @id"
+                    + " entity and take a parameter named after its id field");
         }
     }
 
@@ -604,19 +760,86 @@ public final class TypeChecker {
             }
             case Ast.CallExpr ce -> inferConstructor(ce, env, where);
             case Ast.BinExpr be -> inferBinary(be, env, where);
+            case Ast.NotExpr ne -> {
+                Ty t = infer(ne.value(), env, where);
+                if (!t.isBool()) {
+                    throw new CheckException(where + ": 'not' requires a boolean, got " + t);
+                }
+                yield Ty.BOOL;
+            }
+            case Ast.EmptyCheck ec -> {
+                Ty t = infer(ec.value(), env, where);
+                boolean collection = t instanceof Ty.GenericTy g
+                        && (g.kind().equals("List") || g.kind().equals("Set") || g.kind().equals("Map"));
+                if (!collection) {
+                    throw new CheckException(where + ": 'is empty' needs a collection, got " + t);
+                }
+                yield Ty.BOOL;
+            }
+            case Ast.OldExpr oe -> {
+                // Ensures is the one context where `result` is in scope; old() rides with it.
+                if (!env.containsKey("result")) {
+                    throw new CheckException(where + ": old(...) may only appear in ensures");
+                }
+                yield infer(oe.value(), env, where);
+            }
+            case Ast.AggExpr ae -> inferAggregate(ae, env, where);
         };
     }
 
-    /** A call inside an expression is an entity constructor: {@code Product(1, "Notebook", 5)}. */
+    private Ty inferAggregate(Ast.AggExpr ag, Map<String, Ty> env, String where) {
+        Ty element = switch (ag.source()) {
+            case Ast.SourceExpr s -> {
+                Ty t = infer(s.expr(), env, where);
+                if (!(t instanceof Ty.GenericTy g
+                        && (g.kind().equals("List") || g.kind().equals("Set")))) {
+                    throw new CheckException(where + ": the aggregate source must be a collection, got " + t);
+                }
+                yield g.args().get(0);
+            }
+            case Ast.AllOf all -> {
+                String entity = entityByWord(all.word());
+                if (entity == null) {
+                    throw new CheckException(where + ": cannot resolve 'all " + all.word()
+                            + "' to a stored entity");
+                }
+                if (currentService == null || !currentService.uses().contains("db")) {
+                    throw new CheckException(where + ": 'all " + all.word() + "' needs the db effect");
+                }
+                yield Ty.entity(entity);
+            }
+        };
+        Map<String, Ty> inner = new LinkedHashMap<>(env);
+        inner.put(ag.var(), element);
+        ag.where().ifPresent(w -> {
+            Ty t = infer(w, inner, where + " where");
+            if (!t.isBool()) {
+                throw new CheckException(where + ": the where filter must be boolean, got " + t);
+            }
+        });
+        Ty valueTy = infer(ag.value(), inner, where);
+        if (ag.kind().equals("count")) {
+            return Ty.INT;
+        }
+        Ty e = valueTy.erased();
+        if (!e.equals(Ty.INT) && !e.equals(Ty.MONEY)) {
+            throw new CheckException(where + ": sum of needs Int or Money elements, got " + valueTy);
+        }
+        return e;
+    }
+
+    /** A call in an expression: an entity constructor, max/min, or an effect-free helper method. */
     private Ty inferConstructor(Ast.CallExpr ce, Map<String, Ty> env, String where) {
         if (valueSets.containsKey(ce.callee())) {
             throw new CheckException(where + ": the value set of " + ce.callee() + " is closed; use its"
                     + " declared constants (" + ce.callee() + "." + valueSets.get(ce.callee()).get(0) + ", ...)");
         }
+        if (ce.callee().equals("max") || ce.callee().equals("min")) {
+            return inferExtreme(ce, env, where);
+        }
         LinkedHashMap<String, Ty> fields = entities.get(ce.callee());
         if (fields == null) {
-            throw new CheckException(where + ": '" + ce.callee()
-                    + "' is not an entity; only entity constructors are allowed in expressions");
+            return inferHelperCall(ce, env, where);
         }
         List<Ty> fieldTypes = List.copyOf(fields.values());
         int required = requiredFields.getOrDefault(ce.callee(), fieldTypes.size());
@@ -632,6 +855,45 @@ public final class TypeChecker {
             fits(argWhere, ce.args().get(i), at, fieldTypes.get(i));
         }
         return Ty.entity(ce.callee());
+    }
+
+    /** {@code max(a, b)} / {@code min(a, b)} over two values of the same ordered type. */
+    private Ty inferExtreme(Ast.CallExpr ce, Map<String, Ty> env, String where) {
+        if (ce.args().size() != 2) {
+            throw new CheckException(where + ": " + ce.callee() + " takes two arguments");
+        }
+        Ty l = infer(ce.args().get(0), env, where).erased();
+        Ty r = infer(ce.args().get(1), env, where).erased();
+        boolean ordered = l.equals(r) && (l.equals(Ty.INT) || l.equals(Ty.MONEY) || l.equals(Ty.INSTANT));
+        if (!ordered) {
+            throw new CheckException(where + ": " + ce.callee() + " needs two values of the same ordered"
+                    + " type, got " + l + " and " + r);
+        }
+        return l;
+    }
+
+    /** A contract may call any module method that declares no effects. */
+    private Ty inferHelperCall(Ast.CallExpr ce, Map<String, Ty> env, String where) {
+        Helper helper = helpers.get(ce.callee());
+        if (helper == null) {
+            throw new CheckException(where + ": '" + ce.callee()
+                    + "' is neither an entity constructor nor a module method");
+        }
+        if (helper.ambiguous()) {
+            throw new CheckException(where + ": '" + ce.callee()
+                    + "' is declared by more than one service; contracts need an unambiguous name");
+        }
+        if (!helper.uses().isEmpty()) {
+            throw new CheckException(where + ": contracts may only call effect-free methods, but '"
+                    + ce.callee() + "' uses " + String.join(", ", helper.uses()));
+        }
+        checkArgCount(where, ce.callee(), ce.args().size(), helper.sig().params().size());
+        for (int i = 0; i < ce.args().size(); i++) {
+            Ty at = infer(ce.args().get(i), env, where);
+            fits(where + ": " + ce.callee() + " argument " + (i + 1), ce.args().get(i), at,
+                    helper.sig().params().get(i));
+        }
+        return helper.sig().returnType();
     }
 
     private Ty inferBinary(Ast.BinExpr be, Map<String, Ty> env, String where) {
@@ -750,6 +1012,10 @@ public final class TypeChecker {
             return declared;
         }
         if (entities.containsKey(name)) {
+            if (errorEntities.contains(name)) {
+                throw new CheckException(where + ": '" + name
+                        + "' is an error (named in raises) and cannot be used as data");
+            }
             return Ty.entity(name);
         }
         throw new CheckException(where + ": unknown type '" + name + "'");

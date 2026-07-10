@@ -60,8 +60,16 @@ public final class PromptBuilder {
               time, when budgeted, is clock.instant().
             - An enum-like entity's instance set is closed: use its listed constants (Role.Member),
               never its constructor.
+            - Each `raises Error when <condition>` names an exception class in the same package:
+              throw exactly that class under exactly that condition (new NotFound(), or with its
+              context fields), and let no other exception escape where a raises names one. Check
+              input conditions before store lookups so each failure surfaces as declared.
+            - In `ensures`, old(expr) means the value of expr BEFORE the call; old(result.field)
+              means the stored row's field before the change. The body implements the transition;
+              the harness snapshots the old values.
+            - `requires` clauses are enforced by guards before the body runs; assume they hold.
             - Records are immutable: to "change" a field, construct a new record value.
-            - The body must satisfy every `requires`, `ensures`, and `example`.
+            - The body must satisfy every `requires`, `ensures`, `raises`, and `example`.
             """;
 
     public String system() {
@@ -112,6 +120,14 @@ public final class PromptBuilder {
         if (!method.ensures().isEmpty()) {
             sb.append("Postconditions (must hold for the result):\n");
             method.ensures().forEach(e -> sb.append("  ensures ").append(sky(e)).append('\n'));
+            sb.append('\n');
+        }
+        if (!method.raises().isEmpty()) {
+            sb.append("Failure contracts (throw exactly these):\n");
+            for (Ast.Raise r : method.raises()) {
+                sb.append("  raises ").append(r.error()).append(" when ")
+                        .append(renderCondition(r.condition())).append('\n');
+            }
             sb.append('\n');
         }
         if (!method.examples().isEmpty()) {
@@ -186,6 +202,14 @@ public final class PromptBuilder {
         return sb.toString();
     }
 
+    private String renderCondition(Ast.RaiseCondition condition) {
+        return switch (condition) {
+            case Ast.CondExpr c -> sky(c.expr());
+            case Ast.NoSuch ns -> "no " + ns.entityWord() + " has that " + ns.fieldWord();
+            case Ast.AlreadyRegistered ar -> sky(ar.value()) + " already registered";
+        };
+    }
+
     private String skyTypeDecl(Ast.TypeDecl d) {
         String refinement = switch (d.refinement()) {
             case Ast.Range r -> d.base() + "(" + (r.lo().isPresent() ? r.lo().getAsLong() : "")
@@ -207,6 +231,19 @@ public final class PromptBuilder {
             case Ast.CallExpr c -> c.callee() + "("
                     + c.args().stream().map(this::sky).collect(Collectors.joining(", ")) + ")";
             case Ast.BinExpr b -> sky(b.left()) + " " + b.op() + " " + sky(b.right());
+            case Ast.NotExpr n -> "not " + sky(n.value());
+            case Ast.OldExpr o -> "old(" + sky(o.value()) + ")";
+            case Ast.EmptyCheck e -> sky(e.value()) + " is empty";
+            case Ast.AggExpr a -> a.kind() + " of (" + sky(a.value()) + " for " + a.var() + " in "
+                    + skySource(a.source())
+                    + a.where().map(w -> " where " + sky(w)).orElse("") + ")";
+        };
+    }
+
+    private String skySource(Ast.AggSource source) {
+        return switch (source) {
+            case Ast.AllOf all -> "all " + all.word();
+            case Ast.SourceExpr s -> sky(s.expr());
         };
     }
 }

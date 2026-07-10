@@ -25,6 +25,7 @@ import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.types.Builtins;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -114,7 +115,16 @@ public final class Lowering {
     }
 
     public static String exprToJava(Ast.Expr expr, Map<String, String> env) {
-        return exprToJava(expr, env, Set.of());
+        return exprToJava(expr, env, Set.of(), null);
+    }
+
+    public static String exprToJava(Ast.Expr expr, Map<String, String> env, Set<String> valueEntities) {
+        return exprToJava(expr, env, valueEntities, null);
+    }
+
+    /** Module-aware lowering: helper calls, value constants and 'all' sources resolve. */
+    public static String exprToJava(Ast.Expr expr, Map<String, String> env, Ast.Module module) {
+        return exprToJava(expr, env, valueEntities(module), module);
     }
 
     /**
@@ -125,7 +135,8 @@ public final class Lowering {
      * helper methods staged into every generated test class, so javac's overload resolution
      * picks primitive or object semantics.
      */
-    public static String exprToJava(Ast.Expr expr, Map<String, String> env, Set<String> valueEntities) {
+    private static String exprToJava(Ast.Expr expr, Map<String, String> env, Set<String> valueEntities,
+                                     Ast.Module module) {
         return switch (expr) {
             case Ast.IntLit i -> i.value() + "L";
             case Ast.StrLit s -> javaString(s.value());
@@ -136,16 +147,76 @@ public final class Lowering {
                     m.target() instanceof Ast.NameExpr n && !env.containsKey(n.name())
                             && valueEntities.contains(n.name())
                             ? n.name() + "." + m.field()
-                            : "(" + exprToJava(m.target(), env, valueEntities) + ")." + m.field() + "()";
-            case Ast.CallExpr c -> "new " + c.callee() + "(" + c.args().stream()
-                    .map(a -> exprToJava(a, env, valueEntities)).collect(Collectors.joining(", ")) + ")";
-            case Ast.BinExpr b -> binToJava(b, env, valueEntities);
+                            : "(" + exprToJava(m.target(), env, valueEntities, module) + ")." + m.field() + "()";
+            case Ast.CallExpr c -> callToJava(c, env, valueEntities, module);
+            case Ast.BinExpr b -> binToJava(b, env, valueEntities, module);
+            case Ast.NotExpr n -> "!(" + exprToJava(n.value(), env, valueEntities, module) + ")";
+            case Ast.EmptyCheck e -> "(" + exprToJava(e.value(), env, valueEntities, module) + ").isEmpty()";
+            case Ast.OldExpr o ->
+                    throw new UnsupportedOperationException("old(...) must be snapshotted before lowering");
+            case Ast.AggExpr a -> aggToJava(a, env, valueEntities, module);
         };
     }
 
-    private static String binToJava(Ast.BinExpr b, Map<String, String> env, Set<String> valueEntities) {
-        String l = exprToJava(b.left(), env, valueEntities);
-        String r = exprToJava(b.right(), env, valueEntities);
+    /** An entity constructor, max/min through the helpers, or an effect-free module method. */
+    private static String callToJava(Ast.CallExpr c, Map<String, String> env, Set<String> valueEntities,
+                                     Ast.Module module) {
+        String args = c.args().stream()
+                .map(a -> exprToJava(a, env, valueEntities, module))
+                .collect(Collectors.joining(", "));
+        if (c.callee().equals("max") || c.callee().equals("min")) {
+            return c.callee() + "(" + args + ")";
+        }
+        if (module != null && module.entities().stream().noneMatch(e -> e.name().equals(c.callee()))) {
+            String owner = module.services().stream()
+                    .filter(s -> s.methods().stream().anyMatch(m -> m.name().equals(c.callee())))
+                    .map(Ast.Service::name).findFirst().orElse(null);
+            if (owner != null) {
+                return "new " + owner + "()." + c.callee() + "(" + args + ")";
+            }
+        }
+        return "new " + c.callee() + "(" + args + ")";
+    }
+
+    /**
+     * Aggregates fold a stream: {@code count} filters and counts; {@code sum} maps and adds
+     * through the runtime-dispatching sumOf helper, so Int and Money elements both work.
+     */
+    private static String aggToJava(Ast.AggExpr a, Map<String, String> env, Set<String> valueEntities,
+                                    Ast.Module module) {
+        String source = switch (a.source()) {
+            case Ast.AllOf all -> "db.all" + entityByWord(all.word(), module) + "s()";
+            case Ast.SourceExpr s -> "(" + exprToJava(s.expr(), env, valueEntities, module) + ")";
+        };
+        Map<String, String> inner = new LinkedHashMap<>(env);
+        inner.put(a.var(), a.var());
+        String filter = a.where()
+                .map(w -> ".filter(" + a.var() + " -> " + exprToJava(w, inner, valueEntities, module) + ")")
+                .orElse("");
+        if (a.kind().equals("count")) {
+            return source + ".stream()" + filter + ".count()";
+        }
+        return "sumOf(" + source + ".stream()" + filter + ".map(" + a.var() + " -> (Object) ("
+                + exprToJava(a.value(), inner, valueEntities, module) + ")).toList())";
+    }
+
+    /** Match "products" to the module's Product entity, as the checker did. */
+    private static String entityByWord(String word, Ast.Module module) {
+        String bare = word.toLowerCase(java.util.Locale.ROOT);
+        String singular = bare.endsWith("s") ? bare.substring(0, bare.length() - 1) : bare;
+        return module.entities().stream()
+                .map(Ast.Entity::name)
+                .filter(n -> {
+                    String lower = n.toLowerCase(java.util.Locale.ROOT);
+                    return lower.equals(bare) || lower.equals(singular);
+                })
+                .findFirst().orElseThrow();
+    }
+
+    private static String binToJava(Ast.BinExpr b, Map<String, String> env, Set<String> valueEntities,
+                                    Ast.Module module) {
+        String l = exprToJava(b.left(), env, valueEntities, module);
+        String r = exprToJava(b.right(), env, valueEntities, module);
         return switch (b.op()) {
             case "and" -> "(" + l + " && " + r + ")";
             case "or" -> "(" + l + " || " + r + ")";
@@ -248,6 +319,100 @@ public final class Lowering {
     private static String throwUnless(String condition, String label, String rule) {
         return "if (!(" + condition + ")) throw new IllegalArgumentException(\""
                 + label + " violates " + rule + "\");\n";
+    }
+
+    /**
+     * A Java expression producing a valid value of the given type, for the witness
+     * arguments of generated raises/requires tests — or null when none is derivable
+     * (a regex-refined text, a secret). Entities recurse through their required fields.
+     */
+    public static String defaultJavaValue(Ast.Type type, Map<String, Ast.TypeDecl> types, Ast.Module module) {
+        if (type instanceof Ast.TypeRef ref && ref.list()) {
+            return "java.util.List.of()";
+        }
+        if (type instanceof Ast.GenericType g) {
+            return switch (g.name()) {
+                case "Maybe" -> "java.util.Optional.empty()";
+                case "List" -> "java.util.List.of()";
+                case "Set" -> "java.util.Set.of()";
+                case "Map" -> "java.util.Map.of()";
+                default -> null;   // Secret has no safe default
+            };
+        }
+        if (type instanceof Ast.RangedType r) {
+            return r.base().equals("Int")
+                    ? Math.max(r.lo().orElse(1), 1) + "L"
+                    : "\"x\"";
+        }
+        Ast.TypeRef ref = (Ast.TypeRef) type;
+        Ast.TypeDecl declared = types.get(ref.name());
+        if (declared != null) {
+            return switch (declared.refinement()) {
+                case Ast.Range range -> declared.base().equals("Int")
+                        ? Math.max(range.lo().orElse(1), 1) + "L" : "\"x\"";
+                case Ast.Matching ignored -> null;
+                case Ast.Where ignored -> declared.base().equals("Money") ? "Money.of(\"1\", \"EUR\")" : null;
+            };
+        }
+        return switch (ref.name()) {
+            case "Int" -> "1L";
+            case "Text" -> "\"x\"";
+            case "Bool" -> "true";
+            case "Email" -> "\"a@example.com\"";
+            case "Money" -> "Money.of(\"1\", \"EUR\")";
+            case "Instant" -> "java.time.Instant.parse(\"2026-01-01T00:00:00Z\")";
+            case "Bytes" -> "Bytes.ofUtf8(\"x\")";
+            default -> defaultEntityValue(ref.name(), types, module);
+        };
+    }
+
+    private static String defaultEntityValue(String name, Map<String, Ast.TypeDecl> types, Ast.Module module) {
+        for (Ast.Entity e : module.entities()) {
+            if (!e.name().equals(name)) {
+                continue;
+            }
+            if (!e.values().isEmpty()) {
+                return name + "." + e.values().get(0);
+            }
+            // The omitting constructor covers the trailing defaulted fields.
+            List<String> args = new java.util.ArrayList<>();
+            for (int i = 0; i < requiredFields(e); i++) {
+                String value = defaultJavaValue(e.fields().get(i).type(), types, module);
+                if (value == null) {
+                    return null;
+                }
+                args.add(value);
+            }
+            return "new " + name + "(" + String.join(", ", args) + ")";
+        }
+        return null;
+    }
+
+    private static int requiredFields(Ast.Entity e) {
+        int required = e.fields().size();
+        while (required > 0 && e.fields().get(required - 1).defaultValue().isPresent()) {
+            required--;
+        }
+        return required;
+    }
+
+    /** The expression as written in SkyLang, for guard and assertion messages. */
+    public static String skyText(Ast.Expr expr) {
+        return switch (expr) {
+            case Ast.IntLit i -> Long.toString(i.value());
+            case Ast.StrLit s -> "\"" + s.value() + "\"";
+            case Ast.BoolLit b -> Boolean.toString(b.value());
+            case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
+            case Ast.NameExpr n -> n.name();
+            case Ast.MemberExpr m -> skyText(m.target()) + "." + m.field();
+            case Ast.CallExpr c -> c.callee() + "("
+                    + c.args().stream().map(Lowering::skyText).collect(Collectors.joining(", ")) + ")";
+            case Ast.BinExpr b -> skyText(b.left()) + " " + b.op() + " " + skyText(b.right());
+            case Ast.NotExpr n -> "not " + skyText(n.value());
+            case Ast.OldExpr o -> "old(" + skyText(o.value()) + ")";
+            case Ast.EmptyCheck e -> skyText(e.value()) + " is empty";
+            case Ast.AggExpr a -> a.kind() + " of (...)";
+        };
     }
 
     public static String javaString(String s) {

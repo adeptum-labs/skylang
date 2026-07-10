@@ -714,6 +714,170 @@ class TypeCheckerTest {
                 """));
     }
 
+    // ----- the chapter-5 surface: raises, old, aggregates, helper calls --------
+
+    private static final String CATALOG = """
+            module shop
+            entity Product { id Int @id  name Text  stock Int @min(0) }
+            entity User { id Int @id  email Email @unique }
+            entity NotFound { }
+            entity BadInput { }
+            entity DuplicateEmail { }
+            service Catalog uses db {
+            %s
+            }
+            """;
+
+    @Test
+    void acceptsTheChapterFiveContracts() {
+        assertDoesNotThrow(() -> check(CATALOG.formatted("""
+              restock(id Int, units Int) -> Product
+                intent   "Increase stock."
+                requires units > 0 and not (units > 10000)
+                ensures  result.stock == old(result.stock) + units
+                raises   NotFound when no product has that id
+                raises   BadInput when units <= 0
+              register(email Email) -> User
+                intent "Create the user."
+                raises DuplicateEmail when email already registered
+              totalStock() -> Int
+                intent  "The total stock."
+                ensures result == sum of (p.stock for p in all products)
+              emptyCount(products [Product]) -> Int
+                intent  "How many are out of stock."
+                ensures result == count of (p for p in products where p.stock == 0)
+            """)));
+    }
+
+    @Test
+    void raisesNamesMustBeDeclaredEntities() {
+        CheckException e = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f(id Int) -> Product
+                intent "x"
+                raises Mystery when id <= 0
+            """)));
+        assertTrue(e.getMessage().contains("Mystery"), e.getMessage());
+    }
+
+    @Test
+    void errorEntitiesCannotBeUsedAsData() {
+        CheckException e = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f(id Int) -> NotFound
+                intent "x"
+                raises NotFound when id <= 0
+            """)));
+        assertTrue(e.getMessage().contains("error"), e.getMessage());
+    }
+
+    @Test
+    void unresolvablePhrasesAreRejectedWithAHint() {
+        CheckException entity = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f(id Int) -> Product
+                intent "x"
+                raises NotFound when no widget has that id
+            """)));
+        assertTrue(entity.getMessage().contains("widget"), entity.getMessage());
+        CheckException unique = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f(name Text) -> Product
+                intent "x"
+                raises BadInput when name already registered
+            """)));
+        assertTrue(unique.getMessage().contains("@unique"), unique.getMessage());
+    }
+
+    @Test
+    void existencePhrasesNeedTheDbEffect() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Product { id Int @id }
+                entity NotFound { }
+                service S {
+                  f(id Int) -> Product
+                    intent "x"
+                    raises NotFound when no product has that id
+                }
+                """));
+        assertTrue(e.getMessage().contains("db"), e.getMessage());
+    }
+
+    @Test
+    void oldIsOnlyForEnsures() {
+        CheckException e = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f(units Int) -> Product
+                intent   "x"
+                requires old(units) > 0
+            """)));
+        assertTrue(e.getMessage().contains("ensures"), e.getMessage());
+    }
+
+    @Test
+    void oldOverResultNeedsDbAndAnIdParameter() {
+        assertDoesNotThrow(() -> check(CATALOG.formatted("""
+              touch(p Product) -> Product
+                intent  "x"
+                ensures result.stock == old(p.stock)
+            """)));
+        CheckException e = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f(units Int) -> Product
+                intent  "x"
+                ensures result.stock == old(result.stock) + units
+            """)));
+        assertTrue(e.getMessage().contains("id"), e.getMessage());
+    }
+
+    @Test
+    void aggregatesTypeTheirComprehension() {
+        CheckException sum = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f(products [Product]) -> Int
+                intent  "x"
+                ensures result == sum of (p.name for p in products)
+            """)));
+        assertTrue(sum.getMessage().contains("sum"), sum.getMessage());
+        CheckException source = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f(p Product) -> Int
+                intent  "x"
+                ensures result == sum of (x.stock for x in p)
+            """)));
+        assertTrue(source.getMessage().contains("collection"), source.getMessage());
+        CheckException all = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+              f() -> Int
+                intent  "x"
+                ensures result == sum of (w.stock for w in all widgets)
+            """)));
+        assertTrue(all.getMessage().contains("widgets"), all.getMessage());
+    }
+
+    @Test
+    void contractsMayCallEffectFreeHelpers() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                service Math {
+                  double(x Int) -> Int
+                    intent  "x times two."
+                    example double(2) -> 4
+                }
+                service S {
+                  quadruple(x Int) -> Int
+                    intent  "x times four."
+                    ensures result == double(double(x))
+                }
+                """));
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Product { id Int @id  stock Int }
+                service Store uses db {
+                  lookup(id Int) -> Product
+                    intent "x"
+                }
+                service S {
+                  f(id Int) -> Int
+                    intent  "x"
+                    ensures result == lookup(id).stock
+                }
+                """));
+        assertTrue(e.getMessage().contains("effect"), e.getMessage());
+    }
+
     @Test
     void memberDefaultsMustMatchTheFieldType() {
         CheckException e = assertThrows(CheckException.class, () -> check("""

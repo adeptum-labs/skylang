@@ -74,6 +74,16 @@ clause
     | REQUIRES expr                        # requiresClause
     | ENSURES expr                         # ensuresClause
     | EXAMPLE call ARROW exampleResult     # exampleClause
+    | RAISES ID WHEN raisesCondition       # raisesClause
+    ;
+
+// The when-vocabulary: a formal condition, or one of the fixed domain phrases
+// ("no product has that id", "email already registered") the checker resolves
+// against the declared model. Phrase words stay soft and are validated in the builder.
+raisesCondition
+    : ID ID HAS ID ID     # existenceCondition   // no product has that id
+    | expr ID ID          # phraseCondition      // email already registered
+    | expr                # exprCondition        // units <= 0
     ;
 
 exampleResult
@@ -121,10 +131,14 @@ appearsPred
 expr
     : LPAREN expr RPAREN                        # parenExpr
     | expr DOT ID                               # memberExpr
+    | OLD LPAREN expr RPAREN                    # oldExpr       // old(product.stock) — the pre-call value
+    | ID OF LPAREN expr FOR ID IN aggSource (WHERE expr)? RPAREN # aggExpr  // sum/count of (...)
     | ID LPAREN args? RPAREN                     # callExpr      // f(...) or Ctor(...)
     | expr op=(STAR | SLASH) expr               # mulExpr
     | expr op=(PLUS | MINUS) expr               # addExpr
     | expr op=(EQ | NEQ | LT | LE | GT | GE) expr   # cmpExpr
+    | expr IS NOT? expr                         # isExpr        // status is not Pending | tags is empty
+    | NOT expr                                   # notExpr
     | expr op=(AND | OR) expr                    # logicExpr
     | MONEY                                      # moneyLit
     | INT                                        # intLit
@@ -132,4 +146,9 @@ expr
     | TRUE                                       # trueLit
     | FALSE                                      # falseLit
     | ID                                         # nameExpr
+    ;
+
+aggSource
+    : ID ID    # allSource     // "all products" — the module's stored entities of that kind
+    | expr     # exprSource
     ;

@@ -59,6 +59,11 @@ TRUE     : 'true' ;
 FALSE    : 'false' ;
 USES     : 'uses' ;
 VALUES   : 'values' ;
+RAISES   : 'raises' ;
+WHEN     : 'when' ;
+OLD      : 'old' ;
+NOT      : 'not' ;
+FOR      : 'for' ;
 
 ARROW  : '->' ;
 AT     : '@' ;

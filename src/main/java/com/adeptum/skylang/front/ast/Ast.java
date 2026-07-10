@@ -164,13 +164,50 @@ public final class Ast {
     public record Where(Expr predicate) implements Refinement {
     }
 
+    /**
+     * A method: signature, drivers and contracts. The freeze hash covers this record's
+     * string form, so {@code toString} is pinned: byte-identical to the original record
+     * format unless the method declares {@code raises} clauses.
+     */
     public record Method(String name,
                          List<Param> params,
                          Type returnType,
                          Optional<String> intent,
                          List<Expr> requires,
                          List<Expr> ensures,
-                         List<Example> examples) {
+                         List<Example> examples,
+                         List<Raise> raises) {
+        public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
+                      List<Expr> requires, List<Expr> ensures, List<Example> examples) {
+            this(name, params, returnType, intent, requires, ensures, examples, List.of());
+        }
+
+        @Override
+        public String toString() {
+            return "Method[name=" + name + ", params=" + params + ", returnType=" + returnType
+                    + ", intent=" + intent + ", requires=" + requires + ", ensures=" + ensures
+                    + ", examples=" + examples
+                    + (raises.isEmpty() ? "" : ", raises=" + raises) + "]";
+        }
+    }
+
+    /** {@code raises NotFound when <condition>} — a named failure and when it must occur. */
+    public record Raise(String error, RaiseCondition condition) {
+    }
+
+    public sealed interface RaiseCondition permits CondExpr, NoSuch, AlreadyRegistered {
+    }
+
+    /** A formal boolean condition: {@code when units <= 0}. */
+    public record CondExpr(Expr expr) implements RaiseCondition {
+    }
+
+    /** {@code when no product has that id} — the lookup by the named field must find nothing. */
+    public record NoSuch(String entityWord, String fieldWord) implements RaiseCondition {
+    }
+
+    /** {@code when email already registered} — the @unique value is already stored. */
+    public record AlreadyRegistered(Expr value) implements RaiseCondition {
     }
 
     /** A concrete {@code example call(...) -> result} case. */
@@ -255,7 +292,35 @@ public final class Ast {
     // ----- expressions -------------------------------------------------------
 
     public sealed interface Expr
-            permits IntLit, StrLit, BoolLit, MoneyLit, NameExpr, MemberExpr, CallExpr, BinExpr {
+            permits IntLit, StrLit, BoolLit, MoneyLit, NameExpr, MemberExpr, CallExpr, BinExpr,
+            NotExpr, OldExpr, EmptyCheck, AggExpr {
+    }
+
+    /** {@code not <expr>}. */
+    public record NotExpr(Expr value) implements Expr {
+    }
+
+    /** {@code old(expr)} — the value of {@code expr} before the method ran (ensures only). */
+    public record OldExpr(Expr value) implements Expr {
+    }
+
+    /** {@code <collection> is empty}. */
+    public record EmptyCheck(Expr value) implements Expr {
+    }
+
+    /** {@code sum of (p.stock for p in products where ...)} / {@code count of (...)}. */
+    public record AggExpr(String kind, Expr value, String var, AggSource source,
+                          Optional<Expr> where) implements Expr {
+    }
+
+    public sealed interface AggSource permits AllOf, SourceExpr {
+    }
+
+    /** {@code all products} — every stored entity of the kind the word names. */
+    public record AllOf(String word) implements AggSource {
+    }
+
+    public record SourceExpr(Expr expr) implements AggSource {
     }
 
     public record IntLit(long value) implements Expr {

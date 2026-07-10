@@ -145,6 +145,7 @@ public final class AstBuilder {
         List<Ast.Expr> requires = new ArrayList<>();
         List<Ast.Expr> ensures = new ArrayList<>();
         List<Ast.Example> examples = new ArrayList<>();
+        List<Ast.Raise> raises = new ArrayList<>();
 
         for (SkyLangParser.ClauseContext c : ctx.clause()) {
             if (c instanceof SkyLangParser.IntentClauseContext ic) {
@@ -155,11 +156,35 @@ public final class AstBuilder {
                 ensures.add(expr(ec.expr()));
             } else if (c instanceof SkyLangParser.ExampleClauseContext xc) {
                 examples.add(example(xc));
+            } else if (c instanceof SkyLangParser.RaisesClauseContext rz) {
+                raises.add(new Ast.Raise(rz.ID().getText(), raisesCondition(rz.raisesCondition())));
             }
         }
 
         return new Ast.Method(ctx.ID().getText(), params, type(ctx.type()),
-                intent, requires, ensures, examples);
+                intent, requires, ensures, examples, raises);
+    }
+
+    /** The when-vocabulary: fixed phrases with soft keywords, or a formal condition. */
+    private Ast.RaiseCondition raisesCondition(SkyLangParser.RaisesConditionContext ctx) {
+        return switch (ctx) {
+            case SkyLangParser.ExistenceConditionContext e -> {
+                if (!e.ID(0).getText().equals("no") || !e.ID(2).getText().equals("that")) {
+                    throw new IllegalArgumentException("unrecognized raises condition; say e.g."
+                            + " 'when no product has that id'");
+                }
+                yield new Ast.NoSuch(e.ID(1).getText(), e.ID(3).getText());
+            }
+            case SkyLangParser.PhraseConditionContext p -> {
+                if (!p.ID(0).getText().equals("already") || !p.ID(1).getText().equals("registered")) {
+                    throw new IllegalArgumentException("unrecognized raises condition; say e.g."
+                            + " 'when email already registered'");
+                }
+                yield new Ast.AlreadyRegistered(expr(p.expr()));
+            }
+            case SkyLangParser.ExprConditionContext c -> new Ast.CondExpr(expr(c.expr()));
+            default -> throw new IllegalStateException("unhandled raises condition: " + ctx.getClass());
+        };
     }
 
     private Ast.Type type(SkyLangParser.TypeContext ctx) {
@@ -328,9 +353,46 @@ public final class AstBuilder {
             case SkyLangParser.MoneyLitContext c -> moneyLit(c.MONEY().getText());
             case SkyLangParser.TrueLitContext ignored -> new Ast.BoolLit(true);
             case SkyLangParser.FalseLitContext ignored -> new Ast.BoolLit(false);
+            case SkyLangParser.NotExprContext c -> new Ast.NotExpr(expr(c.expr()));
+            case SkyLangParser.OldExprContext c -> new Ast.OldExpr(expr(c.expr()));
+            case SkyLangParser.IsExprContext c -> isExpr(c);
+            case SkyLangParser.AggExprContext c -> aggExpr(c);
             case SkyLangParser.NameExprContext c -> new Ast.NameExpr(c.ID().getText());
             default -> throw new IllegalStateException("unhandled expr node: " + ctx.getClass().getSimpleName());
         };
+    }
+
+    /** {@code x is empty} / {@code x is not empty} read as emptiness; other {@code is} forms are equality. */
+    private Ast.Expr isExpr(SkyLangParser.IsExprContext ctx) {
+        Ast.Expr left = expr(ctx.expr(0));
+        boolean negated = ctx.NOT() != null;
+        if (ctx.expr(1) instanceof SkyLangParser.NameExprContext n && n.ID().getText().equals("empty")) {
+            Ast.Expr check = new Ast.EmptyCheck(left);
+            return negated ? new Ast.NotExpr(check) : check;
+        }
+        return new Ast.BinExpr(negated ? "!=" : "==", left, expr(ctx.expr(1)));
+    }
+
+    private Ast.Expr aggExpr(SkyLangParser.AggExprContext ctx) {
+        String kind = ctx.ID(0).getText();
+        if (!kind.equals("sum") && !kind.equals("count")) {
+            throw new IllegalArgumentException("unknown aggregate '" + kind + " of' (use sum or count)");
+        }
+        Ast.AggSource source = switch (ctx.aggSource()) {
+            case SkyLangParser.AllSourceContext a -> {
+                if (!a.ID(0).getText().equals("all")) {
+                    throw new IllegalArgumentException("unrecognized aggregate source; say e.g."
+                            + " 'for p in all products'");
+                }
+                yield new Ast.AllOf(a.ID(1).getText());
+            }
+            case SkyLangParser.ExprSourceContext e -> new Ast.SourceExpr(expr(e.expr()));
+            default -> throw new IllegalStateException("unhandled aggregate source");
+        };
+        Optional<Ast.Expr> where = ctx.WHERE() == null
+                ? Optional.empty()
+                : Optional.of(expr(ctx.expr(1)));
+        return new Ast.AggExpr(kind, expr(ctx.expr(0)), ctx.ID(1).getText(), source, where);
     }
 
     // ----- helpers -----------------------------------------------------------

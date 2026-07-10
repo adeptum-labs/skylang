@@ -113,6 +113,16 @@ public final class SupportClasses {
             }
             case Ast.CallExpr c -> c.args().forEach(a -> addExpr(a, used));
             case Ast.MemberExpr m -> addExpr(m.target(), used);
+            case Ast.NotExpr n -> addExpr(n.value(), used);
+            case Ast.OldExpr o -> addExpr(o.value(), used);
+            case Ast.EmptyCheck e -> addExpr(e.value(), used);
+            case Ast.AggExpr a -> {
+                addExpr(a.value(), used);
+                a.where().ifPresent(w -> addExpr(w, used));
+                if (a.source() instanceof Ast.SourceExpr s) {
+                    addExpr(s.expr(), used);
+                }
+            }
             default -> {
             }
         }

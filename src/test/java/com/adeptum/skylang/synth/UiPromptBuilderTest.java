@@ -114,7 +114,7 @@ class UiPromptBuilderTest {
             entity Order { id Int  total Money }
             service Orders {
               all() -> [Order]  intent "all"
-              pay(id Int, amount Money, units Quantity, contact Email, when Instant) -> Order  intent "pay"
+              pay(id Int, amount Money, units Quantity, contact Email, moment Instant) -> Order  intent "pay"
             }
             view Pay at "/pay" {
               shows  Orders.all() as a table of (id)

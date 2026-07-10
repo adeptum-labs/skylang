@@ -399,6 +399,109 @@ class ParsingTest {
                 new Ast.Service("S", List.of()).toString());
     }
 
+    // ----- the chapter-5 surface: raises, old, not, aggregates -----------------
+
+    @Test
+    void parsesRaisesConditions() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Product { id Int @id  stock Int }
+                entity NotFound { }
+                entity BadInput { }
+                entity Duplicate { }
+                service S {
+                  restock(id Int, units Int) -> Product
+                    intent "x"
+                    raises NotFound  when no product has that id
+                    raises BadInput  when units <= 0
+                    raises Duplicate when email already registered
+                }
+                """, "t.sky");
+        List<Ast.Raise> raises = m.services().get(0).methods().get(0).raises();
+        assertEquals(3, raises.size());
+
+        Ast.Raise notFound = raises.get(0);
+        assertEquals("NotFound", notFound.error());
+        Ast.NoSuch noSuch = assertInstanceOf(Ast.NoSuch.class, notFound.condition());
+        assertEquals("product", noSuch.entityWord());
+        assertEquals("id", noSuch.fieldWord());
+
+        Ast.Raise badInput = raises.get(1);
+        Ast.CondExpr cond = assertInstanceOf(Ast.CondExpr.class, badInput.condition());
+        assertInstanceOf(Ast.BinExpr.class, cond.expr());
+
+        Ast.AlreadyRegistered dup = assertInstanceOf(Ast.AlreadyRegistered.class, raises.get(2).condition());
+        assertEquals("email", assertInstanceOf(Ast.NameExpr.class, dup.value()).name());
+    }
+
+    @Test
+    void parsesOldNotAndIsForms() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Product { id Int @id  stock Int }
+                service S {
+                  restock(id Int, units Int) -> Product
+                    intent   "x"
+                    requires not (units <= 0)
+                    ensures  result.stock == old(result.stock) + units
+                  check(p Product, tags [Text]) -> Bool
+                    intent   "x"
+                    requires tags is empty
+                    ensures  result is not false
+                }
+                """, "t.sky");
+        Ast.Method restock = m.services().get(0).methods().get(0);
+        assertInstanceOf(Ast.NotExpr.class, restock.requires().get(0));
+        Ast.BinExpr ensures = assertInstanceOf(Ast.BinExpr.class, restock.ensures().get(0));
+        Ast.BinExpr plus = assertInstanceOf(Ast.BinExpr.class, ensures.right());
+        assertInstanceOf(Ast.OldExpr.class, plus.left());
+
+        Ast.Method check = m.services().get(0).methods().get(1);
+        Ast.EmptyCheck empty = assertInstanceOf(Ast.EmptyCheck.class, check.requires().get(0));
+        assertEquals("tags", assertInstanceOf(Ast.NameExpr.class, empty.value()).name());
+        Ast.BinExpr isNot = assertInstanceOf(Ast.BinExpr.class, check.ensures().get(0));
+        assertEquals("!=", isNot.op());
+    }
+
+    @Test
+    void parsesAggregates() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Product { id Int @id  stock Int }
+                service S uses db {
+                  totalStock() -> Int
+                    intent  "x"
+                    ensures result == sum of (p.stock for p in all products)
+                  emptyCount(products [Product]) -> Int
+                    intent  "x"
+                    ensures result == count of (p for p in products where p.stock == 0)
+                }
+                """, "t.sky");
+        Ast.BinExpr total = assertInstanceOf(Ast.BinExpr.class,
+                m.services().get(0).methods().get(0).ensures().get(0));
+        Ast.AggExpr sum = assertInstanceOf(Ast.AggExpr.class, total.right());
+        assertEquals("sum", sum.kind());
+        assertEquals("p", sum.var());
+        assertInstanceOf(Ast.MemberExpr.class, sum.value());
+        Ast.AllOf all = assertInstanceOf(Ast.AllOf.class, sum.source());
+        assertEquals("products", all.word());
+        assertTrue(sum.where().isEmpty());
+
+        Ast.AggExpr count = assertInstanceOf(Ast.AggExpr.class,
+                ((Ast.BinExpr) m.services().get(0).methods().get(1).ensures().get(0)).right());
+        assertEquals("count", count.kind());
+        assertTrue(count.where().isPresent());
+        assertInstanceOf(Ast.SourceExpr.class, count.source());
+    }
+
+    @Test
+    void legacyMethodToStringIsUnchanged() {
+        Ast.Method legacy = new Ast.Method("f", List.of(), new Ast.TypeRef("Int"),
+                java.util.Optional.of("x"), List.of(), List.of(), List.of());
+        assertEquals("Method[name=f, params=[], returnType=TypeRef[name=Int, list=false], "
+                + "intent=Optional[x], requires=[], ensures=[], examples=[]]", legacy.toString());
+    }
+
     @Test
     void rejectsUnknownAnnotationAndMalformedTypeDecl() {
         assertThrows(IllegalArgumentException.class, () -> Parsing.parse("""

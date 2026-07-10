@@ -197,6 +197,10 @@ public final class UiPromptBuilder {
             case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
             case Ast.CallExpr c -> c.callee() + "(...)";
             case Ast.BinExpr b -> exprText(b.left()) + " " + b.op() + " " + exprText(b.right());
+            case Ast.NotExpr n -> "not " + exprText(n.value());
+            case Ast.OldExpr o -> "old(" + exprText(o.value()) + ")";
+            case Ast.EmptyCheck ec -> exprText(ec.value()) + " is empty";
+            case Ast.AggExpr a -> a.kind() + " of (...)";
         };
     }
 

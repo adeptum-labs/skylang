@@ -137,6 +137,35 @@ class PromptBuilderTest {
                 "value constants must be listed");
     }
 
+    private static final String SHELF = """
+            module library
+            entity Book { id Int @id  copies Int @min(0) }
+            entity NotFound { }
+            service Shelf uses db {
+              lend(id Int, copies Int) -> Book
+                intent  "Decrease the stored book's copies."
+                ensures result.copies == old(result.copies) - copies
+                raises  NotFound when no book has that id
+            }
+            """;
+
+    @Test
+    void userPromptCarriesTheFailureContracts() {
+        Ast.Module m = Parsing.parse(SHELF, "library.sky");
+        String user = prompts.user(m, m.services().get(0), m.services().get(0).methods().get(0));
+        assertTrue(user.contains("raises NotFound when no book has that id"),
+                "the failure contract must reach the generator");
+        assertTrue(user.contains("old(result.copies)"), "old() must reach the generator verbatim");
+    }
+
+    @Test
+    void systemPromptTeachesRaisesAndOld() {
+        String system = prompts.system();
+        assertTrue(system.contains("raises") && system.contains("throw"),
+                "the generator must throw exactly the named errors");
+        assertTrue(system.contains("old("), "old() semantics must be explained");
+    }
+
     @Test
     void pureServicesAreToldTheyHaveNoEffects() {
         Ast.Module m = store();

@@ -420,7 +420,7 @@ class PipelineTest {
             entity Order { id Int  total Money }
             service Orders {
               all() -> [Order]  intent "all"
-              pay(id Int, amount Money, when Instant) -> Order  intent "pay"
+              pay(id Int, amount Money, moment Instant) -> Order  intent "pay"
             }
             view Pay at "/pay" {
               shows  Orders.all() as a table of (id)
