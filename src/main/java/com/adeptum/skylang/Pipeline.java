@@ -322,7 +322,7 @@ public final class Pipeline {
      * Canonical text whose hash freezes a method. Includes the profile and every entity, so any
      * change that could affect the staged/verified code re-triggers synthesis (conservative).
      */
-    private static String specString(Ast.Module module, Ast.Method method) {
+    static String specString(Ast.Module module, Ast.Method method) {
         StringBuilder sb = new StringBuilder();
         sb.append("profile=").append(JvmProfile.ID).append('@').append(JvmProfile.VERSION).append('\n');
         for (Ast.Entity e : module.entities()) {
@@ -336,7 +336,7 @@ public final class Pipeline {
      * Canonical text whose hash freezes a view. Includes the profile, every entity, and every service
      * signature the view may reference, so a change to the data it renders re-triggers synthesis.
      */
-    private static String viewSpecString(Ast.Module module, Ast.View view) {
+    static String viewSpecString(Ast.Module module, Ast.View view) {
         StringBuilder sb = new StringBuilder();
         sb.append("profile=").append(JvmProfile.ID).append('@').append(JvmProfile.VERSION).append('\n');
         for (Ast.Entity e : module.entities()) {
