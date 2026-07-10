@@ -1,18 +1,26 @@
 module bank
 
 // A small banking domain: refined types carry the rules (IBAN shape, positive
-// amounts, sane name lengths), so no method body ever re-checks them.
+// amounts, sane name lengths), the effects budget says what the service may
+// touch, and no method body ever re-checks any of it.
 
 type Iban          = Text matching /^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/
 type PositiveMoney = Money where amount > 0
 
+entity Status {
+  name Text @id
+  values Open, Frozen, Closed
+}
+
 entity Account {
-  id      Int   @id
-  iban    Iban  @unique
-  owner   Email @unique
+  id      Int    @id
+  iban    Iban   @unique
+  owner   Email  @unique
   name    Text(1..120)
   balance Money
-  active  Bool  = true
+  status  Status  = Status.Open
+  opened  Instant = now
+  active  Bool    = true
 }
 
 entity Card {
@@ -21,7 +29,7 @@ entity Card {
   labels [Text]
 }
 
-service Accounts {
+service Accounts uses db, clock {
 
   all() -> [Account]
     intent "Every account."
@@ -30,10 +38,10 @@ service Accounts {
     intent "The account when its IBAN matches, otherwise nothing."
 
   deposit(a Account, amount PositiveMoney) -> Account
-    intent   "Return a copy of the account with the amount added to its balance."
+    intent   "Persist and return a copy of the account with the amount added to its balance."
     requires amount > 0eur
     ensures  result.balance == a.balance + amount
-    example  deposit(Account(1, "SE3550000000054910000003", "ada@example.com", "Main", 100eur, true), 9.99eur) -> a Account with balance 109.99eur
+    example  deposit(Account(1, "SE3550000000054910000003", "ada@example.com", "Main", 100eur), 9.99eur) -> a Account with balance 109.99eur
 
   interest(a Account, since Instant, rate Int(0..100)) -> Money
     intent "The interest accrued on the balance since the date at the given percentage rate."
