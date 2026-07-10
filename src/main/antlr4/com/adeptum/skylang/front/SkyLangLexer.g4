@@ -101,6 +101,12 @@ SLASH : '/' ;
 AND : 'and' ;
 OR  : 'or' ;
 
+// A native block: the profile's keyword plus a balanced-brace Java body, captured
+// as one token. (A brace inside a Java string literal would unbalance the count —
+// keep such literals out of native blocks.)
+NATIVE_BLOCK : 'java' [ \t\r\n]* BRACE_BLOCK ;
+fragment BRACE_BLOCK : '{' ( ~[{}] | BRACE_BLOCK )* '}' ;
+
 // A money literal carries a three-letter currency suffix, so '1..10' still
 // lexes as INT DOTDOT INT (no letters follow the digits).
 MONEY  : [0-9]+ ('.' [0-9]+)? [a-zA-Z] [a-zA-Z] [a-zA-Z] ;

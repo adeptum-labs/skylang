@@ -94,6 +94,7 @@ clause
     | EXAMPLE call (ON seed)? ARROW exampleResult  # exampleClause
     | RAISES ID WHEN raisesCondition               # raisesClause
     | SPEC STRING LBRACE (GIVEN expr)? WHEN call THEN thenAssert+ RBRACE  # specClause
+    | NATIVE_BLOCK                                 # nativeClause   // java { ... }
     ;
 
 seed : ID ID withClause? ;   // on a Product with stock 5 — a stored row before the call

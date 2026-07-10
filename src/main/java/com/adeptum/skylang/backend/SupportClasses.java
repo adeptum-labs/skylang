@@ -505,6 +505,10 @@ public final class SupportClasses {
                         return data.length;
                     }
 
+                    public long length() {
+                        return data.length;
+                    }
+
                     @Override
                     public boolean equals(Object o) {
                         return o instanceof Bytes b && Arrays.equals(data, b.data);

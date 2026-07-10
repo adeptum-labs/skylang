@@ -611,6 +611,32 @@ class ParsingTest {
                 """, "t.sky"));
     }
 
+    // ----- the chapter-8 surface: native blocks ---------------------------------
+
+    @Test
+    void parsesNativeJavaBlocks() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                service Crypto {
+                  hash(input Bytes) -> Bytes
+                    ensures result.length == 32
+                    java {
+                      var md = java.security.MessageDigest.getInstance("SHA-256");
+                      if (input.size() > 0) { /* nested braces stay balanced */ }
+                      return Bytes.of(md.digest(input.toByteArray()));
+                    }
+                  plain(x Int) -> Int
+                    intent "No native body here."
+                }
+                """, "t.sky");
+        Ast.Method hash = m.services().get(0).methods().get(0);
+        String body = hash.nativeBody().orElseThrow();
+        assertTrue(body.contains("MessageDigest.getInstance(\"SHA-256\")"));
+        assertTrue(body.contains("nested braces"), "nested braces must stay inside the block");
+        assertEquals(1, hash.ensures().size(), "contracts ride along with the native body");
+        assertTrue(m.services().get(0).methods().get(1).nativeBody().isEmpty());
+    }
+
     @Test
     void legacyExampleToStringIsUnchanged() {
         Ast.Example legacy = new Ast.Example(new Ast.CallExpr("f", List.of()),

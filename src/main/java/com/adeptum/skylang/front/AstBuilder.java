@@ -202,6 +202,7 @@ public final class AstBuilder {
         List<Ast.Example> examples = new ArrayList<>();
         List<Ast.Raise> raises = new ArrayList<>();
         List<Ast.Spec> specs = new ArrayList<>();
+        Optional<String> nativeBody = Optional.empty();
 
         for (SkyLangParser.ClauseContext c : ctx.clause()) {
             if (c instanceof SkyLangParser.IntentClauseContext ic) {
@@ -216,11 +217,14 @@ public final class AstBuilder {
                 raises.add(new Ast.Raise(rz.ID().getText(), raisesCondition(rz.raisesCondition())));
             } else if (c instanceof SkyLangParser.SpecClauseContext sc) {
                 specs.add(spec(sc));
+            } else if (c instanceof SkyLangParser.NativeClauseContext nc) {
+                String raw = nc.NATIVE_BLOCK().getText();
+                nativeBody = Optional.of(raw.substring(raw.indexOf('{') + 1, raw.lastIndexOf('}')).strip());
             }
         }
 
         return new Ast.Method(ctx.ID().getText(), params, type(ctx.type()),
-                intent, requires, ensures, examples, raises, specs);
+                intent, requires, ensures, examples, raises, specs, nativeBody);
     }
 
     private Ast.Spec spec(SkyLangParser.SpecClauseContext ctx) {

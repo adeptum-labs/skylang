@@ -616,9 +616,10 @@ public final class TypeChecker {
         String where = service + "." + m.name();
         currentService = svc;
 
-        if (m.intent().isEmpty() && m.examples().isEmpty() && m.specs().isEmpty()) {
+        if (m.intent().isEmpty() && m.examples().isEmpty() && m.specs().isEmpty()
+                && m.nativeBody().isEmpty()) {
             throw new CheckException(where
-                    + " has no driver: give it an intent, an example, or a spec");
+                    + " has no driver: give it an intent, an example, a spec, or a native block");
         }
 
         Map<String, Ty> params = new LinkedHashMap<>();
@@ -1016,6 +1017,10 @@ public final class TypeChecker {
                     yield Ty.entity(n.name());
                 }
                 Ty target = infer(me.target(), env, where);
+                if (target.erased().equals(Ty.BYTES)
+                        && (me.field().equals("length") || me.field().equals("size"))) {
+                    yield Ty.INT;   // a byte sequence exposes its length to contracts
+                }
                 if (!(target instanceof Ty.EntityTy et)) {
                     throw new CheckException(where + ": cannot read field '" + me.field() + "' of non-entity " + target);
                 }
