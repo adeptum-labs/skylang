@@ -169,6 +169,17 @@ unfrozen) and the exact body it was proven against. `sky freeze` is the delibera
 build: discard the lock and regenerate, re-verify and re-freeze everything (say, to adopt a
 better model); native bodies are re-verified but never rewritten.
 
+The pipeline speaks specification when it fails. A red candidate is narrated per method —
+`▸ candidate 1: ensures result.stock == p.stock + units ✗ FAILED ▸ regenerating ...` — and
+only the implicated methods regenerate, so an innocent sibling never pays a model call for
+someone else's red test; each method gets five candidates by default (`--attempts N` on
+build/freeze/tdd). Errors carry their stage: `error [frontend]` is a specification you wrote
+inconsistently, with a `-> did you mean 'stock'?` hint on a near-miss field name; `error
+[synthesis]` names the method, the attempts spent and the violated clauses — and calls out
+two examples as unsatisfiable together when they demand different outcomes for the same
+arguments; `error [backend]` is the staged project failing to compile, with a pointer back
+to the `java` block when a native body is the culprit.
+
 Not yet implemented (deferred): `page`/`flow`, the dependency `requires` registry, further
 whenever-forms (audited deletes, money conservation, layer boundaries), the `ts`/`py`
 native keywords (they arrive with their profiles), property-based `ensures`, article-form

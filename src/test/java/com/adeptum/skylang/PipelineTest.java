@@ -1003,6 +1003,27 @@ class PipelineTest {
             """;
 
     @Test
+    void aStagedCompileFailurePointsBackAtTheJavaBlock(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(CRYPTO, "crypto.sky");
+        new TypeChecker().check(module);
+        Verifier brokenCompile = dir -> VerificationResult.fail("""
+                [ERROR] COMPILATION ERROR :\s
+                [ERROR] /tmp/build/jvm-jakarta/src/main/java/crypto/Hasher.java:[14,9] cannot find symbol
+                """);
+        var err = new ByteArrayOutputStream();
+
+        int code = new Pipeline(new StubLlm("return null;"), brokenCompile).build(module,
+                root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"), quiet(), new PrintStream(err));
+
+        assertEquals(1, code);
+        String report = err.toString();
+        assertTrue(report.contains("error [backend]: the staged project did not compile"), report);
+        assertTrue(report.contains("Hasher.java:[14,9] cannot find symbol"), report);
+        assertTrue(report.contains("the fix belongs in the"), report);
+        assertTrue(report.contains("java block of the .sky source."), report);
+    }
+
+    @Test
     void nativeBodiesBypassTheModelAndFreeze(@TempDir Path root) throws Exception {
         Path lock = root.resolve("sky.lock");
         Path buildDir = root.resolve("build/jvm-jakarta");
