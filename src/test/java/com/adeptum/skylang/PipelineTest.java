@@ -155,6 +155,106 @@ class PipelineTest {
         assertEquals(5, stub.calls(), "four regenerations follow the first candidate");
     }
 
+    private static final String RESTOCK_FAILURE = """
+            [ERROR] Failures:\s
+            [ERROR]   CatalogTest.restock_example_1:23 ensures: result.stock == p.stock + units [p=Product[id=1], units=3] ==> expected: <true> but was: <false>
+            """;
+
+    @Test
+    void theTranscriptNamesTheViolatedClausePerCandidate(@TempDir Path root) {
+        Ast.Module module = checkedModule();
+        var runs = new java.util.concurrent.atomic.AtomicInteger();
+        Verifier failsOnce = dir -> runs.incrementAndGet() == 1
+                ? VerificationResult.fail(RESTOCK_FAILURE) : VerificationResult.pass();
+        var out = new ByteArrayOutputStream();
+
+        int code = new Pipeline(new StubLlm(BODY), failsOnce).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), new PrintStream(out), quiet());
+
+        assertEquals(0, code);
+        String transcript = out.toString();
+        assertTrue(transcript.contains("Catalog.restock"), transcript);
+        assertTrue(transcript.contains("▸ candidate 1: ensures: result.stock == p.stock + units  ✗ FAILED"),
+                "the violated clause should be named on the failing candidate:\n" + transcript);
+        assertTrue(transcript.contains("▸ regenerating ..."), transcript);
+        assertTrue(transcript.contains("▸ candidate 2: all contracts ✓"),
+                "the passing candidate should be announced:\n" + transcript);
+    }
+
+    @Test
+    void onlyTheImplicatedMethodRegenerates(@TempDir Path root) {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text  stock Int @min(0) }
+                service Catalog {
+                  restock(p Product, units Int) -> Product
+                    intent  "Increase stock."
+                    requires units > 0
+                  rename(p Product, name Text) -> Product
+                    intent  "Rename the product."
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        StubLlm stub = new StubLlm(BODY);
+        var runs = new java.util.concurrent.atomic.AtomicInteger();
+        Verifier failsOnce = dir -> runs.incrementAndGet() == 1
+                ? VerificationResult.fail(RESTOCK_FAILURE) : VerificationResult.pass();
+
+        int code = new Pipeline(stub, failsOnce).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code);
+        assertEquals(3, stub.calls(),
+                "two first candidates plus one regeneration of the implicated method only");
+    }
+
+    @Test
+    void synthesisExhaustionReportsTheViolatedClauses(@TempDir Path root) {
+        Ast.Module module = checkedModule();
+        Verifier alwaysFail = dir -> VerificationResult.fail(RESTOCK_FAILURE);
+        var err = new ByteArrayOutputStream();
+
+        int code = new Pipeline(new StubLlm(BODY), alwaysFail).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), new PrintStream(err));
+
+        assertEquals(1, code);
+        String report = err.toString();
+        assertTrue(report.contains("error [synthesis]: shop.Catalog.restock"), report);
+        assertTrue(report.contains("could not satisfy all clauses after 5 attempts."), report);
+        assertTrue(report.contains("ensures: result.stock == p.stock + units"), report);
+    }
+
+    @Test
+    void contradictoryExamplesAreCalledOut(@TempDir Path root) {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Order { id Int  status Text }
+                entity EmptyOrder { }
+                service Orders {
+                  place(id Int) -> Order
+                    intent  "Place the order."
+                    example place(1) -> raises EmptyOrder
+                    example place(1) -> status "Placed"
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        Verifier alwaysFail = dir -> VerificationResult.fail("""
+                [ERROR]   OrdersTest.place_example_1:10 example: raises EmptyOrder ==> Expected shop.EmptyOrder to be thrown, but nothing was thrown.
+                """);
+        var err = new ByteArrayOutputStream();
+
+        int code = new Pipeline(new StubLlm("return db.save(new Order(id, \"Placed\"));"), alwaysFail)
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        quiet(), new PrintStream(err));
+
+        assertEquals(1, code);
+        String report = err.toString();
+        assertTrue(report.contains("unsatisfiable together:"), report);
+        assertTrue(report.contains("example place(1) -> raises EmptyOrder"), report);
+        assertTrue(report.contains("example place(1) -> status \"Placed\""), report);
+        assertTrue(report.contains("-> these two examples contradict each other."), report);
+    }
+
     @Test
     void secondBuildReusesFrozenBodyWithoutCallingModel(@TempDir Path root) {
         Ast.Module module = checkedModule();

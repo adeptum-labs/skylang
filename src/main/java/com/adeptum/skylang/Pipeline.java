@@ -23,6 +23,7 @@ package com.adeptum.skylang;
 
 import com.adeptum.skylang.backend.FacesViewStager;
 import com.adeptum.skylang.backend.JvmProfile;
+import com.adeptum.skylang.backend.Lowering;
 import com.adeptum.skylang.backend.ProjectStager;
 import com.adeptum.skylang.freeze.Hashing;
 import com.adeptum.skylang.freeze.Lock;
@@ -33,6 +34,7 @@ import com.adeptum.skylang.synth.UiPromptBuilder;
 import com.adeptum.skylang.verify.EffectLinter;
 import com.adeptum.skylang.verify.VerificationResult;
 import com.adeptum.skylang.verify.Verifier;
+import com.adeptum.skylang.verify.VerifyReport;
 import com.adeptum.skylang.verify.ViewVerifier;
 
 import java.io.IOException;
@@ -84,6 +86,7 @@ public final class Pipeline {
         String body;
         boolean fresh;   // true = synthesized this build (needs freezing on success)
         boolean stale;   // true = an older frozen entry existed (fresh replaces it)
+        int candidate = 1;   // how many bodies have been proposed for this method this build
 
         Unit(Ast.Service service, Ast.Method method, String key, String specHash) {
             this.service = service;
@@ -194,22 +197,18 @@ public final class Pipeline {
                     .anyMatch(u -> u.fresh && u.method.nativeBody().isEmpty());
             while (!result.passed() && regenerable && attempts < maxRegenerations) {
                 attempts++;
-                out.println("  verification failed — regenerating synthesized bodies (attempt " + attempts + ")");
-                for (Unit u : units) {
-                    // A native body is the author's to fix; only model-written bodies regenerate.
-                    if (u.fresh && u.method.nativeBody().isEmpty()) {
-                        u.body = synthesize(module, u);
-                    }
-                }
+                regenerateFailing(module, units, result.output(), attempts, out);
                 stager.stage(module, bodyMap(units), buildDir);
                 result = verifier.verify(buildDir);
             }
             if (!result.passed()) {
-                err.println("build failed: synthesized code did not satisfy its contracts/examples.");
-                err.println(result.output());
-                return 1;
+                return reportVerifyFailure(module, units, result.output(), err);
             }
             for (Unit u : units) {
+                if (u.candidate > 1) {
+                    out.printf("  %-28s ▸ candidate %d: all contracts ✓%n",
+                            label(u), u.candidate);
+                }
                 if (u.fresh) {
                     lock.put(u.key, new Lock.Entry(u.specHash, Lock.canonical(u.body)));
                 }
@@ -386,6 +385,131 @@ public final class Pipeline {
 
     private static String counted(int n, String noun) {
         return n == 0 ? "" : "   \u2713 " + n + " " + noun + (n == 1 ? "" : "s");
+    }
+
+    private static String label(Unit u) {
+        return u.service.name() + "." + u.method.name();
+    }
+
+    /**
+     * One retry round: name each failing candidate's violated clauses, then regenerate only the
+     * implicated methods. When the toolchain output cannot be attributed to methods (say, a
+     * compile error), every fresh synthesized body regenerates \u2014 the conservative fallback.
+     */
+    private void regenerateFailing(Ast.Module module, List<Unit> units, String output,
+                                   int attempt, PrintStream out) {
+        List<VerifyReport.ClauseFailure> failures = VerifyReport.clauseFailures(output);
+        var implicated = failures.stream()
+                .map(f -> f.service() + "." + f.method())
+                .collect(java.util.stream.Collectors.toSet());
+        if (implicated.isEmpty()) {
+            out.println("  verification failed \u2014 regenerating synthesized bodies (attempt " + attempt + ")");
+        }
+        for (Unit u : units) {
+            // A native body is the author's to fix; only model-written bodies regenerate.
+            if (!u.fresh || u.method.nativeBody().isPresent()
+                    || (!implicated.isEmpty() && !implicated.contains(label(u)))) {
+                continue;
+            }
+            String pad = " ".repeat(2 + Math.max(28, label(u).length()) + 1);
+            failures.stream().filter(f -> (f.service() + "." + f.method()).equals(label(u)))
+                    .forEach(f -> out.printf("  %-28s \u25b8 candidate %d: %s  \u2717 FAILED%n",
+                            label(u), u.candidate, f.clause()));
+            out.println(pad + "\u25b8 regenerating ...");
+            u.body = synthesize(module, u);
+            u.candidate++;
+        }
+    }
+
+    /**
+     * The end of the road for a red build: attribute the toolchain output to a stage and say,
+     * in specification terms, what could not be satisfied \u2014 the book's error taxonomy.
+     */
+    private int reportVerifyFailure(Ast.Module module, List<Unit> units, String output, PrintStream err) {
+        if (VerifyReport.compilationFailed(output)) {
+            err.println("error [backend]: the staged project did not compile");
+            List<String> diagnostics = VerifyReport.compileErrors(output);
+            diagnostics.forEach(d -> err.println("  " + d));
+            boolean nativeInvolved = diagnostics.stream().anyMatch(d -> units.stream()
+                    .anyMatch(u -> u.method.nativeBody().isPresent()
+                            && d.contains("/" + u.service.name() + ".java")));
+            if (nativeInvolved) {
+                err.println("  -> the failing file is in the staged project; the fix belongs in the");
+                err.println("     java block of the .sky source.");
+            }
+            return 1;
+        }
+        List<VerifyReport.ClauseFailure> failures = VerifyReport.clauseFailures(output);
+        if (failures.isEmpty()) {
+            err.println("build failed: synthesized code did not satisfy its contracts/examples.");
+            err.println(output);
+            return 1;
+        }
+        for (Unit u : units) {
+            List<String> clauses = failures.stream()
+                    .filter(f -> (f.service() + "." + f.method()).equals(label(u)))
+                    .map(VerifyReport.ClauseFailure::clause).distinct().toList();
+            if (clauses.isEmpty()) {
+                continue;
+            }
+            if (u.method.nativeBody().isPresent()) {
+                err.println("error [verify]: " + module.name() + "." + label(u) + " (native)");
+                err.println("  the hand-written body does not satisfy:");
+                clauses.forEach(c -> err.println("    " + c));
+                err.println("  -> fix the java block in the .sky source.");
+                continue;
+            }
+            err.println("error [synthesis]: " + module.name() + "." + label(u));
+            err.println("  could not satisfy all clauses after " + u.candidate
+                    + (u.candidate == 1 ? " attempt." : " attempts."));
+            var contradiction = contradictoryExamples(u.method);
+            if (contradiction.isPresent()) {
+                err.println("  unsatisfiable together:");
+                err.println("    " + exampleText(contradiction.get()[0]));
+                err.println("    " + exampleText(contradiction.get()[1]));
+                err.println("  -> these two examples contradict each other.");
+            } else {
+                err.println("  violated:");
+                clauses.forEach(c -> err.println("    " + c));
+            }
+        }
+        return 1;
+    }
+
+    /** Two examples with the same arguments demanding different outcomes can never both pass. */
+    private static java.util.Optional<Ast.Example[]> contradictoryExamples(Ast.Method m) {
+        List<Ast.Example> examples = m.examples();
+        for (int i = 0; i < examples.size(); i++) {
+            for (int j = i + 1; j < examples.size(); j++) {
+                Ast.Example a = examples.get(i);
+                Ast.Example b = examples.get(j);
+                if (Lowering.skyText(a.call()).equals(Lowering.skyText(b.call()))
+                        && a.seed().equals(b.seed())
+                        && !resultText(a.result()).equals(resultText(b.result()))) {
+                    return java.util.Optional.of(new Ast.Example[]{a, b});
+                }
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    private static String exampleText(Ast.Example ex) {
+        return "example " + Lowering.skyText(ex.call()) + " -> " + resultText(ex.result());
+    }
+
+    private static String resultText(Ast.Result result) {
+        return switch (result) {
+            case Ast.RaisesResult rr -> "raises " + rr.error();
+            case Ast.ExprResult er -> Lowering.skyText(er.value());
+            case Ast.EntityResult ent -> "a " + ent.typeName() + " with " + fieldsText(ent.fields());
+            case Ast.FieldsResult fr -> fieldsText(fr.fields());
+        };
+    }
+
+    private static String fieldsText(List<Ast.FieldExpect> fields) {
+        return fields.stream()
+                .map(f -> f.field() + " " + Lowering.skyText(f.expected()))
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     /** The spec hash a method freezes under \u2014 the key auditing tools look up in the lock. */
