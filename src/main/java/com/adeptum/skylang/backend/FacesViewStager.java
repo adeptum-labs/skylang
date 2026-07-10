@@ -104,6 +104,7 @@ public final class FacesViewStager {
             Path test = buildDir.resolve("src/test/java").resolve(pkg);
             Files.createDirectories(test);
             Files.writeString(test.resolve("ViewHarness.java"), VIEW_HARNESS.formatted(pkg));
+            Files.writeString(test.resolve("VisualGate.java"), VISUAL_GATE.formatted(pkg));
             Files.writeString(test.resolve("ViewsRenderTest.java"), renderTest(pkg, module));
             Files.writeString(test.resolve("ViewsInteractionTest.java"), interactionTest(pkg, module));
             Files.writeString(test.resolve("PreviewServer.java"), PREVIEW_SERVER.formatted(pkg));
@@ -142,6 +143,7 @@ public final class FacesViewStager {
                             .append(escape(s.value())).append("\");\n");
                 }
             }
+            methods.append("        VisualGate.check(\"").append(view.name()).append("\", html);\n");
             methods.append("    }\n");
         }
         return RENDER_TEST.formatted(pkg, methods.toString());
@@ -187,6 +189,124 @@ public final class FacesViewStager {
         }
         return INTERACTION_TEST.formatted(pkg, methods.toString());
     }
+
+    /**
+     * The visual-freeze gate. The rendered HTML is rasterized by a version-pinned, pure-Java renderer
+     * onto a fixed canvas — no browser, no network — and compared against the frozen baseline by
+     * structural similarity (SSIM). Hidden inputs and scripts are stripped first so per-boot noise
+     * like the Faces view state can never leak into the pixels. Without a baseline the rasterization
+     * is captured to {@code target/sky-visual} for the compiler to freeze into {@code sky.lock}.
+     */
+    private static final String VISUAL_GATE = """
+            package %s;
+
+            import org.jsoup.Jsoup;
+            import org.jsoup.nodes.Document;
+            import org.xhtmlrenderer.simple.Graphics2DRenderer;
+
+            import javax.imageio.ImageIO;
+            import java.awt.image.BufferedImage;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+
+            import static org.junit.jupiter.api.Assertions.assertTrue;
+
+            /** Rasterizes a rendered view with the pinned renderer and diffs it against its frozen look. */
+            final class VisualGate {
+
+                private static final double THRESHOLD = 0.97;
+                private static final int WIDTH = 1024;
+                private static final int HEIGHT = 768;
+
+                private VisualGate() {
+                }
+
+                static void check(String view, String html) throws Exception {
+                    BufferedImage actual = rasterize(html);
+                    Path capture = Path.of("target/sky-visual", view + ".png");
+                    Files.createDirectories(capture.getParent());
+                    ImageIO.write(actual, "png", capture.toFile());
+
+                    Path frozen = Path.of("src/test/resources/sky-visual", view + ".png");
+                    if (!Files.exists(frozen)) {
+                        System.out.println("visual gate: no baseline for " + view + " yet — captured " + capture);
+                        return;
+                    }
+                    BufferedImage baseline = ImageIO.read(frozen.toFile());
+                    double score = ssim(baseline, actual);
+                    assertTrue(score >= THRESHOLD, () -> "view " + view + " drifted from its frozen look"
+                            + " (ssim " + score + " < " + THRESHOLD + "); compare " + frozen + " with " + capture);
+                }
+
+                private static BufferedImage rasterize(String html) throws Exception {
+                    Document doc = Jsoup.parse(html);
+                    doc.select("input[type=hidden], script").remove();
+                    doc.outputSettings().syntax(Document.OutputSettings.Syntax.xml);
+                    Path page = Files.createTempFile("sky-visual", ".xhtml");
+                    try {
+                        Files.writeString(page, doc.outerHtml());
+                        return Graphics2DRenderer.renderToImage(page.toUri().toString(), WIDTH, HEIGHT);
+                    } finally {
+                        Files.deleteIfExists(page);
+                    }
+                }
+
+                /** Mean SSIM over 8x8 windows of the grayscale images; 1.0 = identical, below ~0.97 = drift. */
+                private static double ssim(BufferedImage a, BufferedImage b) {
+                    if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) {
+                        return 0;
+                    }
+                    double[] ga = gray(a);
+                    double[] gb = gray(b);
+                    int w = a.getWidth(), h = a.getHeight(), window = 8, n = window * window;
+                    double c1 = 6.5025, c2 = 58.5225, total = 0;
+                    int windows = 0;
+                    for (int y = 0; y + window <= h; y += window) {
+                        for (int x = 0; x + window <= w; x += window) {
+                            double ma = 0, mb = 0;
+                            for (int j = 0; j < window; j++) {
+                                for (int i = 0; i < window; i++) {
+                                    ma += ga[(y + j) * w + x + i];
+                                    mb += gb[(y + j) * w + x + i];
+                                }
+                            }
+                            ma /= n;
+                            mb /= n;
+                            double va = 0, vb = 0, cov = 0;
+                            for (int j = 0; j < window; j++) {
+                                for (int i = 0; i < window; i++) {
+                                    double da = ga[(y + j) * w + x + i] - ma;
+                                    double db = gb[(y + j) * w + x + i] - mb;
+                                    va += da * da;
+                                    vb += db * db;
+                                    cov += da * db;
+                                }
+                            }
+                            va /= n - 1;
+                            vb /= n - 1;
+                            cov /= n - 1;
+                            total += ((2 * ma * mb + c1) * (2 * cov + c2))
+                                    / ((ma * ma + mb * mb + c1) * (va + vb + c2));
+                            windows++;
+                        }
+                    }
+                    return windows == 0 ? 0 : total / windows;
+                }
+
+                private static double[] gray(BufferedImage img) {
+                    int w = img.getWidth(), h = img.getHeight();
+                    double[] out = new double[w * h];
+                    for (int y = 0; y < h; y++) {
+                        for (int x = 0; x < w; x++) {
+                            int rgb = img.getRGB(x, y);
+                            out[y * w + x] = 0.299 * ((rgb >> 16) & 0xff)
+                                    + 0.587 * ((rgb >> 8) & 0xff) + 0.114 * (rgb & 0xff);
+                        }
+                    }
+                    return out;
+                }
+            }
+            """;
 
     /** Shared plumbing for everything that boots the staged webapp: tests, gates, the preview server. */
     private static final String VIEW_HARNESS = """

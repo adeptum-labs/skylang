@@ -234,6 +234,21 @@ class PipelineTest {
         assertTrue(verified.get(), "a freshly synthesized view must go through the staged verification");
     }
 
+    @Test
+    void stagedProjectCarriesTheVisualGate(@TempDir Path root) throws Exception {
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(checkedViewModule(), root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertTrue(Files.exists(buildDir.resolve("src/test/java/shop/VisualGate.java")),
+                "the visual gate helper should be staged");
+        assertTrue(Files.readString(buildDir.resolve("src/test/java/shop/ViewsRenderTest.java"))
+                .contains("VisualGate.check(\"ProductList\", html)"), "each view should pass the visual gate");
+        assertTrue(Files.readString(buildDir.resolve("pom.xml")).contains("flying-saucer-core"),
+                "the pinned rasterizer should be a staged test dependency");
+    }
+
     /** A verifier that behaves like the staged visual gate: it leaves a capture behind, then passes. */
     private static Verifier capturing(byte[] png) {
         return dir -> {

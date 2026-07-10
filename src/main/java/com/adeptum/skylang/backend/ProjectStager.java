@@ -315,6 +315,18 @@ public final class ProjectStager {
                       <version>4.40.0</version>
                       <scope>test</scope>
                     </dependency>
+                    <dependency>
+                      <groupId>org.xhtmlrenderer</groupId>
+                      <artifactId>flying-saucer-core</artifactId>
+                      <version>9.11.4</version>
+                      <scope>test</scope>
+                    </dependency>
+                    <dependency>
+                      <groupId>org.slf4j</groupId>
+                      <artifactId>slf4j-api</artifactId>
+                      <version>2.0.13</version>
+                      <scope>test</scope>
+                    </dependency>
                   </dependencies>
                   <build>
                     <plugins>
@@ -326,6 +338,9 @@ public final class ProjectStager {
                           <classpathDependencyExcludes>
                             <classpathDependencyExclude>jakarta.platform:jakarta.jakartaee-api</classpathDependencyExclude>
                           </classpathDependencyExcludes>
+                          <systemPropertyVariables>
+                            <java.awt.headless>true</java.awt.headless>
+                          </systemPropertyVariables>
                         </configuration>
                       </plugin>
                       <plugin>
