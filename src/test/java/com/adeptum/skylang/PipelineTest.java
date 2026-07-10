@@ -235,6 +235,27 @@ class PipelineTest {
     }
 
     @Test
+    void recheckVerifiesEvenWhenEverythingIsFrozen(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS).build(checkedViewModule(), lock, buildDir, quiet(), quiet());
+
+        var verified = new java.util.concurrent.atomic.AtomicBoolean();
+        Verifier recording = dir -> {
+            verified.set(true);
+            return VerificationResult.pass();
+        };
+        StubLlm stub = routingStub(VIEW_REPLY);
+
+        int code = new Pipeline(stub, recording)
+                .build(checkedViewModule(), lock, buildDir, quiet(), quiet(), true);
+
+        assertEquals(0, code);
+        assertEquals(0, stub.calls(), "a recheck must stay offline — no model call");
+        assertTrue(verified.get(), "a recheck must run the staged verification despite the frozen lock");
+    }
+
+    @Test
     void stagedProjectCarriesTheVisualGate(@TempDir Path root) throws Exception {
         Path buildDir = root.resolve("build/jvm-jakarta");
 

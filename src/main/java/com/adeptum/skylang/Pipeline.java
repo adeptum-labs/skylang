@@ -107,6 +107,17 @@ public final class Pipeline {
 
     /** @return 0 on success, non-zero on a verification/synthesis failure. */
     public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err) {
+        return build(module, lockPath, buildDir, out, err, false);
+    }
+
+    /**
+     * @param recheck run the staged verification even when every unit is frozen — an offline
+     *                re-render of the whole project (tests, render checks, the visual gate) that
+     *                catches environment or toolchain drift without a single model call
+     * @return 0 on success, non-zero on a verification/synthesis failure.
+     */
+    public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err,
+                     boolean recheck) {
         Lock lock = Lock.load(lockPath);
         lock.setProfile(JvmProfile.ID, JvmProfile.VERSION);
 
@@ -157,7 +168,7 @@ public final class Pipeline {
             facesViewStager.stage(module, viewArtifacts(viewUnits), baselines(viewUnits, lock), buildDir);
             clearCaptures(buildDir);   // a stale rasterization must never be adopted as a baseline
         }
-        if (anyFresh || anyViewFresh) {
+        if (anyFresh || anyViewFresh || recheck) {
             int attempts = 0;
             VerificationResult result = verifier.verify(buildDir);
             while (!result.passed() && attempts < maxRegenerations) {
