@@ -930,7 +930,8 @@ public final class TypeChecker {
                     Ty fieldTy = fields.get(fe.field());
                     if (fieldTy == null) {
                         throw new CheckException(where + " example refers to unknown field '"
-                                + et.name() + "." + fe.field() + "'");
+                                + et.name() + "." + fe.field() + "'"
+                                + didYouMean(fe.field(), fields.keySet()));
                     }
                     String feWhere = where + " example field '" + fe.field() + "'";
                     Ty valTy = infer(fe.expected(), Map.of(), feWhere);
@@ -953,7 +954,8 @@ public final class TypeChecker {
                     Ty fieldTy = fields.get(fe.field());
                     if (fieldTy == null) {
                         throw new CheckException(where + " example refers to unknown field '"
-                                + ent.typeName() + "." + fe.field() + "'");
+                                + ent.typeName() + "." + fe.field() + "'"
+                                + didYouMean(fe.field(), fields.keySet()));
                     }
                     String feWhere = where + " example field '" + fe.field() + "'";
                     Ty valTy = infer(fe.expected(), Map.of(), feWhere);
@@ -1032,7 +1034,8 @@ public final class TypeChecker {
                 }
                 Ty ft = entities.get(et.name()).get(me.field());
                 if (ft == null) {
-                    throw new CheckException(where + ": " + target + " has no field '" + me.field() + "'");
+                    throw new CheckException(where + ": " + target + " has no field '" + me.field() + "'"
+                            + didYouMean(me.field(), entities.get(et.name()).keySet()));
                 }
                 yield ft;
             }
@@ -1473,5 +1476,39 @@ public final class TypeChecker {
             case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
             default -> value.toString();
         };
+    }
+
+    /** A typo hint: the nearest existing name, when one is close enough to be a likely slip. */
+    private static String didYouMean(String wrong, java.util.Collection<String> candidates) {
+        String best = null;
+        int bestDistance = Math.max(2, wrong.length() / 3) + 1;
+        for (String candidate : candidates) {
+            int d = editDistance(wrong.toLowerCase(java.util.Locale.ROOT),
+                    candidate.toLowerCase(java.util.Locale.ROOT));
+            if (d < bestDistance) {
+                bestDistance = d;
+                best = candidate;
+            }
+        }
+        return best == null ? "" : "\n  -> did you mean '" + best + "'?";
+    }
+
+    private static int editDistance(String a, String b) {
+        int[] prev = new int[b.length() + 1];
+        int[] cur = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) {
+            prev[j] = j;
+        }
+        for (int i = 1; i <= a.length(); i++) {
+            cur[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int subst = prev[j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1);
+                cur[j] = Math.min(subst, Math.min(prev[j] + 1, cur[j - 1] + 1));
+            }
+            int[] swap = prev;
+            prev = cur;
+            cur = swap;
+        }
+        return prev[b.length()];
     }
 }

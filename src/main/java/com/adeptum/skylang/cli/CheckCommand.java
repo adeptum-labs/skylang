@@ -51,7 +51,7 @@ public final class CheckCommand implements Callable<Integer> {
                     methods, methods == 1 ? "" : "s");
             return 0;
         } catch (SkyParseException | CheckException e) {
-            System.err.println("error: " + e.getMessage());
+            System.err.println("error [frontend]: " + e.getMessage());
             return 1;
         } catch (IOException e) {
             System.err.println("error: cannot read " + file + ": " + e.getMessage());

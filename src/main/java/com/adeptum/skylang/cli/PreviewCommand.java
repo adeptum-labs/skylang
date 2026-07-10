@@ -63,7 +63,7 @@ public final class PreviewCommand implements Callable<Integer> {
             module = Parsing.parseFile(file);
             new TypeChecker().check(module);
         } catch (SkyParseException | CheckException e) {
-            System.err.println("error: " + e.getMessage());
+            System.err.println("error [frontend]: " + e.getMessage());
             return 1;
         } catch (IOException e) {
             System.err.println("error: cannot read " + file + ": " + e.getMessage());

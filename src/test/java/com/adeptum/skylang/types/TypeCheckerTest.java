@@ -70,6 +70,39 @@ class TypeCheckerTest {
     }
 
     @Test
+    void anUnknownFieldSuggestsTheNearestName() {
+        CheckException e = assertThrows(CheckException.class, () -> check(service("""
+                  restock(p Product, units Int) -> Product
+                    intent  "Increase stock."
+                    ensures result.stok == p.stock + units
+                """)));
+        assertTrue(e.getMessage().contains("has no field 'stok'"), e.getMessage());
+        assertTrue(e.getMessage().contains("-> did you mean 'stock'?"), e.getMessage());
+    }
+
+    @Test
+    void anUnknownExampleFieldSuggestsTheNearestName() {
+        CheckException e = assertThrows(CheckException.class, () -> check(service("""
+                  restock(p Product, units Int) -> Product
+                    intent  "Increase stock."
+                    example restock(Product(1, "Notebook", 5), 3) -> a Product with stocks 8
+                """)));
+        assertTrue(e.getMessage().contains("unknown field 'Product.stocks'"), e.getMessage());
+        assertTrue(e.getMessage().contains("-> did you mean 'stock'?"), e.getMessage());
+    }
+
+    @Test
+    void aFieldNothingLikeAnyOtherGetsNoSuggestion() {
+        CheckException e = assertThrows(CheckException.class, () -> check(service("""
+                  restock(p Product, units Int) -> Product
+                    intent  "Increase stock."
+                    ensures result.zzzzzzz == 1
+                """)));
+        assertTrue(e.getMessage().contains("has no field 'zzzzzzz'"), e.getMessage());
+        assertTrue(!e.getMessage().contains("did you mean"), e.getMessage());
+    }
+
+    @Test
     void rejectsNonBooleanEnsures() {
         CheckException e = assertThrows(CheckException.class, () -> check(service("""
                   f(x Int) -> Int
