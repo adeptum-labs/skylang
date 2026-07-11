@@ -52,6 +52,32 @@ class LockTest {
     }
 
     @Test
+    void pinnedDependenciesRoundTripThroughTheHeader(@TempDir Path dir) throws Exception {
+        Path path = dir.resolve("sky.lock");
+        Lock lock = new Lock();
+        lock.setProfile("jvm-jakarta", "0.1.0");
+        lock.setDeps(java.util.Map.of("bcrypt",
+                new Lock.Dep("^4.0", "4.0.2", java.util.List.of("org.mindrot:jbcrypt:0.4"))));
+        lock.save(path);
+
+        Lock reloaded = Lock.load(path);
+        Lock.Dep bcrypt = reloaded.deps().get("bcrypt");
+        assertEquals("^4.0", bcrypt.requested());
+        assertEquals("4.0.2", bcrypt.version());
+        assertEquals(java.util.List.of("org.mindrot:jbcrypt:0.4"), bcrypt.coordinates());
+    }
+
+    @Test
+    void aLockWithoutDependenciesHasNoDepsHeader(@TempDir Path dir) throws Exception {
+        Path path = dir.resolve("sky.lock");
+        Lock lock = new Lock();
+        lock.setProfile("jvm-jakarta", "0.1.0");
+        lock.save(path);
+        assertTrue(!Files.readString(path).contains("\"deps\""),
+                "locks written before the requires block existed must keep their exact shape");
+    }
+
+    @Test
     void legacyStringBodiesStillLoad(@TempDir Path dir) throws Exception {
         Path path = dir.resolve("sky.lock");
         Files.writeString(path, """

@@ -194,12 +194,27 @@ profile does not lower yet. Native blocks are the visible portability boundary: 
 block under ts-node (or a `ts` block under the JVM) is a hard error naming the method, so
 lock-in stays greppable and a migration is priced by counting native blocks.
 
-Not yet implemented (deferred): `page`/`flow`, the dependency `requires` registry, further
-whenever-forms (audited deletes, money conservation, layer boundaries), the python profile
-and its `py` native keyword, the rest of the ts-node envelope (Money/Instant/Bytes/Secret,
-refined types, policies, specs, seeding, views), property-based `ensures`, article-form
-example arguments (`a Gold member`), a Jakarta Mail binding for the `mail` effect, and
-persistence for `Map` fields and lists of identified entities.
+Dependencies are a budget, exactly like effects. The manifest's `requires` block declares
+logical names with version constraints (`bcrypt ^4.0`, `http-client ~2.1`, `json 2.1.3`),
+and the active profile's registry — bundled with the compiler, extended per project by a
+reviewed `sky.registry` file — maps each onto pinned native coordinates with its transitive
+closure: the same block resolves to Maven artifacts under jvm-jakarta and npm packages under
+ts-node. Requiring an unregistered name, an unsatisfiable constraint, or two names that
+disagree on an underlying artifact is a frontend refusal at `sky check`, before any body
+exists. Resolution is pinned in the `sky.lock` header (requested constraint, registry
+version, coordinates) and lands in the staged pom/package.json; the declared deps join every
+spec hash, so changing what a body may draw on regenerates it; and the linter holds every
+body, synthesized or native, to the budget — a registry-known package without its `requires`
+line fails as `dependency 'x' used but not declared in requires`. Two small lists, the
+`uses` clauses and the `requires` block, bound everything the program reaches beyond its own
+logic.
+
+Not yet implemented (deferred): `page`/`flow`, further whenever-forms (audited deletes,
+money conservation, layer boundaries), the python profile and its `py` native keyword, the
+rest of the ts-node envelope (Money/Instant/Bytes/Secret, refined types, policies, specs,
+seeding, views), property-based `ensures`, article-form example arguments (`a Gold member`),
+a Jakarta Mail binding for the `mail` effect, and persistence for `Map` fields and lists of
+identified entities.
 
 ## Build & run
 
