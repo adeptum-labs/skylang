@@ -106,6 +106,26 @@ class UiPromptBuilderTest {
         assertTrue(system.contains("styleClass"));
     }
 
+    @Test
+    void userPromptCarriesTheCalledServiceSignatures() {
+        Ast.Module m = Parsing.parse(SRC, "shop.sky");
+        String user = prompts.user(m, m.views().get(0));
+        assertTrue(user.contains("Services"), user);
+        assertTrue(user.contains("Catalog.all()"), "the query signature is listed:\n" + user);
+        assertTrue(user.contains("Catalog.restock(id Int, units Int) -> Product"),
+                "the action's exact signature is listed so the bean matches it:\n" + user);
+    }
+
+    @Test
+    void systemPromptPinsTheBeanContract() {
+        String system = prompts.system(UiPromptBuilder.STANDARD);
+        assertTrue(system.contains("jakarta.faces.view"),
+                "the correct ViewScoped import is pinned:\n" + system);
+        assertTrue(system.contains("Bean"), "the <View>Bean class-name convention is stated");
+        assertTrue(system.toLowerCase().contains("inject"), "services are injected, not called statically");
+        assertTrue(system.contains("Optional"), "a Maybe return maps to Optional");
+    }
+
     // ----- the chapter-3 type surface -----------------------------------------
 
     private static final String PAY_SRC = """

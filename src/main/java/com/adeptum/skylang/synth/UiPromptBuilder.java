@@ -24,6 +24,7 @@ package com.adeptum.skylang.synth;
 import com.adeptum.skylang.backend.Lowering;
 import com.adeptum.skylang.front.ast.Ast;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -57,6 +58,15 @@ public final class UiPromptBuilder {
             - Render only the fields named by the projection and the actions — nothing else.
             - Never render, bind, or otherwise reach a Secret field; entities expose no getters for them.
             - Bind only to properties that exist on the backing bean.
+            - Name the backing bean class EXACTLY <View>Bean (the view name given below plus "Bean"),
+              so the public class matches its file. Annotate it @jakarta.inject.Named and
+              @jakarta.faces.view.ViewScoped and implement java.io.Serializable — import ViewScoped
+              from jakarta.faces.view (jakarta.enterprise.context has no ViewScoped).
+            - The services under "Services" are injected CDI beans, never static. Declare each as an
+              @jakarta.inject.Inject field and call its INSTANCE methods. Call ONLY the methods listed
+              there, with exactly their given parameters — never invent a method.
+            - Honour each method's return type: a Maybe<T> is a java.util.Optional<T> (a summary shows
+              the single value it holds, if present); a [T] is a list of rows; a plain T is one value.
             - Use only the components listed under "Component vocabulary".
             - Each prompted input names its converter or validator under "Actions": nest exactly
               that tag inside the h:inputText (e.g. <f:converter converterId="sky.money"/> for a
@@ -88,10 +98,25 @@ public final class UiPromptBuilder {
         sb.append('\n');
 
         Ast.Shows shows = view.shows();
+        String shape = shows.projection().map(Ast.Projection::kind)
+                .filter("table"::equals).map(k -> "one row per item")
+                .orElse("the single value it returns");
         sb.append("Data source: ").append(shows.query().service()).append('.')
-                .append(shows.query().method()).append("() — one row per item.\n");
+                .append(shows.query().method()).append("() — bind ").append(shape).append(".\n");
         shows.projection().ifPresent(p ->
                 sb.append("Columns: ").append(String.join(", ", p.columns())).append('\n'));
+
+        // The exact service methods this view calls: the bean must inject these and match these
+        // signatures — never invent a method or guess a return type.
+        List<String> signatures = new ArrayList<>();
+        appendSignature(module, shows.query().service(), shows.query().method(), signatures);
+        for (Ast.Action a : view.actions()) {
+            appendSignature(module, a.service(), a.method(), signatures);
+        }
+        if (!signatures.isEmpty()) {
+            sb.append("Services (inject these; call only these instance methods):\n");
+            signatures.stream().distinct().forEach(s -> sb.append("  ").append(s).append('\n'));
+        }
 
         if (!view.actions().isEmpty()) {
             sb.append("Actions:\n");
@@ -121,6 +146,21 @@ public final class UiPromptBuilder {
 
         sb.append("\nWrite the Facelets fragment and the backing bean now.");
         return sb.toString();
+    }
+
+    /** Append {@code Service.method(params) -> Return} for a called method, so the bean matches it. */
+    private static void appendSignature(Ast.Module module, String service, String method, List<String> into) {
+        module.services().stream()
+                .filter(s -> s.name().equals(service))
+                .flatMap(s -> s.methods().stream())
+                .filter(m -> m.name().equals(method))
+                .findFirst()
+                .ifPresent(m -> {
+                    String params = m.params().stream()
+                            .map(p -> p.name() + " " + p.type().sky())
+                            .collect(Collectors.joining(", "));
+                    into.add(service + "." + method + "(" + params + ") -> " + m.returnType().sky());
+                });
     }
 
     private static final String COMPONENT_SYSTEM = """
