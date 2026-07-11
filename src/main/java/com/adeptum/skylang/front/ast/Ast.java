@@ -421,7 +421,15 @@ public final class Ast {
 
     public sealed interface Expr
             permits IntLit, StrLit, BoolLit, MoneyLit, NameExpr, MemberExpr, CallExpr, BinExpr,
-            NotExpr, OldExpr, EmptyCheck, AggExpr {
+            NotExpr, OldExpr, EmptyCheck, AggExpr, ForallExpr {
+    }
+
+    /**
+     * {@code every product in result has category == category} — a universally quantified
+     * clause over a list: the named field of every element satisfies the comparison, whose
+     * right side resolves in the enclosing scope. An absent Maybe field satisfies nothing.
+     */
+    public record ForallExpr(String var, Expr source, Expr predicate) implements Expr {
     }
 
     /** {@code not <expr>}. */

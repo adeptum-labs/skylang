@@ -308,6 +308,8 @@ public final class PromptBuilder {
             case Ast.AggExpr a -> a.kind() + " of (" + sky(a.value()) + " for " + a.var() + " in "
                     + skySource(a.source())
                     + a.where().map(w -> " where " + sky(w)).orElse("") + ")";
+            case Ast.ForallExpr f -> "every " + f.var() + " in " + sky(f.source())
+                    + " has " + sky(f.predicate());
         };
     }
 

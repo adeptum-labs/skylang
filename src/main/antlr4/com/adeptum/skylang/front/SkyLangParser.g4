@@ -172,6 +172,7 @@ expr
     | expr IS NOT? expr                         # isExpr        // status is not Pending | tags is empty
     | NOT expr                                   # notExpr
     | expr op=(AND | OR) expr                    # logicExpr
+    | EVERY ID IN expr HAS expr                  # forallExpr    // every product in result has f == v
     | MONEY                                      # moneyLit
     | INT                                        # intLit
     | STRING                                     # strLit

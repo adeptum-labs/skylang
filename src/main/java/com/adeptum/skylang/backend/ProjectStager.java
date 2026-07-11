@@ -598,6 +598,12 @@ public final class ProjectStager {
                     private static boolean eq(long a, long b) { return a == b; }
                     private static boolean eq(boolean a, boolean b) { return a == b; }
                     private static boolean eq(Object a, Object b) { return java.util.Objects.equals(a, b); }
+                    private static boolean hasEq(Object v, Object expected) {
+                        if (v instanceof java.util.Optional<?> o) {
+                            return o.isPresent() && java.util.Objects.equals(o.get(), expected);
+                        }
+                        return java.util.Objects.equals(v, expected);
+                    }
                     private static boolean lt(long a, long b) { return a < b; }
                     private static boolean le(long a, long b) { return a <= b; }
                     private static boolean gt(long a, long b) { return a > b; }
@@ -984,6 +990,10 @@ public final class ProjectStager {
             case Ast.NotExpr n -> walkOld(n.value(), oldNames);
             case Ast.MemberExpr m -> walkOld(m.target(), oldNames);
             case Ast.CallExpr c -> c.args().forEach(a -> walkOld(a, oldNames));
+            case Ast.ForallExpr f -> {
+                walkOld(f.source(), oldNames);
+                walkOld(f.predicate(), oldNames);
+            }
             default -> {
             }
         }
@@ -1007,6 +1017,10 @@ public final class ProjectStager {
             case Ast.NotExpr n -> emitSnapshotWalk(n.value(), oldNames, env, module, sb, emitted);
             case Ast.MemberExpr m -> emitSnapshotWalk(m.target(), oldNames, env, module, sb, emitted);
             case Ast.CallExpr c -> c.args().forEach(a -> emitSnapshotWalk(a, oldNames, env, module, sb, emitted));
+            case Ast.ForallExpr f -> {
+                emitSnapshotWalk(f.source(), oldNames, env, module, sb, emitted);
+                emitSnapshotWalk(f.predicate(), oldNames, env, module, sb, emitted);
+            }
             default -> {
             }
         }
@@ -1040,6 +1054,8 @@ public final class ProjectStager {
                     a.source() instanceof Ast.SourceExpr s
                             ? new Ast.SourceExpr(replaceOld(s.expr(), oldNames)) : a.source(),
                     a.where().map(w -> replaceOld(w, oldNames)));
+            case Ast.ForallExpr f -> new Ast.ForallExpr(f.var(),
+                    replaceOld(f.source(), oldNames), replaceOld(f.predicate(), oldNames));
             default -> e;
         };
     }

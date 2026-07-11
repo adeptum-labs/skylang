@@ -161,7 +161,35 @@ public final class Lowering {
             case Ast.OldExpr o ->
                     throw new UnsupportedOperationException("old(...) must be snapshotted before lowering");
             case Ast.AggExpr a -> aggToJava(a, env, valueEntities, module);
+            case Ast.ForallExpr f -> forallToJava(f, env, valueEntities, module);
         };
+    }
+
+    /**
+     * {@code every product in result has category == category} lowers to an allMatch over the
+     * list. Equality goes through the hasEq helper, which unwraps a Maybe field (absent
+     * satisfies nothing); other comparisons apply to the raw field.
+     */
+    private static String forallToJava(Ast.ForallExpr f, Map<String, String> env,
+                                       Set<String> valueEntities, Ast.Module module) {
+        if (!(f.predicate() instanceof Ast.BinExpr be && be.left() instanceof Ast.NameExpr field)) {
+            throw new UnsupportedOperationException(
+                    "an every-clause predicate is '<field> <op> <value>'");
+        }
+        String source = exprToJava(f.source(), env, valueEntities, module);
+        String lhs = f.var() + "." + field.name() + "()";
+        String rhs = exprToJava(be.right(), env, valueEntities, module);
+        String body = switch (be.op()) {
+            case "==" -> "hasEq(" + lhs + ", " + rhs + ")";
+            case "!=" -> "!hasEq(" + lhs + ", " + rhs + ")";
+            case "<" -> "lt(" + lhs + ", " + rhs + ")";
+            case "<=" -> "le(" + lhs + ", " + rhs + ")";
+            case ">" -> "gt(" + lhs + ", " + rhs + ")";
+            case ">=" -> "ge(" + lhs + ", " + rhs + ")";
+            default -> throw new UnsupportedOperationException(
+                    "an every-clause compares with ==, !=, <, <=, > or >=");
+        };
+        return "(" + source + ").stream().allMatch(" + f.var() + " -> " + body + ")";
     }
 
     /** An entity constructor, max/min through the helpers, or an effect-free module method. */
@@ -519,6 +547,8 @@ public final class Lowering {
             case Ast.OldExpr o -> "old(" + skyText(o.value()) + ")";
             case Ast.EmptyCheck e -> skyText(e.value()) + " is empty";
             case Ast.AggExpr a -> a.kind() + " of (...)";
+            case Ast.ForallExpr f -> "every " + f.var() + " in " + skyText(f.source())
+                    + " has " + skyText(f.predicate());
         };
     }
 

@@ -148,6 +148,30 @@ class TypeCheckerTest {
     }
 
     @Test
+    void everyClausesQuantifyOverListResults() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity Category { name Text @id }
+                entity Product { id Int @id  name Text  category Maybe<Category> }
+                service Catalog uses db {
+                  inCategory(category Category) -> [Product]
+                    intent  "Every product in the given category."
+                    ensures every product in result has category == category
+                }
+                """));
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module shop
+                entity Product { id Int @id  name Text }
+                service Catalog uses db {
+                  all() -> [Product]
+                    intent "x"
+                    ensures every product in result has price == 1
+                }
+                """));
+        assertTrue(e.getMessage().contains("has no field 'price'"), e.getMessage());
+    }
+
+    @Test
     void rejectsUnknownType() {
         CheckException e = assertThrows(CheckException.class, () -> check(service("""
                   f(x Widget) -> Int

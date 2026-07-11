@@ -1127,7 +1127,40 @@ public final class TypeChecker {
                 yield infer(oe.value(), env, where);
             }
             case Ast.AggExpr ae -> inferAggregate(ae, env, where);
+            case Ast.ForallExpr fe -> inferForall(fe, env, where);
         };
+    }
+
+    /**
+     * {@code every product in result has category == category}: the source is a list of
+     * entities, the predicate compares one of the element's fields (left) against a value
+     * from the enclosing scope (right). A Maybe field compares against its inner type —
+     * an absent value satisfies nothing.
+     */
+    private Ty inferForall(Ast.ForallExpr fe, Map<String, Ty> env, String where) {
+        Ty sourceTy = infer(fe.source(), env, where + " every-source");
+        if (!(sourceTy instanceof Ty.GenericTy list) || !list.kind().equals("List")
+                || !(list.args().get(0) instanceof Ty.EntityTy element)) {
+            throw new CheckException(where + ": 'every " + fe.var() + " in ...' needs a list of"
+                    + " entities, got " + sourceTy);
+        }
+        if (!(fe.predicate() instanceof Ast.BinExpr be && be.left() instanceof Ast.NameExpr fieldName)) {
+            throw new CheckException(where + ": an every-clause predicate is '<field> <op> <value>'");
+        }
+        Map<String, Ty> fields = entities.get(element.name());
+        Ty fieldTy = fields.get(fieldName.name());
+        if (fieldTy == null) {
+            throw new CheckException(where + ": " + element.name() + " has no field '"
+                    + fieldName.name() + "'" + didYouMean(fieldName.name(), fields.keySet()));
+        }
+        Ty valueTy = infer(be.right(), env, where + " every-value");
+        boolean equality = be.op().equals("==") || be.op().equals("!=");
+        if (equality && fieldTy instanceof Ty.GenericTy maybe && maybe.kind().equals("Maybe")) {
+            fits(where + " every-value", be.right(), valueTy, maybe.args().get(0));
+        } else {
+            fits(where + " every-value", be.right(), valueTy, fieldTy);
+        }
+        return Ty.BOOL;
     }
 
     private Ty inferAggregate(Ast.AggExpr ag, Map<String, Ty> env, String where) {

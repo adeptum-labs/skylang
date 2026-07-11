@@ -140,6 +140,10 @@ public final class SupportClasses {
                     addExpr(s.expr(), used);
                 }
             }
+            case Ast.ForallExpr f -> {
+                addExpr(f.source(), used);
+                addExpr(f.predicate(), used);
+            }
             default -> {
             }
         }

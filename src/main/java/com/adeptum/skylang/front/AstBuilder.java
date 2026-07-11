@@ -482,6 +482,8 @@ public final class AstBuilder {
             case SkyLangParser.OldExprContext c -> new Ast.OldExpr(expr(c.expr()));
             case SkyLangParser.IsExprContext c -> isExpr(c);
             case SkyLangParser.AggExprContext c -> aggExpr(c);
+            case SkyLangParser.ForallExprContext c ->
+                    new Ast.ForallExpr(c.ID().getText(), expr(c.expr(0)), expr(c.expr(1)));
             case SkyLangParser.NameExprContext c -> new Ast.NameExpr(c.ID().getText());
             default -> throw new IllegalStateException("unhandled expr node: " + ctx.getClass().getSimpleName());
         };

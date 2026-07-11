@@ -204,7 +204,8 @@ public final class UiPromptBuilder {
             case Ast.OldExpr o -> "old(" + exprText(o.value()) + ")";
             case Ast.EmptyCheck ec -> exprText(ec.value()) + " is empty";
             case Ast.AggExpr a -> a.kind() + " of (...)";
-        };
+        default -> "";   // view arguments never carry quantified or aggregate clauses
+            };
     }
 
     private String renderExpect(Ast.Expect e) {

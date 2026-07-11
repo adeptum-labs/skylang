@@ -64,6 +64,7 @@ WHEN     : 'when' ;
 OLD      : 'old' ;
 NOT      : 'not' ;
 FOR      : 'for' ;
+EVERY    : 'every' ;
 SPEC     : 'spec' ;
 GIVEN    : 'given' ;
 THEN     : 'then' ;
