@@ -338,6 +338,7 @@ public final class Pipeline {
         }
         if (anyFresh || anyViewFresh || recheck) {
             int attempts = 0;
+            out.println("  verifying staged project (mvn test) ...");
             VerificationResult result = verifier.verify(buildDir);
             boolean regenerable = units.stream()
                     .anyMatch(u -> u.fresh && u.method.nativeBody().isEmpty());
@@ -345,6 +346,7 @@ public final class Pipeline {
                 attempts++;
                 regenerateFailing(module, units, result.output(), attempts, out);
                 profile.stage(module, bodyMap(units), deps.declared(), buildDir);
+                out.println("  re-verifying staged project (mvn test) ...");
                 result = verifier.verify(buildDir);
             }
             if (!result.passed()) {
