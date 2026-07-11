@@ -258,10 +258,22 @@ flows, components and the interface-contract counts — the worked shop's checkp
 the book's: nineteen methods, four pages, one flow, one component, and still nothing
 generated.
 
-Not yet implemented (deferred): render-time verification and staging of the new interface
-forms (summaries, dashboards, flow walking, component isolation renders, prose
-expect/appears, empty and failed states), ordered-by ensures, article-form example arguments
-and results
+The capstone build carries the interface's last two units through the same gate. A
+`component` synthesizes as a Faces composite (a typed `cc:attribute` per parameter, the
+shown value bound, each state style realised), is disposed structurally against its
+declaration, freezes into its own lock section and stages under
+`src/main/resources/components/`. A `flow` synthesizes as a navigation graph the verifier
+*walks* — declared steps in order, every transition present, reachability and
+nothing-follows-success checked against the walk, whose lines print in the transcript — and
+the verified graph stages as an ordinary navigation-table class you could keep. A first
+build opens with its profile and pinned-dependency lines, pages report with their expect and
+appears counts, each policy prints its checked-against-N-bodies line, and `--recheck` counts
+the bodies, pages, flows and components it read from the lock.
+
+Not yet implemented (deferred): in-container rendering of the new interface forms
+(summaries, dashboards, composite isolation renders with sampled thresholds, prose
+expect/appears, empty and failed states — the flow walk and composite checks are structural
+today), ordered-by ensures, article-form example arguments and results
 (`place(a Draft order with 2 items)`, `id of a Placed order`, `-> that product`), further
 whenever-forms (audited deletes, money conservation, layer boundaries), the python profile
 and its `py` native keyword, the rest of the ts-node envelope (Money/Instant/Bytes/Secret,
