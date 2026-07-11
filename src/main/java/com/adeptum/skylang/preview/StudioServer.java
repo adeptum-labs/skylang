@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The studio shell: a lightweight JDK HTTP server the native CLI can host. It frames the
@@ -42,6 +43,8 @@ public final class StudioServer implements AutoCloseable {
 
     private final HttpServer server;
     private volatile int appPort;
+    private volatile Runnable onBrowserGone;
+    private final AtomicBoolean goneSignalled = new AtomicBoolean();
 
     public StudioServer(int controlPort, int appPort, List<String> views, EditHandler handler) throws IOException {
         this(controlPort, appPort, views, handler, false);
@@ -84,9 +87,24 @@ public final class StudioServer implements AutoCloseable {
             }
             reply(exchange, handler.apply(change));
         });
+        // The shell beacons here when its window is closing, so the CLI can stop on its own.
+        server.createContext("/gone", exchange -> {
+            respond(exchange, 200, "bye", "text/plain; charset=utf-8");
+            if (goneSignalled.compareAndSet(false, true)) {
+                Runnable callback = onBrowserGone;
+                if (callback != null) {
+                    callback.run();
+                }
+            }
+        });
         server.createContext("/", exchange -> respond(exchange, 200, shell, "text/html; charset=utf-8"));
         server.setExecutor(null);
         server.start();
+    }
+
+    /** Register what to do when the studio window is closed (a browser {@code pagehide} beacon). */
+    public void onBrowserGone(Runnable callback) {
+        this.onBrowserGone = callback;
     }
 
     /** The bound control port (useful when constructed with port 0). */
@@ -342,6 +360,8 @@ public final class StudioServer implements AutoCloseable {
                   shownPort = 0;
                 }
                 %PANELJS%
+                // Tell the CLI to stop when this window closes, so preview doesn't linger.
+                window.addEventListener('pagehide', function () { navigator.sendBeacon('/gone'); });
                 refresh();
                 loadSpec();
               </script>

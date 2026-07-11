@@ -150,6 +150,28 @@ class StudioServerTest {
     }
 
     @Test
+    void beaconingGoneFiresTheCallbackOnceAndTheShellBeaconsOnClose() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger fired = new java.util.concurrent.atomic.AtomicInteger();
+        try (StudioServer studio = new StudioServer(0, 0, List.of("V"), EditHandler.NONE)) {
+            studio.onBrowserGone(fired::incrementAndGet);
+            HttpClient http = HttpClient.newHttpClient();
+            String base = "http://localhost:" + studio.port();
+
+            assertTrue(http.send(HttpRequest.newBuilder(URI.create(base + "/")).build(),
+                    HttpResponse.BodyHandlers.ofString()).body().contains("sendBeacon('/gone')"),
+                    "the shell should beacon /gone when its window closes");
+
+            for (int i = 0; i < 3; i++) {
+                HttpResponse<String> gone = http.send(
+                        HttpRequest.newBuilder(URI.create(base + "/gone")).POST(BodyPublishers.noBody()).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, gone.statusCode());
+            }
+            assertEquals(1, fired.get(), "the browser-gone callback fires exactly once");
+        }
+    }
+
+    @Test
     void includesTheControlPanelOnlyWhenEnabled() throws Exception {
         assertTrue(shell(true).contains("class=\"panel\""), "the panel is present when enabled");
         assertTrue(shell(true).contains("loadSpec"), "the panel JS is present when enabled");

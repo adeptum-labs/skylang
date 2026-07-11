@@ -43,6 +43,8 @@ import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Orchestrates a {@code sky preview} session and its edit loop. It stages the module's views, serves
@@ -75,6 +77,8 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
     private String lastAppliedSource;   // suppresses the watcher's echo of our own writes
     private volatile PreviewProcess container;
     private volatile StudioServer studio;
+    private final CountDownLatch stopSignal = new CountDownLatch(1);
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     public PreviewSession(Llm llm, Verifier verifier, Profile profile, Budget deps) {
         this.llm = llm;
@@ -103,6 +107,7 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
             this.lastAppliedSource = activeSource;
             this.container = stageAndLaunch(module, true, out, err);   // full verify before launching
             this.studio = new StudioServer(controlPort, container.appPort(), viewNames(module), this, true);
+            studio.onBrowserGone(stopSignal::countDown);   // closing the studio window stops the preview
             return new Handle(studio.port(), container.appPort());
         }
     }
@@ -116,6 +121,9 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
 
     @Override
     public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;   // idempotent: the normal exit and the shutdown hook may both call this
+        }
         // Deliberately not under `lock`. This runs from the JVM shutdown hook, and the main thread
         // may hold `lock` while blocked in a launch that is waiting for the container to report
         // ready. Waiting for the lock here would freeze Ctrl-C at "staged: ..." until that launch
@@ -149,9 +157,22 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
         Runtime.getRuntime().addShutdownHook(new Thread(this::close));
 
         String url = "http://localhost:" + handle.studioPort() + "/";
-        out.println("preview ready — " + url + "  (edit in the browser or the file; Ctrl-C to stop)");
+        out.println("preview ready — " + url
+                + "  (edit in the browser or the file; close the window or Ctrl-C to stop)");
         openBrowser(url, out);
-        watch(sourceFile);
+
+        Thread watcher = new Thread(() -> watch(sourceFile), "sky-preview-watch");
+        watcher.setDaemon(true);
+        watcher.start();
+
+        try {
+            stopSignal.await();   // until the studio window closes (or Ctrl-C fires the shutdown hook)
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return 0;
+        }
+        out.println("preview: window closed — stopping.");
+        close();
         return 0;
     }
 
