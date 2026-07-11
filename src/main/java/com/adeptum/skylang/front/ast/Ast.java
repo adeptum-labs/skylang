@@ -37,15 +37,49 @@ public final class Ast {
     }
 
     public record Module(String name, List<TypeDecl> types, List<Policy> policies,
-                         List<Entity> entities, List<Service> services, List<View> views) {
+                         List<Entity> entities, List<Service> services, List<View> views,
+                         List<Flow> flows, List<Component> components) {
         public Module(String name, List<Entity> entities, List<Service> services, List<View> views) {
-            this(name, List.of(), List.of(), entities, services, views);
+            this(name, List.of(), List.of(), entities, services, views, List.of(), List.of());
         }
 
         public Module(String name, List<TypeDecl> types, List<Entity> entities,
                       List<Service> services, List<View> views) {
-            this(name, types, List.of(), entities, services, views);
+            this(name, types, List.of(), entities, services, views, List.of(), List.of());
         }
+
+        public Module(String name, List<TypeDecl> types, List<Policy> policies,
+                      List<Entity> entities, List<Service> services, List<View> views) {
+            this(name, types, policies, entities, services, views, List.of(), List.of());
+        }
+    }
+
+    // ----- flows and components ---------------------------------------------
+
+    /** {@code flow Checkout { step ... on ... expect ... }} — typed steps, guarded transitions. */
+    public record Flow(String name, List<FlowStep> steps, List<FlowTransition> transitions,
+                       List<String> expects) {
+    }
+
+    /** {@code step Pay -> CheckoutService.place(the cart, the customer)}. */
+    public record FlowStep(String name, String target) {
+    }
+
+    /** {@code on PaymentFailed -> back to step Pay with message}. */
+    public record FlowTransition(String trigger, String target) {
+    }
+
+    /** {@code component StockBadge(product Product) { ... }} — a reusable, verified widget. */
+    public record Component(String name, List<Param> params, ComponentShows shows,
+                            List<ComponentAppears> appears, List<String> expects) {
+    }
+
+    /** {@code shows product.stock as a badge}. */
+    public record ComponentShows(Expr value, String kind) {
+    }
+
+    /** {@code appears amber when product.stock <= 10}. */
+    public record ComponentAppears(String style, Expr when) {
     }
 
     // ----- policies -------------------------------------------------------------
@@ -384,19 +418,55 @@ public final class Ast {
 
     // ----- views -------------------------------------------------------------
 
+    /**
+     * A page ({@code page}/{@code view}): what it shows, its actions, and its contracts.
+     * View spec hashes cover this record's string form, so {@code toString} is pinned:
+     * byte-identical to the original single-shows shape unless extra shows exist.
+     */
     public record View(String name, Optional<String> route, Shows shows,
-                       List<Action> actions, List<Expect> expects, List<Appears> appears) {
+                       List<Action> actions, List<Expect> expects, List<Appears> appears,
+                       List<Shows> moreShows) {
+        public View(String name, Optional<String> route, Shows shows,
+                    List<Action> actions, List<Expect> expects, List<Appears> appears) {
+            this(name, route, shows, actions, expects, appears, List.of());
+        }
+
+        @Override
+        public String toString() {
+            return "View[name=" + name + ", route=" + route + ", shows=" + shows
+                    + ", actions=" + actions + ", expects=" + expects + ", appears=" + appears
+                    + (moreShows.isEmpty() ? "" : ", moreShows=" + moreShows) + "]";
+        }
     }
 
     /** A qualified query call like {@code Catalog.all()}. */
     public record QualifiedCall(String service, String method, List<Expr> args) {
     }
 
-    public record Shows(QualifiedCall query, Optional<Projection> projection) {
+    /** One data source; {@code title} carries {@code titled "Low stock"} on a dashboard. */
+    public record Shows(QualifiedCall query, Optional<Projection> projection, Optional<String> title) {
+        public Shows(QualifiedCall query, Optional<Projection> projection) {
+            this(query, projection, Optional.empty());
+        }
+
+        @Override
+        public String toString() {
+            return "Shows[query=" + query + ", projection=" + projection
+                    + title.map(t -> ", title=" + t).orElse("") + "]";
+        }
     }
 
-    /** {@code a table of (name, stock)} — {@code kind} is "table" or "form". */
-    public record Projection(String kind, List<String> columns) {
+    /** {@code a [sortable] table of (name, stock)} — {@code kind} is "table", "form" or "summary". */
+    public record Projection(String kind, List<String> columns, boolean sortable) {
+        public Projection(String kind, List<String> columns) {
+            this(kind, columns, false);
+        }
+
+        @Override
+        public String toString() {
+            return "Projection[kind=" + kind + ", columns=" + columns
+                    + (sortable ? ", sortable=true" : "") + "]";
+        }
     }
 
     /** {@code action "Restock" on row -> Catalog.restock(row.id, ask Int)}. */
@@ -414,7 +484,7 @@ public final class Ast {
     public record AskArg(Type type) implements ActionArg {
     }
 
-    public sealed interface Expect permits ExpectColumns, ExpectActionKind {
+    public sealed interface Expect permits ExpectColumns, ExpectActionKind, ExpectProse {
     }
 
     /** {@code table has columns (name, stock)}. */
@@ -425,7 +495,15 @@ public final class Ast {
     public record ExpectActionKind(String label, String kind) implements Expect {
     }
 
-    public sealed interface Appears permits AppearsPlacement, AppearsStyle, AppearsColumnOrder {
+    /**
+     * A prose interface contract ({@code placedAt shows only when present}): stated for the
+     * generator and the reader; render-time verification arrives with its rendering form.
+     */
+    public record ExpectProse(String text) implements Expect {
+    }
+
+    public sealed interface Appears
+            permits AppearsPlacement, AppearsStyle, AppearsColumnOrder, AppearsActionState, AppearsProse {
     }
 
     /** {@code appears action "Restock" in toolbar} — the control renders inside a named region. */
@@ -438,6 +516,15 @@ public final class Ast {
 
     /** {@code appears columns (name, stock)} — the rendered column order. */
     public record AppearsColumnOrder(List<String> columns) implements Appears {
+    }
+
+    /** {@code appears action "Cancel" is disabled when status is Shipped}. */
+    public record AppearsActionState(String label, String state, Optional<String> when)
+            implements Appears {
+    }
+
+    /** A prose appearance rule ({@code sections in a two-column grid}). */
+    public record AppearsProse(String text) implements Appears {
     }
 
     // ----- expressions -------------------------------------------------------

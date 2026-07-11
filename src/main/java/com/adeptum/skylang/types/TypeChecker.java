@@ -91,9 +91,62 @@ public final class TypeChecker {
             }
         }
 
+        // Components register first so pages may use them as columns; then views and flows.
+        for (Ast.Component c : module.components()) {
+            checkComponent(c);
+        }
         // Check every view against the entities and the service signatures.
         for (Ast.View v : module.views()) {
             checkView(v, services);
+        }
+        for (Ast.Flow f : module.flows()) {
+            checkFlow(f);
+        }
+    }
+
+    // ----- flows and components --------------------------------------------------
+
+    /** component name -> the entity its one parameter carries, for use as a page column. */
+    private final Map<String, String> componentRow = new HashMap<>();
+
+    private void checkComponent(Ast.Component c) {
+        String where = "component " + c.name();
+        Map<String, Ty> env = new LinkedHashMap<>();
+        for (Ast.Param p : c.params()) {
+            env.put(p.name(), resolveType(p.type(), where + " parameter " + p.name()));
+        }
+        infer(c.shows().value(), env, where + " shows");
+        for (Ast.ComponentAppears a : c.appears()) {
+            Ty t = infer(a.when(), env, where + " appears " + a.style());
+            if (!t.isBool()) {
+                throw new CheckException(where + " appears " + a.style()
+                        + ": the when-condition must be boolean, got " + t);
+            }
+        }
+        if (c.params().size() == 1
+                && env.values().iterator().next() instanceof Ty.EntityTy entity) {
+            componentRow.put(c.name(), entity.name());
+        }
+    }
+
+    private void checkFlow(Ast.Flow f) {
+        String where = "flow " + f.name();
+        java.util.Set<String> steps = new java.util.LinkedHashSet<>();
+        for (Ast.FlowStep step : f.steps()) {
+            if (!steps.add(step.name())) {
+                throw new CheckException(where + ": duplicate step '" + step.name() + "'");
+            }
+        }
+        if (steps.isEmpty()) {
+            throw new CheckException(where + " declares no steps");
+        }
+        for (Ast.FlowTransition t : f.transitions()) {
+            boolean success = t.trigger().equals("success");
+            boolean error = moduleEntities.stream().anyMatch(e -> e.name().equals(t.trigger()));
+            if (!success && !error) {
+                throw new CheckException(where + ": 'on " + t.trigger() + "' must be 'success'"
+                        + " or a declared error entity");
+            }
         }
     }
 
@@ -532,28 +585,12 @@ public final class TypeChecker {
             throw new CheckException(where + " has no data source: add a 'shows' clause");
         }
 
-        // The query must resolve to a service method returning a list of an entity (the row type).
-        Ast.QualifiedCall q = v.shows().query();
-        MethodSig querySig = lookup(services, q.service(), q.method(), where + " shows");
-        checkArgCount(where + " shows", q.service() + "." + q.method(), q.args().size(), querySig.params().size());
-        for (int i = 0; i < q.args().size(); i++) {
-            Ty actual = infer(q.args().get(i), Map.of(), where + " shows argument " + (i + 1));
-            fits(where + " shows argument " + (i + 1), q.args().get(i), actual, querySig.params().get(i));
-        }
-        if (!(querySig.returnType() instanceof Ty.GenericTy list && list.kind().equals("List")
-                && list.args().get(0) instanceof Ty.EntityTy row)) {
-            throw new CheckException(where + " shows: " + q.service() + "." + q.method()
-                    + " must return a list of an entity (e.g. [Product]) to drive a view, but returns "
-                    + querySig.returnType());
-        }
-        String rowType = row.name();
+        // The query must resolve to a service method returning a list (a table's rows) or a
+        // Maybe (a summary's subject) of an entity — the row type.
+        String rowType = checkShows(v, v.shows(), services, where);
         LinkedHashMap<String, Ty> rowFields = entities.get(rowType);
-
-        // Projected columns must be renderable fields of the row entity.
-        if (v.shows().projection().isPresent()) {
-            for (String col : v.shows().projection().get().columns()) {
-                requireRenderableField(where + " shows", rowType, rowFields, col);
-            }
+        for (Ast.Shows extra : v.moreShows()) {
+            checkShows(v, extra, services, where);
         }
 
         // Each action must call a declared method with row-typed / prompted arguments of matching type.
@@ -566,8 +603,12 @@ public final class TypeChecker {
                 String argWhere = actionWhere + " argument " + (i + 1);
                 Ty expected = sig.params().get(i);
                 switch (a.args().get(i)) {
-                    case Ast.ExprArg ea ->
-                            fits(argWhere, ea.value(), infer(ea.value(), env, argWhere), expected);
+                    case Ast.ExprArg ea -> {
+                        if (ea.value() instanceof Ast.NameExpr n && routeParams(v).contains(n.name())) {
+                            break;   // a route parameter binds to whatever the action expects
+                        }
+                        fits(argWhere, ea.value(), infer(ea.value(), env, argWhere), expected);
+                    }
                     case Ast.AskArg ak -> fits(argWhere, null, resolveAskType(ak.type(), argWhere), expected);
                 }
             }
@@ -586,6 +627,9 @@ public final class TypeChecker {
                     if (!declared) {
                         throw new CheckException(where + " expect: no action labelled \"" + ak.label() + "\"");
                     }
+                }
+                case Ast.ExpectProse ignored -> {
+                    // Prose interface contracts are counted and prompt-carried; nothing resolves.
                 }
             }
         }
@@ -610,8 +654,66 @@ public final class TypeChecker {
                         requireRenderableField(where + " appears", rowType, rowFields, col);
                     }
                 }
+                case Ast.AppearsActionState st -> {
+                    boolean declared = v.actions().stream().anyMatch(act -> act.label().equals(st.label()));
+                    if (!declared) {
+                        throw new CheckException(where + " appears: no action labelled \"" + st.label() + "\"");
+                    }
+                }
+                case Ast.AppearsProse ignored -> {
+                }
             }
         }
+    }
+
+    /** Validate one data source and return its row entity name. */
+    private String checkShows(Ast.View v, Ast.Shows shows, Map<String, Map<String, MethodSig>> services,
+                              String where) {
+        Ast.QualifiedCall q = shows.query();
+        MethodSig querySig = lookup(services, q.service(), q.method(), where + " shows");
+        checkArgCount(where + " shows", q.service() + "." + q.method(), q.args().size(), querySig.params().size());
+        java.util.Set<String> routeParams = routeParams(v);
+        for (int i = 0; i < q.args().size(); i++) {
+            String argWhere = where + " shows argument " + (i + 1);
+            Ast.Expr arg = q.args().get(i);
+            if (arg instanceof Ast.NameExpr n && routeParams.contains(n.name())) {
+                continue;   // a route parameter binds to whatever the query expects
+            }
+            Ty actual = arg instanceof Ast.NameExpr n && n.name().equals("currentCustomer")
+                    && entities.containsKey("User")
+                    ? Ty.entity("User")   // the session's signed-in viewer
+                    : infer(arg, Map.of(), argWhere);
+            fits(argWhere, arg, actual, querySig.params().get(i));
+        }
+        Ty returned = querySig.returnType();
+        Ty.EntityTy row;
+        if (returned instanceof Ty.GenericTy g
+                && (g.kind().equals("List") || g.kind().equals("Maybe"))
+                && g.args().get(0) instanceof Ty.EntityTy entity) {
+            row = entity;
+        } else {
+            throw new CheckException(where + " shows: " + q.service() + "." + q.method()
+                    + " must return a list of an entity (e.g. [Product]) or a Maybe of one"
+                    + " to drive a view, but returns " + returned);
+        }
+        if (shows.projection().isPresent()) {
+            for (String col : shows.projection().get().columns()) {
+                requireRenderableField(where + " shows", row.name(), entities.get(row.name()), col);
+            }
+        }
+        return row.name();
+    }
+
+    /** The {@code {param}} names inside the view's route, bound when the page renders. */
+    private static java.util.Set<String> routeParams(Ast.View v) {
+        java.util.Set<String> params = new java.util.LinkedHashSet<>();
+        v.route().ifPresent(route -> {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{(\\w+)}").matcher(route);
+            while (m.find()) {
+                params.add(m.group(1));
+            }
+        });
+        return params;
     }
 
     /** The types a view may prompt the user for: text- or number-shaped values with converters. */
@@ -642,10 +744,20 @@ public final class TypeChecker {
         }
     }
 
-    private static void requireRenderableField(String where, String entity, Map<String, Ty> fields, String field) {
+    private void requireRenderableField(String where, String entity, Map<String, Ty> fields, String field) {
+        // A declared component stands wherever a field could: StockBadge as a table column,
+        // provided its one parameter carries this row entity.
+        if (componentRow.containsKey(field)) {
+            if (!componentRow.get(field).equals(entity)) {
+                throw new CheckException(where + ": component " + field + " takes a "
+                        + componentRow.get(field) + ", not a " + entity);
+            }
+            return;
+        }
         Ty ty = fields.get(field);
         if (ty == null) {
-            throw new CheckException(where + ": '" + field + "' is not a field of " + entity);
+            throw new CheckException(where + ": '" + field + "' is not a field of " + entity
+                    + didYouMean(field, fields.keySet()));
         }
         if (ty.isSecret()) {
             throw new CheckException(where + ": Secret field '" + field + "' cannot be rendered");

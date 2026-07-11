@@ -51,6 +51,10 @@ public final class ViewVerifier {
                         unmet.add("expected a button labelled \"" + a.label() + "\"");
                     }
                 }
+                case Ast.ExpectProse ignored -> {
+                    // Prose contracts guide synthesis through the prompt; their render-time
+                    // verification arrives with the rendering of the form they describe.
+                }
             }
         }
         for (Ast.Appears a : view.appears()) {
@@ -69,6 +73,11 @@ public final class ViewVerifier {
                     if (!tree.columnFields().equals(co.columns())) {
                         unmet.add("expected column order " + co.columns() + " but got " + tree.columnFields());
                     }
+                }
+                case Ast.AppearsActionState ignored -> {
+                    // State-dependent looks need a data-driven render; prompt-guided for now.
+                }
+                case Ast.AppearsProse ignored -> {
                 }
             }
         }

@@ -375,13 +375,30 @@ public final class AstBuilder {
     }
 
     private Ast.Projection projection(SkyLangParser.ProjectionContext ctx) {
-        // ID(0) is the article ("a"); ID(1) is the kind ("table"/"form"); the rest are the columns.
-        String kind = ctx.ID(1).getText();
-        List<String> columns = new ArrayList<>();
-        for (int i = 2; i < ctx.ID().size(); i++) {
-            columns.add(ctx.ID(i).getText());
+        // "a table of (...)" | "a sortable table of (...)" | "a summary of (...)".
+        // The IDs before OF are the article, an optional adjective, and the kind; the
+        // IDs after OF are the columns.
+        List<String> words = new ArrayList<>();
+        for (var id : ctx.ID()) {
+            words.add(id.getText());
         }
-        return new Ast.Projection(kind, columns);
+        int head = headWords(ctx);
+        boolean sortable = head == 3 && words.get(1).equals("sortable");
+        String kind = words.get(head - 1);
+        List<String> columns = new ArrayList<>(words.subList(head, words.size()));
+        return new Ast.Projection(kind, columns, sortable);
+    }
+
+    /** How many IDs precede OF: 2 for "a table of", 3 for "a sortable table of". */
+    private static int headWords(SkyLangParser.ProjectionContext ctx) {
+        int index = 0;
+        for (var child : ctx.children) {
+            if (child.getText().equals("of")) {
+                return index;
+            }
+            index++;
+        }
+        return 2;
     }
 
     private Ast.Action action(SkyLangParser.ActionClauseContext ctx) {
@@ -390,12 +407,14 @@ public final class AstBuilder {
         for (SkyLangParser.ActionArgContext a : t.actionArg()) {
             args.add(actionArg(a));
         }
-        return new Ast.Action(unquote(ctx.STRING().getText()), ctx.ID().getText(),
+        // "on row" | "on a row" | "on the order": the row variable is the last word.
+        String rowVar = ctx.ID(ctx.ID().size() - 1).getText();
+        return new Ast.Action(unquote(ctx.STRING().getText()), rowVar,
                 t.ID(0).getText(), t.ID(1).getText(), args);
     }
 
     private Ast.ActionArg actionArg(SkyLangParser.ActionArgContext ctx) {
-        if (ctx.ASK() != null) {
+        if (ctx.ASK() != null || ctx.PROMPT() != null) {
             return new Ast.AskArg(type(ctx.type()));
         }
         return new Ast.ExprArg(expr(ctx.expr()));
@@ -410,23 +429,94 @@ public final class AstBuilder {
             }
             return new Ast.ExpectColumns(subject, columns);
         }
-        SkyLangParser.ExpectActionKindContext ak = (SkyLangParser.ExpectActionKindContext) ctx;
-        return new Ast.ExpectActionKind(unquote(ak.STRING().getText()), ak.ID().getText());
+        if (ctx instanceof SkyLangParser.ExpectActionKindContext ak) {
+            // "is button" or "is a button": the kind is the last word.
+            String kind = ak.ID(ak.ID().size() - 1).getText();
+            return new Ast.ExpectActionKind(unquote(ak.STRING().getText()), kind);
+        }
+        SkyLangParser.ExpectProseContext pr = (SkyLangParser.ExpectProseContext) ctx;
+        return new Ast.ExpectProse(joinedWords(pr.viewProse()));
     }
 
     private Ast.Appears appears(SkyLangParser.AppearsPredContext ctx) {
         if (ctx instanceof SkyLangParser.AppearsPlacementContext p) {
-            return new Ast.AppearsPlacement(unquote(p.STRING().getText()), p.ID().getText());
+            // "in toolbar" or "in the row's toolbar": the region is the last word.
+            String region = p.ID(p.ID().size() - 1).getText();
+            return new Ast.AppearsPlacement(unquote(p.STRING().getText()), region);
+        }
+        if (ctx instanceof SkyLangParser.AppearsActionStateContext st) {
+            Optional<String> when = st.viewProse() == null
+                    ? Optional.empty() : Optional.of(joinedWords(st.viewProse()));
+            return new Ast.AppearsActionState(unquote(st.STRING().getText()),
+                    st.ID().getText(), when);
         }
         if (ctx instanceof SkyLangParser.AppearsStyleContext s) {
             return new Ast.AppearsStyle(s.ID(0).getText(), s.ID(1).getText());
         }
-        SkyLangParser.AppearsColumnOrderContext co = (SkyLangParser.AppearsColumnOrderContext) ctx;
-        List<String> columns = new ArrayList<>();
-        for (int i = 0; i < co.ID().size(); i++) {
-            columns.add(co.ID(i).getText());
+        if (ctx instanceof SkyLangParser.AppearsColumnOrderContext co) {
+            List<String> columns = new ArrayList<>();
+            // An optional "in order" contributes one leading ID; columns live in parentheses,
+            // which the grammar places after it.
+            int first = co.IN() == null ? 0 : 1;
+            for (int i = first; i < co.ID().size(); i++) {
+                columns.add(co.ID(i).getText());
+            }
+            return new Ast.AppearsColumnOrder(columns);
         }
-        return new Ast.AppearsColumnOrder(columns);
+        SkyLangParser.AppearsProseContext pr = (SkyLangParser.AppearsProseContext) ctx;
+        return new Ast.AppearsProse(joinedWords(pr.viewProse()));
+    }
+
+    // ----- flows and components ----------------------------------------------
+
+    private Ast.Flow flow(SkyLangParser.FlowContext ctx) {
+        List<Ast.FlowStep> steps = new ArrayList<>();
+        List<Ast.FlowTransition> transitions = new ArrayList<>();
+        List<String> expects = new ArrayList<>();
+        for (SkyLangParser.FlowClauseContext c : ctx.flowClause()) {
+            switch (c) {
+                case SkyLangParser.FlowStepContext st ->
+                        steps.add(new Ast.FlowStep(st.ID().getText(), joinedWords(st.viewProse())));
+                case SkyLangParser.FlowTransitionContext tr ->
+                        transitions.add(new Ast.FlowTransition(tr.ID().getText(),
+                                joinedWords(tr.viewProse())));
+                case SkyLangParser.FlowExpectContext ex ->
+                        expects.add(joinedWords(ex.viewProse()));
+                default -> throw new IllegalStateException("unhandled flow clause");
+            }
+        }
+        return new Ast.Flow(ctx.ID().getText(), steps, transitions, expects);
+    }
+
+    private Ast.Component component(SkyLangParser.ComponentContext ctx) {
+        List<Ast.Param> params = new ArrayList<>();
+        if (ctx.params() != null) {
+            for (SkyLangParser.ParamContext pc : ctx.params().param()) {
+                params.add(new Ast.Param(pc.ID().getText(), type(pc.type())));
+            }
+        }
+        Ast.ComponentShows shows = null;
+        List<Ast.ComponentAppears> appears = new ArrayList<>();
+        List<String> expects = new ArrayList<>();
+        for (SkyLangParser.ComponentClauseContext c : ctx.componentClause()) {
+            switch (c) {
+                case SkyLangParser.ComponentShowsContext sh -> {
+                    // "as a badge": the kind is the last word.
+                    shows = new Ast.ComponentShows(expr(sh.expr()),
+                            sh.ID(sh.ID().size() - 1).getText());
+                }
+                case SkyLangParser.ComponentAppearsContext ap ->
+                        appears.add(new Ast.ComponentAppears(ap.ID().getText(), expr(ap.expr())));
+                case SkyLangParser.ComponentExpectContext ex ->
+                        expects.add(joinedWords(ex.viewProse()));
+                default -> throw new IllegalStateException("unhandled component clause");
+            }
+        }
+        if (shows == null) {
+            throw new IllegalArgumentException("component '" + ctx.ID().getText()
+                    + "' needs a shows clause");
+        }
+        return new Ast.Component(ctx.ID().getText(), params, shows, appears, expects);
     }
 
     // ----- examples ----------------------------------------------------------

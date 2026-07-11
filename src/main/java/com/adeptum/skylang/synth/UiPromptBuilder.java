@@ -212,6 +212,7 @@ public final class UiPromptBuilder {
         return switch (e) {
             case Ast.ExpectColumns c -> "the " + c.subject() + " shows columns " + String.join(", ", c.columns());
             case Ast.ExpectActionKind a -> "the action \"" + a.label() + "\" is a " + a.kind();
+            case Ast.ExpectProse p -> p.text();
         };
     }
 
@@ -221,6 +222,9 @@ public final class UiPromptBuilder {
                     + "\" control in a region with styleClass \"" + p.region() + "\"";
             case Ast.AppearsStyle s -> "give the " + s.subject() + " the styleClass \"" + s.value() + "\"";
             case Ast.AppearsColumnOrder co -> "order the columns as " + String.join(", ", co.columns());
+            case Ast.AppearsActionState st -> "the \"" + st.label() + "\" control is " + st.state()
+                    + st.when().map(w -> " when " + w).orElse("");
+            case Ast.AppearsProse p -> p.text();
         };
     }
 }

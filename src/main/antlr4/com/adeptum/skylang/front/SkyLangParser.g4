@@ -28,7 +28,7 @@ options { tokenVocab = SkyLangLexer; }
 
 module_ : MODULE ID decl* EOF ;
 
-decl : entity | service | view | typeDecl | policy ;
+decl : entity | service | view | typeDecl | policy | flow | component ;
 
 // ----- policies: cross-cutting contracts -------------------------------------
 
@@ -138,31 +138,55 @@ args : expr (COMMA expr)* ;
 
 // ----- views ----------------------------------------------------------------
 
-view : VIEW ID route? LBRACE viewClause* RBRACE ;
+view : (VIEW | PAGE) ID route? LBRACE viewClause* RBRACE ;
+
+flow : FLOW ID LBRACE flowClause* RBRACE ;
+
+flowClause
+    : STEP ID ARROW viewProse       # flowStep        // step Pay -> CheckoutService.place(...)
+    | ON ID ARROW viewProse         # flowTransition  // on PaymentFailed -> back to step Pay
+    | EXPECT viewProse              # flowExpect      // expect no step follows success
+    ;
+
+component : COMPONENT ID LPAREN params? RPAREN LBRACE componentClause* RBRACE ;
+
+componentClause
+    : SHOWS expr AS ID ID           # componentShows    // shows product.stock as a badge
+    | APPEARS ID WHEN expr          # componentAppears  // appears amber when product.stock <= 10
+    | EXPECT viewProse              # componentExpect   // expect the badge shows the stock
+    ;
+
+// Prose inside the interface layer: free words up to the next clause keyword.
+viewProse : (ID | STRING | INT | MONEY | COMMA | POSS | DOT | LPAREN | RPAREN
+            | IS | IN | ON | OF | HAS | NOT | OR | AND | WHEN | COLUMNS
+            | LT | LE | GT | GE | EQ | ARROW)+ ;
 
 route : AT_KW STRING ;
 
 viewClause
-    : SHOWS viewQuery (AS projection)?          # showsClause
-    | ACTION STRING ON ID ARROW actionTarget    # actionClause
-    | EXPECT expectPred                         # expectClause
-    | APPEARS appearsPred                       # appearsClause
+    : SHOWS viewQuery (AS projection)? (TITLED STRING)?  # showsClause
+    | ACTION STRING ON ID ID? ARROW actionTarget         # actionClause   // on row | on a row | on the order
+    | EXPECT expectPred                                  # expectClause
+    | APPEARS appearsPred                                # appearsClause
     ;
 
 viewQuery    : ID DOT ID LPAREN args? RPAREN ;                        // Catalog.all()
-projection   : ID ID OF LPAREN ID (COMMA ID)* RPAREN ;               // a table of (name, stock)
+projection   : ID ID? ID OF LPAREN ID (COMMA ID)* RPAREN ;           // a [sortable] table of (...)
 actionTarget : ID DOT ID LPAREN actionArg (COMMA actionArg)* RPAREN ; // Catalog.restock(row.id, ask Int)
-actionArg    : expr | ASK type ;                                     // row.id  |  ask Int
+actionArg    : expr | (ASK | PROMPT) type ;                          // row.id | ask Int | prompt Int
 
 expectPred
     : ID HAS COLUMNS LPAREN ID (COMMA ID)* RPAREN  # expectColumns     // table has columns (name, stock)
-    | ACTION STRING IS ID                          # expectActionKind  // action "Restock" is button
+    | ACTION STRING IS ID ID?                      # expectActionKind  // action "Restock" is [a] button
+    | viewProse                                    # expectProse       // placedAt shows only when present
     ;
 
 appearsPred
-    : ACTION STRING IN ID                          # appearsPlacement    // action "Restock" in toolbar
+    : ACTION STRING IN ID (ID POSS? ID)?           # appearsPlacement    // in toolbar | in the row's toolbar
+    | ACTION STRING IS ID (WHEN viewProse)?        # appearsActionState  // is disabled when status is Shipped
     | ID IS ID                                     # appearsStyle        // rows is compact
-    | COLUMNS LPAREN ID (COMMA ID)* RPAREN         # appearsColumnOrder  // columns (name, stock)
+    | COLUMNS (IN ID)? LPAREN ID (COMMA ID)* RPAREN # appearsColumnOrder // columns [in order] (name, stock)
+    | viewProse                                    # appearsProse        // sections in a two-column grid
     ;
 
 // ----- expressions (ANTLR left-recursion handles precedence) ----------------

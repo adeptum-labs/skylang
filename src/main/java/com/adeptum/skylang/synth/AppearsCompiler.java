@@ -91,6 +91,9 @@ public final class AppearsCompiler {
             case Ast.AppearsPlacement p -> "appears action \"" + p.label() + "\" in " + p.region();
             case Ast.AppearsStyle s -> "appears " + s.subject() + " is " + s.value();
             case Ast.AppearsColumnOrder co -> "appears columns (" + String.join(", ", co.columns()) + ")";
+            case Ast.AppearsActionState st -> "appears action \"" + st.label() + "\" is " + st.state()
+                    + st.when().map(w -> " when " + w).orElse("");
+            case Ast.AppearsProse p -> "appears " + p.text();
         };
     }
 }
