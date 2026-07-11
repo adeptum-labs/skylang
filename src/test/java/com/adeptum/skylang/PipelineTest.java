@@ -510,6 +510,121 @@ class PipelineTest {
                 "whose placedAt is set asserts presence:\n" + tests);
     }
 
+    private static final String INTERFACE_MODULE = """
+            module shop
+            entity Product { id Int @id  name Text  stock Int @min(0) }
+            entity Boom { }
+            service Catalog uses db {
+              all() -> [Product]  intent "Every product."
+              restock(id Int, units Int) -> Product  intent "Increase stock."
+            }
+            component StockBadge(product Product) {
+              shows   product.stock as a badge
+              appears amber when product.stock <= 10
+              expect  the badge shows the stock
+            }
+            flow Checkout {
+              step Cart -> collect items
+              step Pay  -> pay for the cart
+              on success -> page Done
+              on Boom    -> back to step Pay with message
+              expect step Pay is reachable only after Cart
+              expect no step follows success
+            }
+            """;
+
+    private static final String COMPONENT_REPLY = """
+            ```xhtml
+            <cc:interface><cc:attribute name="product" type="shop.Product"/></cc:interface>
+            <cc:implementation>
+              <h:outputText id="badge" value="#{cc.attrs.product.stock}"
+                            styleClass="#{cc.attrs.product.stock le 10 ? 'amber' : ''}"/>
+            </cc:implementation>
+            ```
+            """;
+
+    private static final String FLOW_REPLY = """
+            ```json
+            {"steps": ["Cart", "Pay"],
+             "transitions": {"success": "page Done", "Boom": "step Pay"}}
+            ```
+            """;
+
+    private static StubLlm interfaceStub() {
+        return new StubLlm((system, user) -> {
+            if (user.contains("Component to render")) {
+                return COMPONENT_REPLY;
+            }
+            if (user.contains("Flow to realise")) {
+                return FLOW_REPLY;
+            }
+            if (user.contains("View to render")) {
+                return VIEW_REPLY;
+            }
+            return BODY;
+        });
+    }
+
+    @Test
+    void flowsAndComponentsSynthesizeVerifyAndFreeze(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse(INTERFACE_MODULE, "shop.sky");
+        new TypeChecker().check(module);
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        var out = new ByteArrayOutputStream();
+
+        int code = new Pipeline(interfaceStub(), ALWAYS_PASS)
+                .build(module, lock, buildDir, new PrintStream(out), quiet());
+
+        assertEquals(0, code, out.toString());
+        String transcript = out.toString();
+        assertTrue(transcript.contains("component StockBadge") && transcript.contains("✓ 1 expect   ✓ 1 appears"),
+                transcript);
+        assertTrue(transcript.contains("flow Checkout") && transcript.contains("✓ 2 expect"), transcript);
+        assertTrue(transcript.contains("walked: Cart -> Pay -> success"), transcript);
+        assertTrue(transcript.contains("walked: Pay -> Boom -> Pay"), transcript);
+
+        assertTrue(Files.readString(lock).contains("\"components\""), "the component freezes");
+        assertTrue(Files.readString(lock).contains("\"flows\""), "the flow freezes");
+        assertTrue(Files.exists(buildDir.resolve("src/main/resources/components/stockBadge.xhtml")),
+                "the composite stages under resources/components");
+        String flowClass = Files.readString(
+                buildDir.resolve("src/main/java/shop/CheckoutFlow.java"));
+        assertTrue(flowClass.contains("List.of(\"Cart\", \"Pay\")"), flowClass);
+
+        StubLlm second = interfaceStub();
+        int again = new Pipeline(second, ALWAYS_PASS)
+                .build(module, lock, buildDir, quiet(), quiet());
+        assertEquals(0, again);
+        assertEquals(0, second.calls(), "frozen interface units must not call the model again");
+    }
+
+    @Test
+    void aFlowGraphSkippingAStepIsRejected(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(INTERFACE_MODULE, "shop.sky");
+        new TypeChecker().check(module);
+        StubLlm badFlow = new StubLlm((system, user) -> {
+            if (user.contains("Flow to realise")) {
+                return """
+                        ```json
+                        {"steps": ["Pay"], "transitions": {"success": "page Done"}}
+                        ```
+                        """;
+            }
+            if (user.contains("Component to render")) {
+                return COMPONENT_REPLY;
+            }
+            return BODY;
+        });
+        var err = new ByteArrayOutputStream();
+
+        int code = new Pipeline(badFlow, ALWAYS_PASS, 0).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), new PrintStream(err));
+
+        assertEquals(2, code, "a graph that skips a declared step must fail verification");
+        assertTrue(err.toString().contains("flow Checkout"), err.toString());
+    }
+
     @Test
     void secondBuildReusesFrozenBodyWithoutCallingModel(@TempDir Path root) {
         Ast.Module module = checkedModule();

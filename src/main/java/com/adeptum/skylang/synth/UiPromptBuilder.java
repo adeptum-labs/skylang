@@ -123,6 +123,76 @@ public final class UiPromptBuilder {
         return sb.toString();
     }
 
+    private static final String COMPONENT_SYSTEM = """
+            You are the UI-synthesis backend of the SkyLang compiler, targeting Jakarta Faces.
+            Write ONE Faces composite component as a single fenced ```xhtml block and nothing else.
+            Rules:
+            - Declare a cc:interface with one cc:attribute per parameter (name and type as given).
+            - Render the declared content in cc:implementation, bound through #{cc.attrs.<param>...}.
+            - Realise each state-dependent look as a conditional styleClass carrying the state's
+              name (e.g. amber, brick) exactly, applied when its condition holds.
+            - Give every element a stable id and keep the markup minimal.
+            """;
+
+    public String componentSystem() {
+        return COMPONENT_SYSTEM;
+    }
+
+    public String componentUser(Ast.Module module, Ast.Component component) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("// Component to render:\n");
+        sb.append("component ").append(component.name()).append('(');
+        sb.append(component.params().stream()
+                .map(p -> p.name() + " " + p.type().sky())
+                .collect(Collectors.joining(", "))).append(")\n");
+        sb.append("shows ").append(Lowering.skyText(component.shows().value()))
+                .append(" as a ").append(component.shows().kind()).append('\n');
+        for (Ast.ComponentAppears a : component.appears()) {
+            sb.append("appears ").append(a.style()).append(" when ")
+                    .append(Lowering.skyText(a.when())).append('\n');
+        }
+        for (String e : component.expects()) {
+            sb.append("expect ").append(e).append('\n');
+        }
+        sb.append("\nWrite the composite component now.");
+        return sb.toString();
+    }
+
+    private static final String FLOW_SYSTEM = """
+            You are the navigation-synthesis backend of the SkyLang compiler.
+            Realise the declared flow as ONE fenced ```json block and nothing else, of the shape:
+            {"steps": ["Cart", "Shipping", "Pay"],
+             "transitions": {"success": "page OrderConfirmed", "PaymentFailed": "step Pay"}}
+            Rules:
+            - steps lists every declared step, in the declared order.
+            - transitions maps each declared trigger to its declared target.
+            - Add nothing that was not declared.
+            """;
+
+    public String flowSystem() {
+        return FLOW_SYSTEM;
+    }
+
+    public String flowUser(Ast.Flow flow) {
+        StringBuilder sb = new StringBuilder("// Flow to realise:\nflow ").append(flow.name()).append('\n');
+        for (Ast.FlowStep step : flow.steps()) {
+            sb.append("step ").append(step.name()).append(" -> ").append(step.target()).append('\n');
+        }
+        for (Ast.FlowTransition t : flow.transitions()) {
+            sb.append("on ").append(t.trigger()).append(" -> ").append(t.target()).append('\n');
+        }
+        for (String e : flow.expects()) {
+            sb.append("expect ").append(e).append('\n');
+        }
+        sb.append("\nWrite the navigation graph now.");
+        return sb.toString();
+    }
+
+    /** The single fenced block of the given language from a model reply. */
+    public String extractFenced(String reply, String lang) {
+        return fenced(reply, lang);
+    }
+
     /** Split the model reply into its {@code ```xhtml} and {@code ```java} fenced blocks. */
     public UiArtifact extractArtifacts(String reply) {
         return new UiArtifact(fenced(reply, "xhtml"), fenced(reply, "java"));

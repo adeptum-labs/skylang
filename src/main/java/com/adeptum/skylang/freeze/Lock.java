@@ -67,6 +67,8 @@ public final class Lock {
     private final Map<String, Dep> deps = new LinkedHashMap<>();
     private final Map<String, Entry> methods = new LinkedHashMap<>();
     private final Map<String, ViewEntry> views = new LinkedHashMap<>();
+    private final Map<String, Entry> flows = new LinkedHashMap<>();
+    private final Map<String, Entry> components = new LinkedHashMap<>();
 
     public static Lock load(Path path) {
         Lock lock = new Lock();
@@ -99,6 +101,8 @@ public final class Lock {
                         }
                     }
                 }
+                readEntries(map.get("flows"), lock.flows);
+                readEntries(map.get("components"), lock.components);
                 if (map.get("views") instanceof Map<?, ?> viewMap) {
                     for (Map.Entry<?, ?> e : viewMap.entrySet()) {
                         if (e.getValue() instanceof Map<?, ?> v) {
@@ -142,6 +146,9 @@ public final class Lock {
             viewMap.put(key, v);
         });
 
+        Map<String, Object> flowMap = entryMap(flows);
+        Map<String, Object> componentMap = entryMap(components);
+
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("profile", profile);
         // The header pins the resolved dependency versions — omitted entirely when there are
@@ -159,12 +166,41 @@ public final class Lock {
         }
         root.put("methods", methodMap);
         root.put("views", viewMap);
+        // Interface units are new sections: omitted when absent, so older locks keep their bytes.
+        if (!flows.isEmpty()) {
+            root.put("flows", flowMap);
+        }
+        if (!components.isEmpty()) {
+            root.put("components", componentMap);
+        }
 
         try {
             Files.writeString(path, Json.writePretty(root) + "\n");
         } catch (IOException e) {
             throw new UncheckedIOException("cannot write " + path, e);
         }
+    }
+
+    private static void readEntries(Object node, Map<String, Entry> into) {
+        if (node instanceof Map<?, ?> entries) {
+            for (Map.Entry<?, ?> e : entries.entrySet()) {
+                if (e.getValue() instanceof Map<?, ?> m) {
+                    into.put(String.valueOf(e.getKey()),
+                            new Entry(String.valueOf(m.get("specHash")), multiline(m.get("body"))));
+                }
+            }
+        }
+    }
+
+    private static Map<String, Object> entryMap(Map<String, Entry> entries) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        entries.forEach((key, entry) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("specHash", entry.specHash());
+            m.put("body", entry.body().lines().toList());
+            out.put(key, m);
+        });
+        return out;
     }
 
     private static String asString(Object o) {
@@ -234,6 +270,22 @@ public final class Lock {
 
     public void put(String key, Entry entry) {
         methods.put(key, entry);
+    }
+
+    public Optional<Entry> getFlow(String key) {
+        return Optional.ofNullable(flows.get(key));
+    }
+
+    public void putFlow(String key, Entry entry) {
+        flows.put(key, entry);
+    }
+
+    public Optional<Entry> getComponent(String key) {
+        return Optional.ofNullable(components.get(key));
+    }
+
+    public void putComponent(String key, Entry entry) {
+        components.put(key, entry);
     }
 
     public Optional<ViewEntry> getView(String key) {

@@ -131,6 +131,36 @@ public final class Pipeline {
         }
     }
 
+    /** One unit of work: a flow plus its synthesized navigation graph. */
+    private static final class FlowUnit {
+        final Ast.Flow flow;
+        final String key;
+        final String specHash;
+        String graphJson;
+        boolean fresh;
+
+        FlowUnit(Ast.Flow flow, String key, String specHash) {
+            this.flow = flow;
+            this.key = key;
+            this.specHash = specHash;
+        }
+    }
+
+    /** One unit of work: a component plus its synthesized composite markup. */
+    private static final class ComponentUnit {
+        final Ast.Component component;
+        final String key;
+        final String specHash;
+        String markup;
+        boolean fresh;
+
+        ComponentUnit(Ast.Component component, String key, String specHash) {
+            this.component = component;
+            this.key = key;
+            this.specHash = specHash;
+        }
+    }
+
     /** @return 0 on success, non-zero on a verification/synthesis failure. */
     public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err) {
         return build(module, lockPath, buildDir, out, err, false);
@@ -233,8 +263,50 @@ public final class Pipeline {
             }
         }
 
+        // Resolve components and flows: frozen artifacts are reused; fresh ones synthesize
+        // against their structural contracts, exactly like a view.
+        List<ComponentUnit> componentUnits = new ArrayList<>();
+        boolean anyComponentFresh = false;
+        for (Ast.Component c : module.components()) {
+            ComponentUnit u = new ComponentUnit(c, module.name() + "." + c.name(),
+                    Hashing.sha256(componentSpecString(module, c, profile, deps.declared())));
+            var frozen = retarget ? java.util.Optional.<Lock.Entry>empty() : lock.getComponent(u.key);
+            if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
+                u.markup = frozen.get().body();
+            } else if (resolveComponent(module, u, out)) {
+                u.fresh = true;
+                anyComponentFresh = true;
+            } else {
+                err.println("build failed: component " + c.name()
+                        + " did not satisfy its declaration after " + (maxRegenerations + 1)
+                        + " attempt(s).");
+                return VERIFICATION_FAILED;
+            }
+            componentUnits.add(u);
+        }
+        List<FlowUnit> flowUnits = new ArrayList<>();
+        boolean anyFlowFresh = false;
+        for (Ast.Flow f : module.flows()) {
+            FlowUnit u = new FlowUnit(f, module.name() + "." + f.name(),
+                    Hashing.sha256(flowSpecString(module, f, profile, deps.declared())));
+            var frozen = retarget ? java.util.Optional.<Lock.Entry>empty() : lock.getFlow(u.key);
+            if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
+                u.graphJson = frozen.get().body();
+            } else if (resolveFlow(u, out)) {
+                u.fresh = true;
+                anyFlowFresh = true;
+            } else {
+                err.println("build failed: flow " + f.name()
+                        + " did not satisfy its expectations after " + (maxRegenerations + 1)
+                        + " attempt(s).");
+                return VERIFICATION_FAILED;
+            }
+            flowUnits.add(u);
+        }
+
         // Stage the project. If nothing changed, everything is already verified — skip the test run.
         profile.stage(module, bodyMap(units), deps.declared(), buildDir);
+        stageInterfaceUnits(module, componentUnits, flowUnits, buildDir);
         if (!module.views().isEmpty()) {
             facesViewStager.stage(module, viewArtifacts(viewUnits), baselines(viewUnits, lock), buildDir);
             clearCaptures(buildDir);   // a stale rasterization must never be adopted as a baseline
@@ -291,17 +363,24 @@ public final class Pipeline {
                         Lock.canonical(u.artifact.markup()), Lock.canonical(u.artifact.bean())));
             }
         }
+        for (ComponentUnit u : componentUnits) {
+            if (u.fresh) {
+                lock.putComponent(u.key, new Lock.Entry(u.specHash, Lock.canonical(u.markup)));
+            }
+        }
+        for (FlowUnit u : flowUnits) {
+            if (u.fresh) {
+                lock.putFlow(u.key, new Lock.Entry(u.specHash, Lock.canonical(u.graphJson)));
+            }
+        }
 
         boolean anyVisualFrozen = adoptVisualCaptures(viewUnits, lock, buildDir, out);
-        if (anyFresh || anyViewFresh || anyVisualFrozen) {
+        if (anyFresh || anyViewFresh || anyComponentFresh || anyFlowFresh || anyVisualFrozen) {
             lock.save(lockPath);
         }
 
         report(module, units, viewUnits, out);
-        module.flows().forEach(f ->
-                out.println("  flow " + f.name() + "   ▸ checked (walking arrives with its staging)"));
-        module.components().forEach(c ->
-                out.println("  component " + c.name() + "   ▸ checked (isolation render arrives with its staging)"));
+        reportInterfaceUnits(flowUnits, componentUnits, out);
         out.println("staged: " + buildDir);
         return 0;
     }
@@ -413,6 +492,145 @@ public final class Pipeline {
         return uiPrompts.extractArtifacts(reply);
     }
 
+    private final com.adeptum.skylang.verify.FlowVerifier flowVerifier =
+            new com.adeptum.skylang.verify.FlowVerifier();
+    private final com.adeptum.skylang.verify.ComponentVerifier componentVerifier =
+            new com.adeptum.skylang.verify.ComponentVerifier();
+
+    /** Synthesize a composite component and dispose it against its declaration. */
+    private boolean resolveComponent(Ast.Module module, ComponentUnit u, PrintStream out) {
+        u.markup = uiPrompts.extractFenced(client.complete(
+                uiPrompts.componentSystem(), uiPrompts.componentUser(module, u.component)), "xhtml");
+        List<String> unmet = componentVerifier.unmetExpectations(u.component, u.markup);
+        int attempts = 0;
+        while (!unmet.isEmpty() && attempts < maxRegenerations) {
+            attempts++;
+            out.println("  component " + u.component.name() + " unmet " + unmet
+                    + " — regenerating (attempt " + attempts + ")");
+            u.markup = uiPrompts.extractFenced(client.complete(
+                    uiPrompts.componentSystem(), uiPrompts.componentUser(module, u.component)), "xhtml");
+            unmet = componentVerifier.unmetExpectations(u.component, u.markup);
+        }
+        return unmet.isEmpty();
+    }
+
+    /** Synthesize a flow's navigation graph and walk it against the declared expectations. */
+    private boolean resolveFlow(FlowUnit u, PrintStream out) {
+        u.graphJson = uiPrompts.extractFenced(client.complete(
+                uiPrompts.flowSystem(), uiPrompts.flowUser(u.flow)), "json");
+        List<String> unmet = flowVerifier.unmetExpectations(u.flow, flowVerifier.parse(u.graphJson));
+        int attempts = 0;
+        while (!unmet.isEmpty() && attempts < maxRegenerations) {
+            attempts++;
+            out.println("  flow " + u.flow.name() + " unmet " + unmet
+                    + " — regenerating (attempt " + attempts + ")");
+            u.graphJson = uiPrompts.extractFenced(client.complete(
+                    uiPrompts.flowSystem(), uiPrompts.flowUser(u.flow)), "json");
+            unmet = flowVerifier.unmetExpectations(u.flow, flowVerifier.parse(u.graphJson));
+        }
+        return unmet.isEmpty();
+    }
+
+    /** Components land as composite XHTML; flows as an ordinary navigation-table class. */
+    private void stageInterfaceUnits(Ast.Module module, List<ComponentUnit> components,
+                                     List<FlowUnit> flows, Path buildDir) {
+        try {
+            if (!components.isEmpty()) {
+                Path dir = buildDir.resolve("src/main/resources/components");
+                Files.createDirectories(dir);
+                for (ComponentUnit u : components) {
+                    String file = Character.toLowerCase(u.component.name().charAt(0))
+                            + u.component.name().substring(1) + ".xhtml";
+                    Files.writeString(dir.resolve(file), u.markup + "\n");
+                }
+            }
+            for (FlowUnit u : flows) {
+                var graph = flowVerifier.parse(u.graphJson);
+                Path dir = buildDir.resolve("src/main/java").resolve(module.name());
+                Files.createDirectories(dir);
+                Files.writeString(dir.resolve(u.flow.name() + "Flow.java"),
+                        flowClass(module.name(), u.flow.name(), graph));
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot stage interface units under " + buildDir, e);
+        }
+    }
+
+    /** The staged flow: the verified navigation graph as plain, keepable Java. */
+    private static String flowClass(String pkg, String name,
+                                    com.adeptum.skylang.verify.FlowVerifier.Graph graph) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("package ").append(pkg).append(";\n\n");
+        sb.append("/** The ").append(name).append(" flow: guarded navigation, generated and verified. */\n");
+        sb.append("public final class ").append(name).append("Flow {\n\n");
+        sb.append("    public static final java.util.List<String> STEPS = java.util.List.of(");
+        sb.append(graph.steps().stream().map(st -> "\"" + st + "\"")
+                .collect(java.util.stream.Collectors.joining(", "))).append(");\n\n");
+        sb.append("    public static final java.util.Map<String, String> TRANSITIONS = java.util.Map.of(");
+        sb.append(graph.transitions().entrySet().stream()
+                .map(e -> "\"" + e.getKey() + "\", \"" + e.getValue() + "\"")
+                .collect(java.util.stream.Collectors.joining(", "))).append(");\n\n");
+        sb.append("    private ").append(name).append("Flow() {\n    }\n}\n");
+        return sb.toString();
+    }
+
+    /** The interface units' transcript: frozen lines, and the walk for a fresh flow. */
+    private void reportInterfaceUnits(List<FlowUnit> flows, List<ComponentUnit> components,
+                                      PrintStream out) {
+        for (ComponentUnit u : components) {
+            String label = "component " + u.component.name();
+            if (!u.fresh) {
+                out.printf("  %-24s \u25b8 frozen @ %s   (unchanged)%n",
+                        label, Hashing.shortHash(u.specHash));
+            } else {
+                out.printf("  %-24s \u25b8 synthesized \u25b8 verified \u25b8 frozen @ %s%s%s%n",
+                        label, Hashing.shortHash(u.specHash),
+                        countedInvariant(u.component.expects().size(), "expect"),
+                        countedInvariant(u.component.appears().size(), "appears"));
+            }
+        }
+        for (FlowUnit u : flows) {
+            String label = "flow " + u.flow.name();
+            if (!u.fresh) {
+                out.printf("  %-24s \u25b8 frozen @ %s   (unchanged)%n",
+                        label, Hashing.shortHash(u.specHash));
+                continue;
+            }
+            out.printf("  %-24s \u25b8 synthesized \u25b8 verified \u25b8 frozen @ %s%s%n",
+                    label, Hashing.shortHash(u.specHash),
+                    countedInvariant(u.flow.expects().size(), "expect"));
+            var graph = flowVerifier.parse(u.graphJson);
+            if (graph != null) {
+                for (String line : flowVerifier.walkLines(u.flow, graph)) {
+                    out.printf("  %-24s \u25b8 %s%n", "", line);
+                }
+            }
+        }
+    }
+
+    /** Canonical text whose hash freezes a flow: the profile, deps, and the declaration. */
+    static String flowSpecString(Ast.Module module, Ast.Flow flow, Profile profile,
+                                 List<Resolved> deps) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("profile=").append(profile.id()).append('@').append(profile.version()).append('\n');
+        appendDeps(sb, deps);
+        sb.append("flow ").append(flow).append('\n');
+        return sb.toString();
+    }
+
+    /** Canonical text whose hash freezes a component: profile, deps, entities, declaration. */
+    static String componentSpecString(Ast.Module module, Ast.Component component, Profile profile,
+                                      List<Resolved> deps) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("profile=").append(profile.id()).append('@').append(profile.version()).append('\n');
+        appendDeps(sb, deps);
+        for (Ast.Entity e : module.entities()) {
+            sb.append("entity ").append(e).append('\n');
+        }
+        sb.append("component ").append(component).append('\n');
+        return sb.toString();
+    }
+
     private static Map<String, String> bodyMap(List<Unit> units) {
         Map<String, String> map = new LinkedHashMap<>();
         for (Unit u : units) {
@@ -513,8 +731,8 @@ public final class Pipeline {
             } else {
                 out.printf("  %-" + width + "s \u25b8 synthesized \u25b8 verified \u25b8 frozen @ %s%s%s%n",
                         label, Hashing.shortHash(u.specHash),
-                        counted(u.view.expects().size(), "expect"),
-                        counted(u.view.appears().size(), "appears"));
+                        countedInvariant(u.view.expects().size(), "expect"),
+                        countedInvariant(u.view.appears().size(), "appears"));
             }
         }
         for (Ast.Policy policy : module.policies()) {
@@ -525,6 +743,11 @@ public final class Pipeline {
 
     private static String counted(int n, String noun) {
         return n == 0 ? "" : "   \u2713 " + n + " " + noun + (n == 1 ? "" : "s");
+    }
+
+    /** The interface nouns read the same in any count: "2 expect", "3 appears". */
+    private static String countedInvariant(int n, String noun) {
+        return n == 0 ? "" : "   \u2713 " + n + " " + noun;
     }
 
     private static String label(Unit u) {
