@@ -50,7 +50,7 @@ import java.util.concurrent.Callable;
  * examples, specs and contracts hold; what passes is frozen. Errors keep the watch alive —
  * a red loop is feedback, not an exit.
  */
-@Command(name = "tdd", description = "Watch the file and regenerate edited methods until their tests pass.")
+@Command(mixinStandardHelpOptions = true, name = "tdd", description = "Watch the file and regenerate edited methods until their tests pass.")
 public final class TddCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",

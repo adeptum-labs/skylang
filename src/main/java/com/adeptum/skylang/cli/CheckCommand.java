@@ -36,7 +36,7 @@ import java.nio.file.Path;
 import java.util.concurrent.Callable;
 
 /** {@code sky check} — hard-layer type + contract check only. Fast, offline, no model. */
-@Command(name = "check", description = "Type-check the hard layer; no synthesis, no network.")
+@Command(mixinStandardHelpOptions = true, name = "check", description = "Type-check the hard layer; no synthesis, no network.")
 public final class CheckCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",

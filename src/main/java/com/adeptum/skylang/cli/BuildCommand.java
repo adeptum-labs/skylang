@@ -47,7 +47,7 @@ import java.util.concurrent.Callable;
  * credentials (from {@code sky onboard} / env) are resolved lazily, so a fully-frozen build needs
  * none.
  */
-@Command(name = "build", description = "Synthesize, verify, freeze, and emit the target artifact.")
+@Command(mixinStandardHelpOptions = true, name = "build", description = "Synthesize, verify, freeze, and emit the target artifact.")
 public final class BuildCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",

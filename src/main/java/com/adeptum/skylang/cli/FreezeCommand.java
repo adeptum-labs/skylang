@@ -46,7 +46,7 @@ import java.util.concurrent.Callable;
  * re-verify and re-freeze every body (for example, to adopt an improved model). Native
  * blocks are re-verified but never rewritten.
  */
-@Command(name = "freeze", description = "Regenerate and re-verify every body, rewriting sky.lock.")
+@Command(mixinStandardHelpOptions = true, name = "freeze", description = "Regenerate and re-verify every body, rewriting sky.lock.")
 public final class FreezeCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",

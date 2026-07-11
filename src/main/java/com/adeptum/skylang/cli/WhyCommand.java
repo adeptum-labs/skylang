@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  * specification, its freeze status, and the frozen body it was proven against.
  * Fully offline; never calls the model.
  */
-@Command(name = "why", description = "Explain one method: its specification, freeze status, and frozen body.")
+@Command(mixinStandardHelpOptions = true, name = "why", description = "Explain one method: its specification, freeze status, and frozen body.")
 public final class WhyCommand implements Callable<Integer> {
 
     @Parameters(arity = "1..2", paramLabel = "[<file.sky>] <Service.method>",

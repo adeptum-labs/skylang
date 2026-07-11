@@ -44,7 +44,7 @@ import java.util.concurrent.Callable;
  * {@code sky preview} — serve the module's views live in a browser. The views are staged and served
  * by a long-lived embedded container in a subprocess; frozen views need no model credentials.
  */
-@Command(name = "preview", description = "Serve the module's views live in a browser studio.")
+@Command(mixinStandardHelpOptions = true, name = "preview", description = "Serve the module's views live in a browser studio.")
 public final class PreviewCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",

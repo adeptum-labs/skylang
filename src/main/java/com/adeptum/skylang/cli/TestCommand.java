@@ -48,7 +48,7 @@ import java.util.regex.Pattern;
  * offline: the bodies come from the frozen lock, the model is never consulted, and no
  * artifact is produced. The same suite that gates synthesis, re-run whole.
  */
-@Command(name = "test", description = "Run all contracts and examples as tests from the frozen lock.")
+@Command(mixinStandardHelpOptions = true, name = "test", description = "Run all contracts and examples as tests from the frozen lock.")
 public final class TestCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",

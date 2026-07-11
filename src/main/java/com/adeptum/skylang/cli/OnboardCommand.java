@@ -46,7 +46,7 @@ import java.util.concurrent.Callable;
  * changing just the model is a matter of accepting the rest. {@code sky onboard --model NAME} on an
  * existing config changes only the model, reusing the stored provider and key.
  */
-@Command(name = "onboard", description = "Configure the provider, model, and API key (writes ~/.sky/config).")
+@Command(mixinStandardHelpOptions = true, name = "onboard", description = "Configure the provider, model, and API key (writes ~/.sky/config).")
 public final class OnboardCommand implements Callable<Integer> {
 
     /** The credential store; injectable so tests need not touch the real {@code ~/.sky}. */

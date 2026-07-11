@@ -36,7 +36,7 @@ import java.util.stream.Stream;
  * {@code sky clean} — delete the disposable staged project. The lock is untouched, so the
  * next build re-materialises the directory deterministically without regenerating anything.
  */
-@Command(name = "clean", description = "Delete the build directory; sky.lock is preserved.")
+@Command(mixinStandardHelpOptions = true, name = "clean", description = "Delete the build directory; sky.lock is preserved.")
 public final class CleanCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",
