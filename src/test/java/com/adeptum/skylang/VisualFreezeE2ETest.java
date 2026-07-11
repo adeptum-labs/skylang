@@ -133,7 +133,7 @@ class VisualFreezeE2ETest {
         var driftOut = new ByteArrayOutputStream();
         int third = new Pipeline(stub(), new MavenVerifier()).build(module, lockPath, buildDir,
                 new PrintStream(driftOut), new PrintStream(driftOut), true);
-        assertEquals(1, third, "a drifted view must fail the visual gate");
+        assertEquals(2, third, "a drifted view must fail the visual gate — a verification failure");
         assertTrue(driftOut.toString().contains("drifted from its frozen look"),
                 () -> "the failure should name the drift:\n" + driftOut);
     }
