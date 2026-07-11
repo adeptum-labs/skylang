@@ -77,7 +77,7 @@ public final class AppearsCompiler {
         if (!view.appears().isEmpty()) {
             sb.append("Current appearance:\n");
             for (Ast.Appears a : view.appears()) {
-                sb.append("  ").append(render(a)).append('\n');
+                sb.append("  ").append(renderAppears(a)).append('\n');
             }
         }
 
@@ -86,7 +86,8 @@ public final class AppearsCompiler {
         return sb.toString();
     }
 
-    private static String render(Ast.Appears a) {
+    /** Render one {@code appears} predicate back to its canonical {@code .sky} line. */
+    public static String renderAppears(Ast.Appears a) {
         return switch (a) {
             case Ast.AppearsPlacement p -> "appears action \"" + p.label() + "\" in " + p.region();
             case Ast.AppearsStyle s -> "appears " + s.subject() + " is " + s.value();
