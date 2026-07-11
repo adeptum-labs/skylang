@@ -278,6 +278,82 @@ example, forbid a `Secret` from ever reaching an HTTP response.
 
 ---
 
+## 7a. The interface layer: views, components, and flows
+
+The user interface is soft too. You do not write markup; you *declare* what a screen shows and
+what it lets the user do, and the model renders it against the target profile — on the reference
+JVM profile, Jakarta Faces/Facelets pages with typed backing beans. As with method bodies, nothing
+is trusted on sight: the rendered view is verified against the interface **contracts** you write
+(structure and behaviour, checked against the semantic tree rather than pixels), plus a **visual
+gate** that freezes each view's look and fails the build if a later render drifts from it. Run
+`sky preview` (§13) to see the whole interface live in a browser and watch each contract turn green.
+
+**Pages and views.** A `page` (alias `view`) binds a route, queries a service, projects the result,
+and offers actions:
+
+```sky
+page ProductList at "/products" {
+  shows   Catalog.all() as a sortable table of (name, price, stock)
+  action  "Restock" on a row -> Catalog.restock(row.id, prompt Quantity)
+
+  expect  table has columns (name, price, stock)     // must hold in the render
+  expect  action "Restock" is a button
+  appears action "Restock" in the row's toolbar        // styling / placement intent
+  appears columns in order (name, stock, price)
+}
+```
+
+- `shows <Service.query()> as a [sortable] <table|summary|…> of (fields)` — the data and its shape.
+  A `titled "…"` suffix names the section; a page may `shows` several sections.
+- `action "Label" on a row | on the order -> Service.method(row.id, ask T | prompt T)` — wires a
+  control to a service method. `ask`/`prompt` marks an input the UI must collect (with the right
+  converter for `Money`, `Instant`, refined types, …).
+- `expect …` states what must be true of the rendered view — columns present, an action rendered as
+  a button, an empty-state message shown — and is verified.
+- `appears …` states styling, placement, ordering, and state (`is disabled when status is Shipped`,
+  `rows is compact`, `a failed "Cancel" shows the error's message inline`) — it guides the render and
+  is checked where checkable.
+
+**Components** are reusable, parameterised pieces of interface:
+
+```sky
+component StockBadge(product Product) {
+  shows   product.stock as a badge
+  appears amber when product.stock <= 10
+  appears brick when product.stock == 0
+  expect  the badge shows the stock
+}
+```
+
+A component can then be projected inside a page (`shows Catalog.lowStock(10) as a table of (name,
+StockBadge)`). Which component library backs it is **dependency-driven**: with only the standard
+library declared you get plain components; declaring PrimeFaces or OmniFaces (§11) lets the
+generator render richer ones, without changing the specification.
+
+**Flows** describe multi-step navigation with typed steps and guarded transitions:
+
+```sky
+flow Checkout {
+  step Cart     -> collect items into a Cart
+  step Shipping -> collect address
+  step Pay      -> CheckoutService.place(the cart, the customer)
+
+  on success       -> page OrderConfirmed
+  on PaymentFailed -> back to step Pay with message
+
+  expect step Pay is reachable only after Shipping
+  expect no step follows success
+}
+```
+
+The flow graph is verified against its `expect` clauses (no step skipped, no navigation after
+success), so a generated navigation that violates the declared shape fails the build.
+
+The interface layer is **profile-supplied** (§10): a profile that does not target a UI simply omits
+`page`/`component`/`flow`, and the same domain and behaviour retarget unchanged.
+
+---
+
 ## 8. The freeze model: reproducible builds with an LLM in the loop
 
 The obvious objection: *"If a language model writes the code, how is my build reproducible?"*
