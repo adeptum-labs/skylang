@@ -47,7 +47,8 @@ import picocli.CommandLine.Command;
                 ""},
         description = "SkyLang compiler: declare the contract, the model writes the body.",
         subcommands = {OnboardCommand.class, CheckCommand.class, BuildCommand.class, PreviewCommand.class,
-                TddCommand.class, FreezeCommand.class, WhyCommand.class})
+                TddCommand.class, FreezeCommand.class, WhyCommand.class, TestCommand.class,
+                CleanCommand.class})
 public final class SkyCli implements Runnable {
 
     @Override

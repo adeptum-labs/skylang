@@ -47,7 +47,8 @@ import java.util.concurrent.Callable;
 @Command(name = "preview", description = "Serve the module's views live in a browser studio.")
 public final class PreviewCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file to preview.")
+    @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",
+            description = "The SkyLang source file to preview. Default: the directory's sole .sky file.")
     Path file;
 
     @Option(names = "--profile",
@@ -59,6 +60,13 @@ public final class PreviewCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
+        try {
+            file = SourceFiles.resolve(file);
+        } catch (ConfigException e) {
+            System.err.println("error: " + e.getMessage());
+            return 1;
+        }
+
         Ast.Module module;
         try {
             module = Parsing.parseFile(file);

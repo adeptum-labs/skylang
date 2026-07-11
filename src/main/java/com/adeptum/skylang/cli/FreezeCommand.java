@@ -49,7 +49,8 @@ import java.util.concurrent.Callable;
 @Command(name = "freeze", description = "Regenerate and re-verify every body, rewriting sky.lock.")
 public final class FreezeCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file to refreeze.")
+    @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",
+            description = "The SkyLang source file to refreeze. Default: the directory's sole .sky file.")
     Path file;
 
     @Option(names = "--profile",
@@ -62,6 +63,13 @@ public final class FreezeCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
+        try {
+            file = SourceFiles.resolve(file);
+        } catch (ConfigException e) {
+            System.err.println("error: " + e.getMessage());
+            return 1;
+        }
+
         Ast.Module module;
         try {
             module = Parsing.parseFile(file);

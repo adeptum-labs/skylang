@@ -48,14 +48,24 @@ import java.util.stream.Collectors;
 @Command(name = "why", description = "Explain one method: its specification, freeze status, and frozen body.")
 public final class WhyCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file.")
-    Path file;
+    @Parameters(arity = "1..2", paramLabel = "[<file.sky>] <Service.method>",
+            description = "The method to explain, optionally preceded by its source file "
+                    + "(default: the directory's sole .sky file).")
+    java.util.List<String> args;
 
-    @Parameters(index = "1", paramLabel = "<Service.method>", description = "The method to explain.")
+    Path file;
     String target;
 
     @Override
     public Integer call() {
+        try {
+            file = SourceFiles.resolve(args.size() == 2 ? Path.of(args.get(0)) : null);
+        } catch (ConfigException e) {
+            System.err.println("error: " + e.getMessage());
+            return 1;
+        }
+        target = args.get(args.size() - 1);
+
         Ast.Module module;
         ActiveProfile.Activation active;
         try {

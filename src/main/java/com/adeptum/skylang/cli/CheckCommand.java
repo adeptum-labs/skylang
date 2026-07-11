@@ -39,7 +39,8 @@ import java.util.concurrent.Callable;
 @Command(name = "check", description = "Type-check the hard layer; no synthesis, no network.")
 public final class CheckCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", paramLabel = "<file.sky>", description = "The SkyLang source file to check.")
+    @Parameters(index = "0", arity = "0..1", paramLabel = "<file.sky>",
+            description = "The SkyLang source file to check. Default: the directory's sole .sky file.")
     Path file;
 
     @Option(names = "--profile",
@@ -49,6 +50,7 @@ public final class CheckCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         try {
+            file = SourceFiles.resolve(file);
             Ast.Module module = Parsing.parseFile(file);
             new TypeChecker().check(module);
             ActiveProfile.activate(profile, file, module);   // the portability boundary is frontend
