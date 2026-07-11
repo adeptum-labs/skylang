@@ -21,8 +21,11 @@
 
 package com.adeptum.skylang.config;
 
-/** The resolved LLM credentials SkyLang synthesizes with: provider, API key, and model. */
-public record SkyConfig(Provider provider, String apiKey, String model) {
+/**
+ * The resolved LLM settings SkyLang synthesizes with: provider, API key, model, and reasoning
+ * effort.
+ */
+public record SkyConfig(Provider provider, String apiKey, String model, ReasoningEffort reasoningEffort) {
 
     public SkyConfig {
         if (apiKey == null || apiKey.isBlank()) {
@@ -31,6 +34,14 @@ public record SkyConfig(Provider provider, String apiKey, String model) {
         if (model == null || model.isBlank()) {
             model = provider.defaultModel();
         }
+        if (reasoningEffort == null) {
+            reasoningEffort = ReasoningEffort.DEFAULT;
+        }
+    }
+
+    /** A configuration at the default reasoning effort. */
+    public SkyConfig(Provider provider, String apiKey, String model) {
+        this(provider, apiKey, model, ReasoningEffort.DEFAULT);
     }
 
     /** The key with all but a short prefix/suffix hidden, for display. */

@@ -22,6 +22,7 @@
 package com.adeptum.skylang.synth;
 
 import com.adeptum.skylang.config.Provider;
+import com.adeptum.skylang.config.ReasoningEffort;
 import com.adeptum.skylang.config.SkyConfig;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -42,20 +43,31 @@ import java.util.function.Supplier;
 public final class LangChain4jLlm implements Llm {
 
     private static final int MAX_TOKENS = 4096;
+    /** OpenAI reasoning models spend the completion budget on hidden reasoning, so give it room. */
+    private static final int REASONING_MAX_TOKENS = 16384;
+    private static final int MAX_DEGRADE_ATTEMPTS = 3;
     private static final Duration TIMEOUT = Duration.ofMinutes(5);
 
     /**
      * OpenAI renamed the completion-length cap: newer models require
      * {@code max_completion_tokens} and reject the legacy {@code max_tokens}, while some older
-     * models accept only the legacy name. We try one spelling and fall back to the other, so the
-     * client is not tied to any single generation of models.
+     * models accept only the legacy name.
      */
-    private enum TokenLimit { COMPLETION, LEGACY }
+    enum TokenLimit { COMPLETION, LEGACY }
+
+    /**
+     * The request parameters some models reject — the token-limit spelling, whether to send an
+     * OpenAI {@code reasoning_effort}, and whether to enable Anthropic thinking. We start with the
+     * richest setting the config asks for and drop whatever a given model refuses, so one build
+     * works across model generations without a per-model table.
+     */
+    record Build(TokenLimit tokenLimit, boolean reasoning, boolean thinking) {
+    }
 
     private final Supplier<SkyConfig> configSupplier;
     private ChatModel model;
-    private TokenLimit tokenLimit = TokenLimit.COMPLETION;
-    private boolean tokenLimitFlipped;
+    private Build cachedBuild;
+    private volatile Build resolvedBuild;   // the build that last succeeded; the next call starts here
 
     public LangChain4jLlm(Supplier<SkyConfig> configSupplier) {
         this.configSupplier = configSupplier;
@@ -65,68 +77,89 @@ public final class LangChain4jLlm implements Llm {
         this(() -> config);
     }
 
-    /** Bodies synthesize concurrently, so the lazy init must be safe to race. */
-    private synchronized ChatModel model() {
-        if (model == null) {
-            model = buildModel(configSupplier.get(), tokenLimit);
+    /** The richest parameter set the configuration asks for, before any model refuses a part. */
+    private static Build initialBuild(SkyConfig config) {
+        boolean reasoning = config.provider() == Provider.OPENAI;
+        boolean thinking = config.provider() == Provider.ANTHROPIC
+                && config.reasoningEffort() != ReasoningEffort.LOW;
+        return new Build(TokenLimit.COMPLETION, reasoning, thinking);
+    }
+
+    /** Bodies synthesize concurrently, so the cache must be safe to race. */
+    private synchronized ChatModel modelFor(SkyConfig config, Build build) {
+        if (model == null || !build.equals(cachedBuild)) {
+            model = buildModel(config, build);
+            cachedBuild = build;
         }
         return model;
     }
 
-    static ChatModel buildModel(SkyConfig config, TokenLimit tokenLimit) {
+    static ChatModel buildModel(SkyConfig config, Build build) {
         return switch (config.provider()) {
-            case ANTHROPIC -> AnthropicChatModel.builder()
-                    .apiKey(config.apiKey())
-                    .modelName(config.model())
-                    .maxTokens(MAX_TOKENS)
-                    .timeout(TIMEOUT)
-                    .build();
+            case ANTHROPIC -> {
+                AnthropicChatModel.AnthropicChatModelBuilder builder = AnthropicChatModel.builder()
+                        .apiKey(config.apiKey())
+                        .modelName(config.model())
+                        .timeout(TIMEOUT);
+                if (build.thinking()) {
+                    int budget = thinkingBudget(config.reasoningEffort());
+                    builder = builder.thinkingType("enabled")
+                            .thinkingBudgetTokens(budget)
+                            .temperature(1.0)                 // Anthropic requires 1 with thinking
+                            .maxTokens(budget + MAX_TOKENS);   // output must exceed the thinking budget
+                } else {
+                    builder = builder.maxTokens(MAX_TOKENS);
+                }
+                yield builder.build();
+            }
             case OPENAI -> {
+                int cap = build.reasoning() ? REASONING_MAX_TOKENS : MAX_TOKENS;
                 OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
                         .apiKey(config.apiKey())
                         .modelName(config.model())
                         .timeout(TIMEOUT);
-                yield (tokenLimit == TokenLimit.LEGACY
-                        ? builder.maxTokens(MAX_TOKENS)
-                        : builder.maxCompletionTokens(MAX_TOKENS)).build();
+                builder = build.tokenLimit() == TokenLimit.LEGACY
+                        ? builder.maxTokens(cap) : builder.maxCompletionTokens(cap);
+                if (build.reasoning()) {
+                    builder = builder.reasoningEffort(config.reasoningEffort().id());
+                }
+                yield builder.build();
             }
+        };
+    }
+
+    /** Anthropic thinking budget for a given effort; only used when thinking is enabled. */
+    private static int thinkingBudget(ReasoningEffort effort) {
+        return switch (effort) {
+            case LOW -> 1024;
+            case MEDIUM -> 8192;
+            case HIGH -> 16384;
         };
     }
 
     @Override
     public String complete(String system, String userMessage) {
+        SkyConfig config = configSupplier.get();   // config errors propagate before the call
         ChatRequest request = ChatRequest.builder()
                 .messages(SystemMessage.from(system), UserMessage.from(userMessage))
                 .build();
-        try {
-            return model().chat(request).aiMessage().text();   // config errors propagate before the call
-        } catch (RuntimeException e) {
-            if (flipTokenLimitIfNeeded(e)) {
-                try {
-                    return model().chat(request).aiMessage().text();
-                } catch (RuntimeException retry) {
-                    throw new SynthException("LLM call failed: " + retry.getMessage(), retry);
+        Build build = resolvedBuild != null ? resolvedBuild : initialBuild(config);
+        RuntimeException last = null;
+        for (int attempt = 0; attempt <= MAX_DEGRADE_ATTEMPTS; attempt++) {
+            try {
+                String text = modelFor(config, build).chat(request).aiMessage().text();
+                resolvedBuild = build;   // remember what worked, so later calls skip the dance
+                return text;
+            } catch (RuntimeException e) {
+                last = e;
+                Build degraded = degrade(config, build, e.getMessage());
+                if (degraded == null) {
+                    break;
                 }
+                build = degraded;
             }
-            throw new SynthException("LLM call failed: " + e.getMessage(), e);
         }
-    }
-
-    /**
-     * On an OpenAI token-parameter rejection, switch spellings once and rebuild the cached model,
-     * so every later call uses what worked. Returns whether a retry is worth attempting.
-     */
-    private synchronized boolean flipTokenLimitIfNeeded(RuntimeException e) {
-        SkyConfig config = configSupplier.get();
-        if (config.provider() != Provider.OPENAI || !isTokenLimitError(e.getMessage())) {
-            return false;
-        }
-        if (!tokenLimitFlipped) {
-            tokenLimit = tokenLimit == TokenLimit.COMPLETION ? TokenLimit.LEGACY : TokenLimit.COMPLETION;
-            tokenLimitFlipped = true;
-            model = buildModel(config, tokenLimit);
-        }
-        return true;   // another racing caller may have flipped it; retry against the current model
+        throw new SynthException("LLM call failed: " + last.getMessage(), last);
     }
 
     /** Make a tiny live call to confirm the credentials work; throws on failure. */
@@ -134,32 +167,65 @@ public final class LangChain4jLlm implements Llm {
         ChatRequest request = ChatRequest.builder()
                 .messages(UserMessage.from("Reply with the single word: OK"))
                 .build();
-        ChatResponse response = chatWithTokenFallback(config, request);
+        ChatResponse response = chatResilient(config, request);
         String text = response.aiMessage().text();
         if (text == null || text.isBlank()) {
             throw new SynthException("validation call returned an empty response");
         }
     }
 
-    /** Try the modern token parameter, falling back to the legacy one for an older OpenAI model. */
-    private static ChatResponse chatWithTokenFallback(SkyConfig config, ChatRequest request) {
-        try {
-            return buildModel(config, TokenLimit.COMPLETION).chat(request);
-        } catch (RuntimeException e) {
-            if (config.provider() == Provider.OPENAI && isTokenLimitError(e.getMessage())) {
-                return buildModel(config, TokenLimit.LEGACY).chat(request);
+    /** Run a request, dropping each parameter a model rejects until it succeeds or none remain. */
+    private static ChatResponse chatResilient(SkyConfig config, ChatRequest request) {
+        Build build = initialBuild(config);
+        RuntimeException last = null;
+        for (int attempt = 0; attempt <= MAX_DEGRADE_ATTEMPTS; attempt++) {
+            try {
+                return buildModel(config, build).chat(request);
+            } catch (RuntimeException e) {
+                last = e;
+                Build degraded = degrade(config, build, e.getMessage());
+                if (degraded == null) {
+                    break;
+                }
+                build = degraded;
             }
-            throw e;
         }
+        throw last;
+    }
+
+    /**
+     * Drop the one parameter a model just rejected, monotonically (token spelling flips once to
+     * legacy; reasoning and thinking only turn off), so the retry loop always terminates. Returns
+     * the degraded build, or null when the error is not about a parameter we can drop.
+     */
+    static Build degrade(SkyConfig config, Build build, String message) {
+        if (config.provider() == Provider.OPENAI) {
+            if (build.tokenLimit() == TokenLimit.COMPLETION && isTokenLimitError(message)) {
+                return new Build(TokenLimit.LEGACY, build.reasoning(), build.thinking());
+            }
+            if (build.reasoning() && isUnsupportedParam(message, "reasoning_effort")) {
+                return new Build(build.tokenLimit(), false, build.thinking());
+            }
+        } else if (build.thinking()
+                && (isUnsupportedParam(message, "thinking") || isUnsupportedParam(message, "budget_tokens"))) {
+            return new Build(build.tokenLimit(), build.reasoning(), false);
+        }
+        return null;
     }
 
     /** True when a provider rejected the request because of the token-limit parameter's spelling. */
     static boolean isTokenLimitError(String message) {
+        return isUnsupportedParam(message, "max_tokens")
+                || isUnsupportedParam(message, "max_completion_tokens");
+    }
+
+    /** True when the message reports that the named request parameter is unsupported. */
+    static boolean isUnsupportedParam(String message, String param) {
         if (message == null) {
             return false;
         }
         String m = message.toLowerCase(Locale.ROOT);
-        return (m.contains("max_tokens") || m.contains("max_completion_tokens"))
+        return m.contains(param.toLowerCase(Locale.ROOT))
                 && (m.contains("unsupported") || m.contains("not supported"));
     }
 }

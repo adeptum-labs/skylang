@@ -23,6 +23,7 @@ package com.adeptum.skylang.cli;
 
 import com.adeptum.skylang.config.ConfigStore;
 import com.adeptum.skylang.config.Provider;
+import com.adeptum.skylang.config.ReasoningEffort;
 import com.adeptum.skylang.config.SkyConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,12 +52,13 @@ class OnboardCommandTest {
     void showReportsFileSourcesAndFlagsTheIgnoredKey() {
         ConfigStore.Resolution r = new ConfigStore.Resolution(
                 Optional.of(new SkyConfig(Provider.ANTHROPIC, "sk-ant-fromfile-123456", "claude-x")),
-                new ConfigStore.Origins(ConfigStore.Origin.CONFIG_FILE,
+                new ConfigStore.Origins(ConfigStore.Origin.CONFIG_FILE, ConfigStore.Origin.CONFIG_FILE,
                         ConfigStore.Origin.CONFIG_FILE, ConfigStore.Origin.CONFIG_FILE),
-                true, false, false);
+                true, false, false, false);
 
         String out = OnboardCommand.renderShow(r, CONFIG);
         assertTrue(out.contains("provider  anthropic"), out);
+        assertTrue(out.contains("effort    high"), "the reasoning effort is reported:\n" + out);
         assertTrue(out.contains("(config file)"), out);
         assertTrue(out.contains("/home/dev/.sky/config"), out);
         assertTrue(out.contains("ANTHROPIC_API_KEY is set but ignored"),
@@ -69,13 +71,14 @@ class OnboardCommandTest {
     void showNamesTheEnvironmentSourcesThatFilledTheGaps() {
         ConfigStore.Resolution r = new ConfigStore.Resolution(
                 Optional.of(new SkyConfig(Provider.ANTHROPIC, "sk-ant-fromenv-123456", "claude-tuned")),
-                new ConfigStore.Origins(ConfigStore.Origin.CONFIG_FILE,
-                        ConfigStore.Origin.SKY_MODEL_ENV, ConfigStore.Origin.ANTHROPIC_ENV),
-                true, false, true);
+                new ConfigStore.Origins(ConfigStore.Origin.CONFIG_FILE, ConfigStore.Origin.SKY_MODEL_ENV,
+                        ConfigStore.Origin.ANTHROPIC_ENV, ConfigStore.Origin.SKY_EFFORT_ENV),
+                true, false, true, true);
 
         String out = OnboardCommand.renderShow(r, CONFIG);
         assertTrue(out.contains("(ANTHROPIC_API_KEY)"), out);
         assertTrue(out.contains("(SKY_MODEL)"), out);
+        assertTrue(out.contains("(SKY_REASONING_EFFORT)"), "effort resolved from the environment:\n" + out);
         // A key filled from the environment was not overridden, so nothing is flagged as ignored.
         assertFalse(out.contains("is set but ignored"), out);
     }
@@ -84,8 +87,8 @@ class OnboardCommandTest {
     void showGuidesWhenNothingIsConfigured() {
         ConfigStore.Resolution r = new ConfigStore.Resolution(Optional.empty(),
                 new ConfigStore.Origins(ConfigStore.Origin.UNSET, ConfigStore.Origin.UNSET,
-                        ConfigStore.Origin.UNSET),
-                false, false, false);
+                        ConfigStore.Origin.UNSET, ConfigStore.Origin.UNSET),
+                false, false, false, false);
 
         String out = OnboardCommand.renderShow(r, CONFIG);
         assertTrue(out.contains("No LLM credentials configured"), out);
@@ -93,9 +96,10 @@ class OnboardCommandTest {
     }
 
     @Test
-    void theShowFlagIsWiredIntoPicocli() {
+    void theFlagsAreWiredIntoPicocli() {
         String usage = new CommandLine(new OnboardCommand()).getUsageMessage();
         assertTrue(usage.contains("--show"), "onboard must expose --show:\n" + usage);
+        assertTrue(usage.contains("--reasoning-effort"), "onboard must expose --reasoning-effort:\n" + usage);
     }
 
     // ----- selecting and changing the model -----------------------------------
@@ -122,13 +126,32 @@ class OnboardCommandTest {
         cmd.provider = "anthropic";
         cmd.apiKey = "sk-ant-onboardkey-123456";
         cmd.model = "claude-custom-9";
+        cmd.reasoningEffort = "high";   // set so the flow stays non-interactive
         cmd.noValidate = true;
 
         String out = capture(cmd);
         SkyConfig saved = new ConfigStore(file, name -> null).resolve();
         assertEquals("claude-custom-9", saved.model(), "the chosen model must be persisted");
         assertEquals(Provider.ANTHROPIC, saved.provider());
+        assertEquals(ReasoningEffort.HIGH, saved.reasoningEffort());
         assertTrue(out.contains("claude-custom-9"), "the summary reports the model:\n" + out);
+    }
+
+    @Test
+    void flagsPersistTheChosenReasoningEffort(@TempDir Path dir) {
+        Path file = dir.resolve(".sky/config");
+        OnboardCommand cmd = new OnboardCommand();
+        cmd.store = new ConfigStore(file, name -> null);
+        cmd.provider = "openai";
+        cmd.apiKey = "sk-openai-onboardkey-1234";
+        cmd.model = "gpt-5";
+        cmd.reasoningEffort = "medium";
+        cmd.noValidate = true;
+
+        String out = capture(cmd);
+        SkyConfig saved = new ConfigStore(file, name -> null).resolve();
+        assertEquals(ReasoningEffort.MEDIUM, saved.reasoningEffort(), "the chosen effort must be persisted");
+        assertTrue(out.contains("effort:   medium"), "the summary reports the effort:\n" + out);
     }
 
     @Test
@@ -147,7 +170,26 @@ class OnboardCommandTest {
         assertEquals("gpt-4o-mini", updated.model(), "only the model changes");
         assertEquals(Provider.OPENAI, updated.provider(), "the stored provider is reused");
         assertEquals("sk-openai-original-123456", updated.apiKey(), "the stored key is reused");
-        assertTrue(out.contains("Updated model to gpt-4o-mini"), out);
+        assertTrue(out.contains("Updated") && out.contains("gpt-4o-mini"), out);
+    }
+
+    @Test
+    void effortOnlyChangeReusesModelProviderAndKey(@TempDir Path dir) {
+        Path file = dir.resolve(".sky/config");
+        new ConfigStore(file, name -> null).save(
+                new SkyConfig(Provider.OPENAI, "sk-openai-original-123456", "gpt-5", ReasoningEffort.LOW));
+
+        OnboardCommand cmd = new OnboardCommand();
+        cmd.store = new ConfigStore(file, name -> null);
+        cmd.reasoningEffort = "high";
+        cmd.noValidate = true;
+
+        String out = capture(cmd);
+        SkyConfig updated = new ConfigStore(file, name -> null).resolve();
+        assertEquals(ReasoningEffort.HIGH, updated.reasoningEffort(), "only the effort changes");
+        assertEquals("gpt-5", updated.model(), "the stored model is reused");
+        assertEquals("sk-openai-original-123456", updated.apiKey(), "the stored key is reused");
+        assertTrue(out.contains("Updated") && out.contains("effort:   high"), out);
     }
 
     /** Run the command with stdout captured, returning what it printed. */

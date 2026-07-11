@@ -21,9 +21,16 @@
 
 package com.adeptum.skylang.synth;
 
+import com.adeptum.skylang.config.Provider;
+import com.adeptum.skylang.config.ReasoningEffort;
+import com.adeptum.skylang.config.SkyConfig;
+import com.adeptum.skylang.synth.LangChain4jLlm.Build;
+import com.adeptum.skylang.synth.LangChain4jLlm.TokenLimit;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -56,5 +63,47 @@ class LangChain4jLlmTest {
         assertFalse(LangChain4jLlm.isTokenLimitError("401 Unauthorized: incorrect API key provided"));
         assertFalse(LangChain4jLlm.isTokenLimitError(
                 "The model `gpt-5.6-terra` does not exist or you do not have access to it."));
+    }
+
+    // ----- degradation: drop the parameter a model refuses, monotonically -----------
+
+    private static final SkyConfig OPENAI =
+            new SkyConfig(Provider.OPENAI, "sk-openai-123456789012", "gpt-5", ReasoningEffort.HIGH);
+    private static final SkyConfig ANTHROPIC =
+            new SkyConfig(Provider.ANTHROPIC, "sk-ant-123456789012", "claude-opus-4-8", ReasoningEffort.HIGH);
+
+    @Test
+    void openAiDropsReasoningEffortWhenTheModelRejectsIt() {
+        Build full = new Build(TokenLimit.COMPLETION, true, false);
+        Build degraded = LangChain4jLlm.degrade(OPENAI, full,
+                "Unsupported parameter: 'reasoning_effort' is not supported with this model.");
+        assertFalse(degraded.reasoning(), "reasoning_effort is dropped");
+        assertEquals(TokenLimit.COMPLETION, degraded.tokenLimit(), "the token spelling is untouched");
+    }
+
+    @Test
+    void openAiFlipsTheTokenSpellingOnceButNotBack() {
+        Build completion = new Build(TokenLimit.COMPLETION, false, false);
+        Build flipped = LangChain4jLlm.degrade(OPENAI, completion,
+                "Unsupported parameter: 'max_tokens' is not supported. Use 'max_completion_tokens'.");
+        assertEquals(TokenLimit.LEGACY, flipped.tokenLimit());
+        // Once on the legacy spelling, a further token error has nothing left to try — no oscillation.
+        assertNull(LangChain4jLlm.degrade(OPENAI, flipped,
+                "Unsupported parameter: 'max_completion_tokens' is not supported."));
+    }
+
+    @Test
+    void anthropicDropsThinkingWhenTheModelRejectsIt() {
+        Build thinking = new Build(TokenLimit.COMPLETION, false, true);
+        Build degraded = LangChain4jLlm.degrade(ANTHROPIC, thinking,
+                "thinking: extended thinking is not supported by this model");
+        assertFalse(degraded.thinking(), "thinking is disabled");
+    }
+
+    @Test
+    void anUnrelatedErrorLeavesTheBuildAloneToPropagate() {
+        Build full = new Build(TokenLimit.COMPLETION, true, false);
+        assertNull(LangChain4jLlm.degrade(OPENAI, full,
+                "The model `gpt-nope` does not exist or you do not have access to it."));
     }
 }

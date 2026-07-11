@@ -42,6 +42,7 @@ import java.util.function.UnaryOperator;
 public final class ConfigStore {
 
     private static final String MODEL_ENV = "SKY_MODEL";
+    private static final String EFFORT_ENV = "SKY_REASONING_EFFORT";
 
     private final Path path;
     private final UnaryOperator<String> env;
@@ -73,7 +74,9 @@ public final class ConfigStore {
         ANTHROPIC_ENV("ANTHROPIC_API_KEY"),
         OPENAI_ENV("OPENAI_API_KEY"),
         SKY_MODEL_ENV(MODEL_ENV),
+        SKY_EFFORT_ENV(EFFORT_ENV),
         PROVIDER_DEFAULT("provider default"),
+        DEFAULT("default"),
         UNSET("unset");
 
         private final String label;
@@ -88,7 +91,7 @@ public final class ConfigStore {
     }
 
     /** The source of each resolved field. */
-    public record Origins(Origin provider, Origin model, Origin apiKey) {
+    public record Origins(Origin provider, Origin model, Origin apiKey, Origin reasoningEffort) {
     }
 
     /**
@@ -96,7 +99,8 @@ public final class ConfigStore {
      * variables are set — enough for {@code sky onboard --show} to explain what won and why.
      */
     public record Resolution(Optional<SkyConfig> config, Origins origins,
-                             boolean anthropicEnvSet, boolean openaiEnvSet, boolean skyModelEnvSet) {
+                             boolean anthropicEnvSet, boolean openaiEnvSet, boolean skyModelEnvSet,
+                             boolean skyReasoningEffortEnvSet) {
     }
 
     /** The merged configuration, or empty when neither a file nor the environment supplies one. */
@@ -119,9 +123,11 @@ public final class ConfigStore {
         String anthropicKey = trimmedEnv(Provider.ANTHROPIC.envVar());
         String openaiKey = trimmedEnv(Provider.OPENAI.envVar());
         String skyModel = trimmedEnv(MODEL_ENV);
+        String skyEffort = trimmedEnv(EFFORT_ENV);
         boolean anthropicSet = anthropicKey != null;
         boolean openaiSet = openaiKey != null;
         boolean skyModelSet = skyModel != null;
+        boolean skyEffortSet = skyEffort != null;
 
         Provider provider;
         Origin providerOrigin;
@@ -139,8 +145,8 @@ public final class ConfigStore {
             providerOrigin = Origin.OPENAI_ENV;
         } else {
             return new Resolution(Optional.empty(),
-                    new Origins(Origin.UNSET, Origin.UNSET, Origin.UNSET),
-                    false, false, skyModelSet);
+                    new Origins(Origin.UNSET, Origin.UNSET, Origin.UNSET, Origin.UNSET),
+                    false, false, skyModelSet, skyEffortSet);
         }
 
         String providerEnvKey = provider == Provider.ANTHROPIC ? anthropicKey : openaiKey;
@@ -172,10 +178,23 @@ public final class ConfigStore {
             modelOrigin = Origin.PROVIDER_DEFAULT;
         }
 
-        Origins origins = new Origins(providerOrigin, modelOrigin, apiKeyOrigin);
+        ReasoningEffort effort;
+        Origin effortOrigin;
+        if (file.containsKey("reasoning_effort")) {
+            effort = ReasoningEffort.parse(file.get("reasoning_effort"));
+            effortOrigin = Origin.CONFIG_FILE;
+        } else if (skyEffort != null) {
+            effort = ReasoningEffort.parse(skyEffort);
+            effortOrigin = Origin.SKY_EFFORT_ENV;
+        } else {
+            effort = ReasoningEffort.DEFAULT;
+            effortOrigin = Origin.DEFAULT;
+        }
+
+        Origins origins = new Origins(providerOrigin, modelOrigin, apiKeyOrigin, effortOrigin);
         Optional<SkyConfig> config = apiKey == null ? Optional.empty()
-                : Optional.of(new SkyConfig(provider, apiKey.trim(), model));
-        return new Resolution(config, origins, anthropicSet, openaiSet, skyModelSet);
+                : Optional.of(new SkyConfig(provider, apiKey.trim(), model, effort));
+        return new Resolution(config, origins, anthropicSet, openaiSet, skyModelSet, skyEffortSet);
     }
 
     /** An environment value, trimmed, or null when unset or blank. */
@@ -189,6 +208,7 @@ public final class ConfigStore {
                 + "# SkyLang credentials — keep private, do not commit.\n"
                 + "provider=" + config.provider().id() + "\n"
                 + "model=" + config.model() + "\n"
+                + "reasoning_effort=" + config.reasoningEffort().id() + "\n"
                 + "api_key=" + config.apiKey() + "\n";
         try {
             Path dir = path.getParent();

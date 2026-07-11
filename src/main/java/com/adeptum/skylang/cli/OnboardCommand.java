@@ -24,6 +24,7 @@ package com.adeptum.skylang.cli;
 import com.adeptum.skylang.config.ConfigException;
 import com.adeptum.skylang.config.ConfigStore;
 import com.adeptum.skylang.config.Provider;
+import com.adeptum.skylang.config.ReasoningEffort;
 import com.adeptum.skylang.config.SkyConfig;
 import com.adeptum.skylang.synth.LangChain4jLlm;
 import picocli.CommandLine.Command;
@@ -62,6 +63,11 @@ public final class OnboardCommand implements Callable<Integer> {
                     + "stored provider and key. Prompted (with a default) if omitted.")
     String model;
 
+    @Option(names = "--reasoning-effort",
+            description = "How hard the model thinks: low, medium, or high (default high). On an "
+                    + "existing config, changes only this. Prompted (with a default) if omitted.")
+    String reasoningEffort;
+
     @Option(names = "--no-validate", description = "Skip the live validation call before saving.")
     boolean noValidate;
 
@@ -78,22 +84,26 @@ public final class OnboardCommand implements Callable<Integer> {
         try {
             Optional<SkyConfig> existing = store.load();
 
-            // `sky onboard --model NAME` on an existing config changes only the model.
-            if (hasModelFlag() && provider == null && apiKey == null && existing.isPresent()) {
-                return changeModel(store, existing.get(), model.trim());
+            // `sky onboard --model NAME` / `--reasoning-effort E` on an existing config changes only
+            // the named settings, reusing the stored provider and key.
+            if ((hasModelFlag() || hasEffortFlag()) && provider == null && apiKey == null
+                    && existing.isPresent()) {
+                return applyChanges(store, existing.get());
             }
 
             Provider p = (provider != null && !provider.isBlank())
                     ? Provider.parse(provider) : promptProvider(existing);
             String chosenModel = hasModelFlag() ? model.trim() : promptModel(p, existing);
+            ReasoningEffort chosenEffort = hasEffortFlag()
+                    ? ReasoningEffort.parse(reasoningEffort) : promptEffort(existing);
             String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : promptKey(existing);
 
-            SkyConfig config = new SkyConfig(p, key.trim(), chosenModel);
+            SkyConfig config = new SkyConfig(p, key.trim(), chosenModel, chosenEffort);
             if (!validate(config)) {
                 return 1;
             }
             store.save(config);
-            printSaved(store, config);
+            printConfig(store, config, "Saved");
             return 0;
         } catch (ConfigException e) {
             System.err.println("error: " + e.getMessage());
@@ -109,15 +119,21 @@ public final class OnboardCommand implements Callable<Integer> {
         return model != null && !model.isBlank();
     }
 
-    /** Change only the model, keeping the stored provider and key. */
-    private Integer changeModel(ConfigStore store, SkyConfig existing, String newModel) {
-        SkyConfig updated = new SkyConfig(existing.provider(), existing.apiKey(), newModel);
+    private boolean hasEffortFlag() {
+        return reasoningEffort != null && !reasoningEffort.isBlank();
+    }
+
+    /** Change the named settings on an existing config, keeping its provider and key. */
+    private Integer applyChanges(ConfigStore store, SkyConfig existing) {
+        String newModel = hasModelFlag() ? model.trim() : existing.model();
+        ReasoningEffort newEffort = hasEffortFlag()
+                ? ReasoningEffort.parse(reasoningEffort) : existing.reasoningEffort();
+        SkyConfig updated = new SkyConfig(existing.provider(), existing.apiKey(), newModel, newEffort);
         if (!validate(updated)) {
             return 1;
         }
         store.save(updated);
-        System.out.printf("Updated model to %s (provider %s).%n  %s%n",
-                newModel, updated.provider().id(), store.path());
+        printConfig(store, updated, "Updated");
         return 0;
     }
 
@@ -141,9 +157,10 @@ public final class OnboardCommand implements Callable<Integer> {
         }
     }
 
-    private void printSaved(ConfigStore store, SkyConfig config) {
-        System.out.printf("Saved %s%n  provider: %s%n  model:    %s%n  key:      %s%n",
-                store.path(), config.provider().id(), config.model(), config.maskedKey());
+    private void printConfig(ConfigStore store, SkyConfig config, String verb) {
+        System.out.printf("%s %s%n  provider: %s%n  model:    %s%n  effort:   %s%n  key:      %s%n",
+                verb, store.path(), config.provider().id(), config.model(),
+                config.reasoningEffort().id(), config.maskedKey());
     }
 
     private Integer showResolved(ConfigStore store) {
@@ -172,6 +189,7 @@ public final class OnboardCommand implements Callable<Integer> {
         out.append("Resolved configuration (").append(configPath).append("):\n");
         out.append(row("provider", config.provider().id(), origins.provider()));
         out.append(row("model", config.model(), origins.model()));
+        out.append(row("effort", config.reasoningEffort().id(), origins.reasoningEffort()));
         out.append(row("key", config.maskedKey(), origins.apiKey()));
 
         boolean providerEnvSet = config.provider() == Provider.ANTHROPIC
@@ -182,6 +200,10 @@ public final class OnboardCommand implements Callable<Integer> {
         }
         if (origins.model() == ConfigStore.Origin.CONFIG_FILE && r.skyModelEnvSet()) {
             out.append("note: SKY_MODEL is set but ignored — the config file defines model.\n");
+        }
+        if (origins.reasoningEffort() == ConfigStore.Origin.CONFIG_FILE && r.skyReasoningEffortEnvSet()) {
+            out.append("note: SKY_REASONING_EFFORT is set but ignored — "
+                    + "the config file defines reasoning_effort.\n");
         }
         return out.toString();
     }
@@ -209,6 +231,12 @@ public final class OnboardCommand implements Callable<Integer> {
     /** The model the prompt offers by default: the current one for this provider, else its default. */
     static String defaultModel(Provider p, Optional<SkyConfig> existing) {
         return existing.filter(e -> e.provider() == p).map(SkyConfig::model).orElse(p.defaultModel());
+    }
+
+    private ReasoningEffort promptEffort(Optional<SkyConfig> existing) {
+        ReasoningEffort preset = existing.map(SkyConfig::reasoningEffort).orElse(ReasoningEffort.DEFAULT);
+        String answer = readLine("Reasoning effort (low / medium / high) [" + preset.id() + "]: ");
+        return answer.isBlank() ? preset : ReasoningEffort.parse(answer);
     }
 
     private String promptKey(Optional<SkyConfig> existing) {

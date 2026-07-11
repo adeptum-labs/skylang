@@ -172,4 +172,26 @@ class ConfigStoreTest {
         assertTrue(r.config().isEmpty());
         assertFalse(r.anthropicEnvSet());
     }
+
+    @Test
+    void reasoningEffortResolvesFileThenEnvThenDefault(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("config");
+        Map<String, String> env = Map.of("SKY_REASONING_EFFORT", "medium");
+
+        Files.writeString(file, "provider=openai\napi_key=sk-openai-abcdef123456\nreasoning_effort=low\n");
+        ConfigStore.Resolution fromFile = new ConfigStore(file, env::get).describe();
+        assertEquals(ReasoningEffort.LOW, fromFile.config().orElseThrow().reasoningEffort());
+        assertEquals(ConfigStore.Origin.CONFIG_FILE, fromFile.origins().reasoningEffort());
+        assertTrue(fromFile.skyReasoningEffortEnvSet(), "the ignored variable is still reported set");
+
+        Files.writeString(file, "provider=openai\napi_key=sk-openai-abcdef123456\n");
+        ConfigStore.Resolution fromEnv = new ConfigStore(file, env::get).describe();
+        assertEquals(ReasoningEffort.MEDIUM, fromEnv.config().orElseThrow().reasoningEffort());
+        assertEquals(ConfigStore.Origin.SKY_EFFORT_ENV, fromEnv.origins().reasoningEffort());
+
+        ConfigStore.Resolution fallback = new ConfigStore(file, NO_ENV::get).describe();
+        assertEquals(ReasoningEffort.HIGH, fallback.config().orElseThrow().reasoningEffort(),
+                "with neither file nor environment, effort defaults to high");
+        assertEquals(ConfigStore.Origin.DEFAULT, fallback.origins().reasoningEffort());
+    }
 }
