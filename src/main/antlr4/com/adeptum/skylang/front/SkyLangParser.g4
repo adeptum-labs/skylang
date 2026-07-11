@@ -46,7 +46,10 @@ policyRule
 requireTerm
     : CONTAINS ID ID   # containsTerm    // contains a symbol
     | expr             # exprTerm        // length >= 12
+    | policyProse      # proseTerm       // the author has purchased the product
     ;
+
+policyProse : (ID | HAS | IS | OR | NOT | IN | OF | ON | INT | STRING | POSS)+ ;
 
 // ----- named refined types ---------------------------------------------------
 

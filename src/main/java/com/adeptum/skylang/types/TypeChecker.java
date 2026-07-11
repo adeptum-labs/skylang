@@ -419,6 +419,16 @@ public final class TypeChecker {
                         throw new CheckException(where + ": the logger rule is a forbid");
                     }
                 }
+                case Ast.Posted po -> {
+                    if (!entities.containsKey(po.typeWord())) {
+                        throw new CheckException(where + ": cannot resolve 'a " + po.typeWord()
+                                + " is posted' — no entity matches '" + po.typeWord() + "'");
+                    }
+                    if (!(p.rule() instanceof Ast.RequireRule rr) || rr.raise().isEmpty()) {
+                        throw new CheckException(where + ": a posted rule states what to require"
+                                + " and which error to raise");
+                    }
+                }
             }
         }
     }
@@ -444,6 +454,8 @@ public final class TypeChecker {
                         throw new CheckException(where + ": only 'contains a symbol' is resolvable here");
                     }
                 }
+                case Ast.ProseTerm ignored -> throw new CheckException(where
+                        + ": a construction rule needs a checkable predicate, not prose");
             }
         }
     }

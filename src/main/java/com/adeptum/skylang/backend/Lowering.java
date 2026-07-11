@@ -575,11 +575,15 @@ public final class Lowering {
             boolean text = declared != null && javaName(declared.base(), types).equals("String");
             List<String> conditions = new java.util.ArrayList<>();
             for (Ast.ReqTerm term : rule.terms()) {
-                conditions.add(switch (term) {
+                String condition = switch (term) {
                     case Ast.Contains ignored ->
                             var + ".chars().anyMatch(ch -> !Character.isLetterOrDigit(ch))";
                     case Ast.TermExpr te -> plainCondition(te.expr(), var, text);
-                });
+                    case Ast.ProseTerm ignored -> null;   // prose binds through the prompt, not a guard
+                };
+                if (condition != null) {
+                    conditions.add(condition);
+                }
             }
             String consequence = rule.raise()
                     .map(error -> "throw new " + error + "();")

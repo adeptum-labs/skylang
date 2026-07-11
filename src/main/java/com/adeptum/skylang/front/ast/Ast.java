@@ -54,7 +54,7 @@ public final class Ast {
     public record Policy(String name, Whenever whenever, PolicyRule rule) {
     }
 
-    public sealed interface Whenever permits Constructed, PassedToLogger {
+    public sealed interface Whenever permits Constructed, PassedToLogger, Posted {
     }
 
     /** {@code whenever a Password is constructed}. */
@@ -63,6 +63,10 @@ public final class Ast {
 
     /** {@code whenever a Secret is passed to a logger}. */
     public record PassedToLogger(String typeWord) implements Whenever {
+    }
+
+    /** {@code whenever a Review is posted} — every path that creates and stores the entity. */
+    public record Posted(String typeWord) implements Whenever {
     }
 
     public sealed interface PolicyRule permits RequireRule, ForbidRule {
@@ -76,7 +80,7 @@ public final class Ast {
     public record ForbidRule() implements PolicyRule {
     }
 
-    public sealed interface ReqTerm permits TermExpr, Contains {
+    public sealed interface ReqTerm permits TermExpr, Contains, ProseTerm {
     }
 
     public record TermExpr(Expr expr) implements ReqTerm {
@@ -84,6 +88,13 @@ public final class Ast {
 
     /** {@code contains a symbol}. */
     public record Contains(String what) implements ReqTerm {
+    }
+
+    /**
+     * A free-prose requirement ({@code the author has purchased the product}): stated for
+     * every body through the synthesis prompt; its examples and raises pin the behaviour.
+     */
+    public record ProseTerm(String text) implements ReqTerm {
     }
 
     /**

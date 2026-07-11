@@ -113,12 +113,14 @@ public final class PromptBuilder {
                 sb.append("//   ").append(p.name()).append(": whenever ").append(switch (p.whenever()) {
                     case Ast.Constructed c -> "a " + c.typeWord() + " is constructed";
                     case Ast.PassedToLogger l -> "a " + l.typeWord() + " is passed to a logger";
+                    case Ast.Posted po -> "a " + po.typeWord() + " is posted";
                 });
                 switch (p.rule()) {
                     case Ast.RequireRule rr -> {
                         sb.append(" require ").append(rr.terms().stream().map(t -> switch (t) {
                             case Ast.TermExpr te -> sky(te.expr());
                             case Ast.Contains c -> "contains a " + c.what();
+                            case Ast.ProseTerm pt -> pt.text();
                         }).collect(Collectors.joining(" and ")));
                         rr.raise().ifPresent(e -> sb.append(" else raise ").append(e));
                     }

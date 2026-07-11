@@ -1012,6 +1012,13 @@ public final class ProjectStager {
             case Ast.NotExpr n -> walkOld(n.value(), oldNames);
             case Ast.MemberExpr m -> walkOld(m.target(), oldNames);
             case Ast.CallExpr c -> c.args().forEach(a -> walkOld(a, oldNames));
+            case Ast.AggExpr ag -> {
+                walkOld(ag.value(), oldNames);
+                if (ag.source() instanceof Ast.SourceExpr se) {
+                    walkOld(se.expr(), oldNames);
+                }
+                ag.where().ifPresent(w -> walkOld(w, oldNames));
+            }
             case Ast.ForallExpr f -> {
                 walkOld(f.source(), oldNames);
                 walkOld(f.predicate(), oldNames);
@@ -1039,6 +1046,13 @@ public final class ProjectStager {
             case Ast.NotExpr n -> emitSnapshotWalk(n.value(), oldNames, env, module, sb, emitted);
             case Ast.MemberExpr m -> emitSnapshotWalk(m.target(), oldNames, env, module, sb, emitted);
             case Ast.CallExpr c -> c.args().forEach(a -> emitSnapshotWalk(a, oldNames, env, module, sb, emitted));
+            case Ast.AggExpr ag -> {
+                emitSnapshotWalk(ag.value(), oldNames, env, module, sb, emitted);
+                if (ag.source() instanceof Ast.SourceExpr se) {
+                    emitSnapshotWalk(se.expr(), oldNames, env, module, sb, emitted);
+                }
+                ag.where().ifPresent(w -> emitSnapshotWalk(w, oldNames, env, module, sb, emitted));
+            }
             case Ast.ForallExpr f -> {
                 emitSnapshotWalk(f.source(), oldNames, env, module, sb, emitted);
                 emitSnapshotWalk(f.predicate(), oldNames, env, module, sb, emitted);

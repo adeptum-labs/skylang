@@ -73,6 +73,9 @@ public final class AstBuilder {
         if (verb.equals("constructed") && ctx.ID().size() == 3) {
             return new Ast.Constructed(type);
         }
+        if (verb.equals("posted") && ctx.ID().size() == 3) {
+            return new Ast.Posted(type);
+        }
         if (verb.equals("passed") && ctx.ID().size() == 6
                 && ctx.ID(3).getText().equals("to")
                 && (ctx.ID(4).getText().equals("a") || ctx.ID(4).getText().equals("an"))
@@ -83,8 +86,8 @@ public final class AstBuilder {
     }
 
     private static String badWhenever() {
-        return "unrecognized whenever phrase; say 'whenever a Password is constructed'"
-                + " or 'whenever a Secret is passed to a logger'";
+        return "unrecognized whenever phrase; say 'whenever a Password is constructed',"
+                + " 'whenever a Review is posted' or 'whenever a Secret is passed to a logger'";
     }
 
     private Ast.PolicyRule policyRule(SkyLangParser.PolicyRuleContext ctx) {
@@ -102,6 +105,15 @@ public final class AstBuilder {
                     yield new Ast.Contains(c.ID(1).getText());
                 }
                 case SkyLangParser.ExprTermContext e -> new Ast.TermExpr(expr(e.expr()));
+                case SkyLangParser.ProseTermContext pr -> {
+                    StringBuilder words = new StringBuilder();
+                    var prose = pr.policyProse();
+                    for (int i = 0; i < prose.getChildCount(); i++) {
+                        String word = prose.getChild(i).getText();
+                        words.append(words.isEmpty() || word.equals("'s") ? "" : " ").append(word);
+                    }
+                    yield new Ast.ProseTerm(words.toString());
+                }
                 default -> throw new IllegalStateException("unhandled require term");
             });
         }
