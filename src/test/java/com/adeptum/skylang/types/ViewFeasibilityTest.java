@@ -28,37 +28,49 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ViewFeasibilityTest {
 
+    private static final String LOGIN = """
+            module identity
+            entity UserAccount { id Int @id  displayName Text  email Email }
+            service Session uses db {
+              current() -> Maybe<UserAccount>
+                intent "The account for the current session, if any."
+              signOut(account UserAccount) -> UserAccount
+                intent "End the session."
+            }
+            page Login at "/" {
+              shows  Session.current() as a summary of (displayName, email)
+              action "Sign out" on the account -> Session.signOut(account)
+              expect action "Sign out" is a button
+            }
+            """;
+
     @Test
     void flagsAnOptionalShowsWithAPresentOnlyExpectation() {
-        Ast.Module module = Parsing.parse("""
-                module identity
-                entity UserAccount { id Int @id  displayName Text  email Email }
-                service Session uses db {
-                  current() -> Maybe<UserAccount>
-                    intent "The account for the current session, if any."
-                  signOut(account UserAccount) -> UserAccount
-                    intent "End the session."
-                }
-                page Login at "/" {
-                  shows  Session.current() as a summary of (displayName, email)
-                  action "Sign out" on the account -> Session.signOut(account)
-                  expect action "Sign out" is a button
-                }
-                """, "identity.sky");
+        Ast.Module module = Parsing.parse(LOGIN, "identity.sky");
 
-        List<String> warnings = ViewFeasibility.warnings(module);
+        List<String> found = ViewFeasibility.contradictions(module);
 
-        assertEquals(1, warnings.size(), warnings.toString());
-        String warning = warnings.get(0);
-        assertTrue(warning.contains("page Login may not pass render verification"), warning);
-        assertTrue(warning.contains("Session.current()"), warning);
-        assertTrue(warning.contains("Maybe<UserAccount>"), warning);
-        assertTrue(warning.contains("action \"Sign out\" is a button"), warning);
-        assertTrue(warning.contains("Split Login"), warning);
+        assertEquals(1, found.size(), found.toString());
+        String message = found.get(0);
+        assertTrue(message.contains("page Login cannot be verified as written"), message);
+        assertTrue(message.contains("Session.current()"), message);
+        assertTrue(message.contains("Maybe<UserAccount>"), message);
+        assertTrue(message.contains("action \"Sign out\" is a button"), message);
+        assertTrue(message.contains("Split Login"), message);
+    }
+
+    @Test
+    void theCheckerRejectsTheContradictionBeforeAnySynthesis() {
+        Ast.Module module = Parsing.parse(LOGIN, "identity.sky");
+
+        CheckException thrown = assertThrows(CheckException.class, () -> new TypeChecker().check(module));
+        assertTrue(thrown.getMessage().contains("page Login cannot be verified as written"),
+                thrown.getMessage());
     }
 
     @Test
@@ -79,7 +91,7 @@ class ViewFeasibilityTest {
                 }
                 """, "shop.sky");
 
-        assertTrue(ViewFeasibility.warnings(module).isEmpty());
+        assertTrue(ViewFeasibility.contradictions(module).isEmpty());
     }
 
     @Test
@@ -96,6 +108,6 @@ class ViewFeasibilityTest {
                 }
                 """, "identity.sky");
 
-        assertTrue(ViewFeasibility.warnings(module).isEmpty());
+        assertTrue(ViewFeasibility.contradictions(module).isEmpty());
     }
 }

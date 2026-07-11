@@ -105,6 +105,13 @@ public final class TypeChecker {
         for (Ast.Flow f : module.flows()) {
             checkFlow(f);
         }
+
+        // A page whose expectations its own data cannot satisfy is unbuildable; say so here,
+        // before any synthesis, rather than as an opaque render failure after it.
+        List<String> contradictions = ViewFeasibility.contradictions(module);
+        if (!contradictions.isEmpty()) {
+            throw new CheckException(String.join("\n\n", contradictions));
+        }
     }
 
     // ----- flows and components --------------------------------------------------

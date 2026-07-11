@@ -44,17 +44,24 @@ public final class ViewFeasibility {
     private ViewFeasibility() {
     }
 
-    /** @return one human-readable warning per page whose expectations cannot be verified as written. */
-    public static List<String> warnings(Ast.Module module) {
-        List<String> warnings = new ArrayList<>();
+    /** @return one message per page whose expectations contradict its data, empty when all are sound. */
+    public static List<String> contradictions(Ast.Module module) {
+        List<String> found = new ArrayList<>();
         for (Ast.View view : module.views()) {
-            optionalContentContradiction(module, view).ifPresent(warnings::add);
+            optionalContentContradiction(module, view).ifPresent(found::add);
         }
-        return warnings;
+        return found;
     }
 
     private static Optional<String> optionalContentContradiction(Ast.Module module, Ast.View view) {
         Ast.QualifiedCall query = view.shows().query();
+
+        // A query with arguments (e.g. a route-bound Orders.find(id)) can be exercised with a value
+        // that resolves; only a parameterless, ambient optional (Session.current()) has no input the
+        // verifier can vary to make it present, so it is the one that cannot be seeded.
+        if (!query.args().isEmpty()) {
+            return Optional.empty();
+        }
         Optional<Ast.Method> shown = method(module, query.service(), query.method());
         boolean optional = shown
                 .map(m -> m.returnType() instanceof Ast.GenericType g && g.name().equals("Maybe"))
@@ -82,8 +89,8 @@ public final class ViewFeasibility {
         String source = query.service() + "." + query.method() + "()";
         String type = shown.get().returnType().sky();
         StringBuilder sb = new StringBuilder();
-        sb.append("warning [frontend]: page ").append(view.name())
-                .append(" may not pass render verification.\n");
+        sb.append("page ").append(view.name())
+                .append(" cannot be verified as written.\n");
         sb.append("  It shows ").append(source).append(", which returns ").append(type)
                 .append(" — a value that can be absent, and is absent in the state the\n")
                 .append("  renderer produces (nothing supplies one during verification). These expectations\n")
