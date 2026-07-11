@@ -834,6 +834,27 @@ class PipelineTest {
         assertEquals(2, code);
     }
 
+    @Test
+    void previewModeInjectsTheSelectionScript(@TempDir Path root) throws Exception {
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS).preview()
+                .build(checkedViewModule(), root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        String xhtml = Files.readString(buildDir.resolve("src/main/webapp/ProductList.xhtml"));
+        assertTrue(xhtml.contains("sky.select"), "preview pages carry the studio selection script");
+        assertTrue(xhtml.contains("CDATA"), "the script is CDATA-wrapped so it stays valid Facelets XML");
+    }
+
+    @Test
+    void normalStagingCarriesNoSelectionScript(@TempDir Path root) throws Exception {
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(checkedViewModule(), root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        String xhtml = Files.readString(buildDir.resolve("src/main/webapp/ProductList.xhtml"));
+        assertFalse(xhtml.contains("sky.select"), "a normal build stays clean — no preview script");
+    }
+
     private static PrintStream quiet() {
         return new PrintStream(new ByteArrayOutputStream());
     }

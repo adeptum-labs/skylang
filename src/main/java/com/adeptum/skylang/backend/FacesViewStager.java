@@ -38,6 +38,17 @@ import java.util.Map;
  */
 public final class FacesViewStager {
 
+    /** When true, served pages carry the studio's in-page selection script (preview only). */
+    private final boolean preview;
+
+    public FacesViewStager() {
+        this(false);
+    }
+
+    public FacesViewStager(boolean preview) {
+        this.preview = preview;
+    }
+
     private static final String WEB_XML = """
             <?xml version="1.0" encoding="UTF-8"?>
             <web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
@@ -600,7 +611,8 @@ public final class FacesViewStager {
             """;
 
     /** Wrap the synthesized fragment in a full Facelets page with the standard component namespaces. */
-    private static String page(Ast.View view, String markup) {
+    private String page(Ast.View view, String markup) {
+        String selection = preview ? "\n" + selectionScript(view.name()) : "";
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <!DOCTYPE html>
@@ -609,10 +621,40 @@ public final class FacesViewStager {
                       xmlns:f="jakarta.faces.core">
                 <h:head><title>%s</title></h:head>
                 <h:body>
-                %s
+                %s%s
                 </h:body>
                 </html>
-                """.formatted(view.name(), markup.strip());
+                """.formatted(view.name(), markup.strip(), selection);
+    }
+
+    /**
+     * The in-page selection script the preview studio injects: on click it reports the clicked
+     * control (a command's rendered label) or column header to the parent studio via postMessage,
+     * so the studio can highlight the matching panel knob. CDATA-wrapped to stay valid Facelets XML.
+     */
+    static String selectionScript(String viewName) {
+        return """
+                <script>//<![CDATA[
+                (function(){
+                  var VIEW = "%s";
+                  document.addEventListener('click', function(e){
+                    var btn = e.target.closest('button, a, input[type=submit], input[type=button]');
+                    if (btn) {
+                      var label = (btn.value || btn.textContent || '').trim();
+                      if (label) {
+                        e.preventDefault(); e.stopPropagation();
+                        window.parent.postMessage({ type: 'sky.select', view: VIEW, control: label }, '*');
+                        return;
+                      }
+                    }
+                    var th = e.target.closest('th');
+                    if (th) {
+                      var text = (th.textContent || '').trim();
+                      if (text) window.parent.postMessage({ type: 'sky.select', view: VIEW, field: text }, '*');
+                    }
+                  }, true);
+                })();
+                //]]></script>""".formatted(viewName);
     }
 
     /** Ensure the backing bean carries the module's package declaration. */

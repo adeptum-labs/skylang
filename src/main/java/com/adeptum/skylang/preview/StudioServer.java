@@ -181,7 +181,7 @@ public final class StudioServer implements AutoCloseable {
                 }
                 function renderPanel() {
                   let h = '<div class="grp"><div class="lbl">Columns <em>verified</em></div><ul class="cols">';
-                  spec.order.forEach((c, i) => h += '<li><span>' + esc(c) + '</span><span class="mv">'
+                  spec.order.forEach((c, i) => h += '<li data-col="' + esc(c) + '"><span>' + esc(c) + '</span><span class="mv">'
                     + '<button data-mv="-1" data-i="' + i + '">&#8593;</button>'
                     + '<button data-mv="1" data-i="' + i + '">&#8595;</button></span></li>');
                   h += '</ul></div>';
@@ -224,6 +224,23 @@ public final class StudioServer implements AutoCloseable {
                       'label=' + encodeURIComponent(label) + '&region=' + encodeURIComponent(t.value));
                     else setChange('clearActionRegion', 'label=' + encodeURIComponent(label));
                   }
+                });
+                function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s; }
+                window.addEventListener('message', e => {
+                  if (e.origin !== 'http://localhost:' + shownPort) return;
+                  const d = e.data || {};
+                  if (d.type !== 'sky.select') return;
+                  document.querySelectorAll('.panel .sel').forEach(x => x.classList.remove('sel'));
+                  let target = null;
+                  if (d.control) {
+                    const sel = document.querySelector('.panel [data-region="' + cssEsc(d.control) + '"]');
+                    if (sel) target = sel.closest('.grp');
+                  } else if (d.field) {
+                    document.querySelectorAll('.panel li[data-col]').forEach(li => {
+                      if ((li.getAttribute('data-col') || '').toLowerCase() === d.field.toLowerCase()) target = li;
+                    });
+                  }
+                  if (target) { target.classList.add('sel'); target.scrollIntoView({ block: 'nearest' }); }
                 });""";
 
     private static final String TEMPLATE = """
@@ -255,6 +272,7 @@ public final class StudioServer implements AutoCloseable {
                 .panel ul.cols li { display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0.4rem; background: #fff; border: 1px solid #dde; border-radius: 4px; margin-bottom: 0.2rem; }
                 .panel .mv button { border: 0; background: #e3eaea; border-radius: 3px; cursor: pointer; margin-left: 0.15rem; padding: 0.1rem 0.35rem; }
                 .panel .hint { color: #789; }
+                .panel .sel { outline: 2px solid #2a7d5a; outline-offset: 1px; border-radius: 4px; }
               </style>
             </head>
             <body>

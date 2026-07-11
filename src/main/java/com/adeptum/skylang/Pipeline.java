@@ -72,7 +72,7 @@ public final class Pipeline {
     private final Profile profile;
     private final Budget deps;
     private final UiPromptBuilder uiPrompts = new UiPromptBuilder();
-    private final FacesViewStager facesViewStager = new FacesViewStager();
+    private FacesViewStager facesViewStager = new FacesViewStager();
     private final ViewVerifier viewVerifier = new ViewVerifier();
     private final int maxRegenerations;
 
@@ -164,6 +164,12 @@ public final class Pipeline {
     /** @return 0 on success, non-zero on a verification/synthesis failure. */
     public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err) {
         return build(module, lockPath, buildDir, out, err, false);
+    }
+
+    /** Stage views in preview mode, so the served pages carry the studio's in-page selection script. */
+    public Pipeline preview() {
+        this.facesViewStager = new FacesViewStager(true);
+        return this;
     }
 
     /**

@@ -232,7 +232,7 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
     // ----- machinery ---------------------------------------------------------
 
     private PreviewProcess stageAndLaunch(Ast.Module module, PrintStream out, PrintStream err) throws IOException {
-        int staged = new Pipeline(llm, STAGE_ONLY).build(module, lockPath, buildDir, out, err);
+        int staged = new Pipeline(llm, STAGE_ONLY).preview().build(module, lockPath, buildDir, out, err);
         if (staged != 0) {
             throw new IOException("could not stage the views for preview");
         }
