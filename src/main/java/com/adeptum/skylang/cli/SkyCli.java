@@ -23,6 +23,10 @@ package com.adeptum.skylang.cli;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.ScopeType;
+
+import java.util.Arrays;
 
 /**
  * The {@code sky} command-line entry point. The help header recreates the book cover's
@@ -51,6 +55,10 @@ import picocli.CommandLine.Command;
                 CleanCommand.class})
 public final class SkyCli implements Runnable {
 
+    @Option(names = "--debug", scope = ScopeType.INHERIT,
+            description = "Verbose debug logging (model prompts and replies, verification, staging).")
+    boolean debug;
+
     @Override
     public void run() {
         // No subcommand given: print usage.
@@ -58,7 +66,18 @@ public final class SkyCli implements Runnable {
     }
 
     public static void main(String[] args) {
+        // Configure the log level before any logger initializes — slf4j-simple reads these once.
+        configureLogging(Arrays.asList(args).contains("--debug"));
         int exitCode = new CommandLine(new SkyCli()).execute(args);
         System.exit(exitCode);
+    }
+
+    /** Point the SLF4J-simple binding at a clean, quiet-by-default format; {@code --debug} opens it up. */
+    private static void configureLogging(boolean debug) {
+        System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", debug ? "debug" : "error");
+        System.setProperty("org.slf4j.simpleLogger.showDateTime", "false");
+        System.setProperty("org.slf4j.simpleLogger.showThreadName", "false");
+        System.setProperty("org.slf4j.simpleLogger.showShortLogName", "true");
+        System.setProperty("org.slf4j.simpleLogger.levelInBrackets", "false");
     }
 }

@@ -22,6 +22,7 @@
 package com.adeptum.skylang.front;
 
 import com.adeptum.skylang.front.ast.Ast;
+import lombok.extern.slf4j.Slf4j;
 import org.antlr.v4.runtime.BaseErrorListener;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
@@ -33,6 +34,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** Entry point for turning SkyLang source text into an {@link Ast.Module}. */
+@Slf4j
 public final class Parsing {
 
     private Parsing() {
@@ -54,7 +56,11 @@ public final class Parsing {
         parser.addErrorListener(listener);
 
         SkyLangParser.Module_Context tree = parser.module_();
-        return new AstBuilder().build(tree);
+        Ast.Module module = new AstBuilder().build(tree);
+        log.debug("parsed {}: module {} — {} entities, {} services, {} views, {} components, {} flows",
+                sourceName, module.name(), module.entities().size(), module.services().size(),
+                module.views().size(), module.components().size(), module.flows().size());
+        return module;
     }
 
     private static final class ThrowingErrorListener extends BaseErrorListener {

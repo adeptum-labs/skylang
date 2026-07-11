@@ -31,6 +31,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
 import java.util.Locale;
@@ -40,6 +41,7 @@ import java.util.function.Supplier;
  * Connects to the configured provider (OpenAI or Anthropic) through LangChain4j. The model is
  * built lazily on first use, so a fully-frozen build resolves no credentials.
  */
+@Slf4j
 public final class LangChain4jLlm implements Llm {
 
     private static final int MAX_TOKENS = 4096;
@@ -157,12 +159,16 @@ public final class LangChain4jLlm implements Llm {
         ChatRequest request = ChatRequest.builder()
                 .messages(SystemMessage.from(system), UserMessage.from(userMessage))
                 .build();
+        log.debug("LLM request to {}/{} ({} + {} chars)\n=== system ===\n{}\n=== user ===\n{}",
+                config.provider().id(), config.model(), system.length(), userMessage.length(),
+                system, userMessage);
         Build build = resolvedBuild != null ? resolvedBuild : initialBuild(config);
         RuntimeException last = null;
         for (int attempt = 0; attempt <= MAX_DEGRADE_ATTEMPTS; attempt++) {
             try {
                 String text = modelFor(config, build).chat(request).aiMessage().text();
                 resolvedBuild = build;   // remember what worked, so later calls skip the dance
+                log.debug("LLM reply ({} chars)\n{}", text == null ? 0 : text.length(), text);
                 return text;
             } catch (RuntimeException e) {
                 last = e;

@@ -20,6 +20,7 @@
     <picocli.version>4.7.6</picocli.version>
     <junit.version>5.10.2</junit.version>
     <langchain4j.version>1.17.2</langchain4j.version>
+    <lombok.version>1.18.34</lombok.version>
     <mainClass>com.adeptum.skylang.cli.SkyCli</mainClass>
     <imageName>sky</imageName>
   </properties>
@@ -46,11 +47,18 @@
       <groupId>dev.langchain4j</groupId>
       <artifactId>langchain4j-anthropic</artifactId>
     </dependency>
-    <!-- LangChain4j logs via SLF4J; a no-op binding keeps the CLI output clean. -->
+    <!-- SLF4J binding: quiet by default (error level); the debug flag raises it to debug. -->
     <dependency>
       <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-nop</artifactId>
+      <artifactId>slf4j-simple</artifactId>
       <version>2.0.16</version>
+    </dependency>
+    <!-- Lombok: compile-time only (@Slf4j); nothing ships to the runtime or the native image. -->
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <version>${lombok.version}</version>
+      <scope>provided</scope>
     </dependency>
 
     <dependency>
@@ -110,6 +118,11 @@
               <groupId>info.picocli</groupId>
               <artifactId>picocli-codegen</artifactId>
               <version>${picocli.version}</version>
+            </path>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
             </path>
           </annotationProcessorPaths>
           <compilerArgs>
