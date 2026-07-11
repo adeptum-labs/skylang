@@ -77,6 +77,53 @@ class ManifestTest {
     }
 
     @Test
+    void parsesTheRequiresBlock() {
+        Manifest m = Manifest.parse("""
+                project shop
+                profile jvm-jakarta
+
+                requires {
+                  bcrypt      ^4.0     // any compatible 4.x
+                  http-client ~2.1     // patch-level updates within 2.1
+                  json        2.1.3    // pinned exactly
+                }
+                """);
+        assertEquals(3, m.requires().size());
+        assertEquals(new Manifest.Require("bcrypt", "^4.0"), m.requires().get(0));
+        assertEquals(new Manifest.Require("http-client", "~2.1"), m.requires().get(1));
+        assertEquals(new Manifest.Require("json", "2.1.3"), m.requires().get(2));
+    }
+
+    @Test
+    void aMissingRequiresBlockMeansNoDependencies() {
+        assertTrue(Manifest.parse("project shop\n").requires().isEmpty());
+    }
+
+    @Test
+    void rejectsADuplicateRequirement() {
+        ConfigException e = assertThrows(ConfigException.class, () -> Manifest.parse("""
+                project shop
+                requires {
+                  bcrypt ^4.0
+                  bcrypt ^4.1
+                }
+                """));
+        assertTrue(e.getMessage().contains("duplicate"), e.getMessage());
+        assertTrue(e.getMessage().contains("bcrypt"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAMalformedVersionConstraint() {
+        ConfigException e = assertThrows(ConfigException.class, () -> Manifest.parse("""
+                project shop
+                requires {
+                  bcrypt latest
+                }
+                """));
+        assertTrue(e.getMessage().contains("latest"), e.getMessage());
+    }
+
+    @Test
     void loadsFromTheDirectoryNextToTheSource(@TempDir Path dir) throws IOException {
         Files.writeString(dir.resolve("sky.project"), "project tokens\nprofile ts-node\n");
         assertEquals("ts-node", Manifest.load(dir).orElseThrow().profile());

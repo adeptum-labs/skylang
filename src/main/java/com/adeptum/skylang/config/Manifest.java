@@ -25,13 +25,20 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
- * The project manifest ({@code sky.project}): the project name and the one line that binds
- * the build to a profile. A retarget is editing that line — everything else re-derives.
+ * The project manifest ({@code sky.project}): the project name, the one line that binds the
+ * build to a profile, and the {@code requires} block of dependencies — logical names with
+ * version constraints, resolved by the active profile's registry. Three things, and no more.
  */
-public record Manifest(String project, String profile) {
+public record Manifest(String project, String profile, List<Require> requires) {
+
+    /** One declared dependency: a logical name and a version constraint (^4.0, ~2.1, 2.1.3). */
+    public record Require(String name, String constraint) {
+    }
 
     public static final String FILE_NAME = "sky.project";
     private static final String REFERENCE_PROFILE = "jvm-jakarta";
@@ -52,9 +59,19 @@ public record Manifest(String project, String profile) {
     public static Manifest parse(String source) {
         String project = null;
         String profile = null;
+        List<Require> requires = new ArrayList<>();
+        boolean inRequires = false;
         for (String raw : source.lines().toList()) {
             String line = stripComment(raw).strip();
             if (line.isEmpty()) {
+                continue;
+            }
+            if (inRequires) {
+                if (line.equals("}")) {
+                    inRequires = false;
+                } else {
+                    requires.add(require(line, requires));
+                }
                 continue;
             }
             String[] parts = line.split("\\s+", 2);
@@ -62,9 +79,18 @@ public record Manifest(String project, String profile) {
             switch (parts[0]) {
                 case "project" -> project = unique("project", project, value);
                 case "profile" -> profile = unique("profile", profile, value);
-                default -> throw new ConfigException(
-                        "sky.project: unknown directive '" + parts[0] + "' (expected project or profile)");
+                case "requires" -> {
+                    if (!value.equals("{")) {
+                        throw new ConfigException("sky.project: expected 'requires {'");
+                    }
+                    inRequires = true;
+                }
+                default -> throw new ConfigException("sky.project: unknown directive '" + parts[0]
+                        + "' (expected project, profile or requires)");
             }
+        }
+        if (inRequires) {
+            throw new ConfigException("sky.project: unclosed requires block");
         }
         if (project == null || project.isEmpty()) {
             throw new ConfigException("sky.project: missing 'project <name>' line");
@@ -73,14 +99,29 @@ public record Manifest(String project, String profile) {
         requireName("project", project);
         String active = profile == null ? REFERENCE_PROFILE : profile;
         requireName("profile", active);
-        return new Manifest(project, active);
+        return new Manifest(project, active, List.copyOf(requires));
     }
 
-    private static void requireName(String directive, String value) {
-        if (!value.matches("[A-Za-z0-9][A-Za-z0-9_-]*")) {
-            throw new ConfigException("sky.project: '" + directive + "' must be a plain name, got '"
-                    + value + "'");
+    private static Require require(String line, List<Require> seen) {
+        String[] parts = line.split("\\s+");
+        if (parts.length != 2) {
+            throw new ConfigException("sky.project: a requires line is '<name> <constraint>', got '"
+                    + line + "'");
         }
+        String name = parts[0];
+        String constraint = parts[1];
+        if (!name.matches("[a-z0-9][a-z0-9-]*")) {
+            throw new ConfigException("sky.project: dependency name '" + name
+                    + "' must be a plain lowercase name");
+        }
+        if (!constraint.matches("[\\^~]?\\d+(\\.\\d+){0,2}")) {
+            throw new ConfigException("sky.project: version constraint '" + constraint
+                    + "' is not ^X.Y, ~X.Y or an exact version");
+        }
+        if (seen.stream().anyMatch(r -> r.name().equals(name))) {
+            throw new ConfigException("sky.project: duplicate requirement '" + name + "'");
+        }
+        return new Require(name, constraint);
     }
 
     private static String unique(String directive, String existing, String value) {
@@ -91,6 +132,13 @@ public record Manifest(String project, String profile) {
             throw new ConfigException("sky.project: '" + directive + "' needs a value");
         }
         return value;
+    }
+
+    private static void requireName(String directive, String value) {
+        if (!value.matches("[A-Za-z0-9][A-Za-z0-9_-]*")) {
+            throw new ConfigException("sky.project: '" + directive + "' must be a plain name, got '"
+                    + value + "'");
+        }
     }
 
     private static String stripComment(String line) {
