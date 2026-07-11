@@ -64,8 +64,9 @@ public final class OnboardCommand implements Callable<Integer> {
     String model;
 
     @Option(names = "--reasoning-effort",
-            description = "How hard the model thinks: low, medium, or high (default high). On an "
-                    + "existing config, changes only this. Prompted (with a default) if omitted.")
+            description = "How hard the model thinks (e.g. low, medium, high, minimal, or a "
+                    + "provider-specific value; default high). On an existing config, changes only "
+                    + "this. Prompted (with a default) if omitted.")
     String reasoningEffort;
 
     @Option(names = "--no-validate", description = "Skip the live validation call before saving.")

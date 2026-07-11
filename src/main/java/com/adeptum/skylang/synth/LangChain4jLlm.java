@@ -77,11 +77,14 @@ public final class LangChain4jLlm implements Llm {
         this(() -> config);
     }
 
+    /** Anthropic thinking needs at least this many budget tokens to be worth enabling. */
+    private static final int ANTHROPIC_MIN_THINKING = 1024;
+
     /** The richest parameter set the configuration asks for, before any model refuses a part. */
     private static Build initialBuild(SkyConfig config) {
         boolean reasoning = config.provider() == Provider.OPENAI;
         boolean thinking = config.provider() == Provider.ANTHROPIC
-                && config.reasoningEffort() != ReasoningEffort.LOW;
+                && thinkingBudget(config.reasoningEffort()) >= ANTHROPIC_MIN_THINKING;
         return new Build(TokenLimit.COMPLETION, reasoning, thinking);
     }
 
@@ -128,12 +131,23 @@ public final class LangChain4jLlm implements Llm {
         };
     }
 
-    /** Anthropic thinking budget for a given effort; only used when thinking is enabled. */
-    private static int thinkingBudget(ReasoningEffort effort) {
-        return switch (effort) {
-            case LOW -> 1024;
-            case MEDIUM -> 8192;
-            case HIGH -> 16384;
+    /**
+     * The Anthropic thinking budget an effort maps to. A bare number is used directly as the token
+     * budget; the common named levels map to sensible budgets; {@code minimal}/{@code none}/
+     * {@code off} disable thinking; any other named level still gets a middle budget so a
+     * provider-specific value is not silently ignored.
+     */
+    static int thinkingBudget(ReasoningEffort effort) {
+        String value = effort.id();
+        if (value.matches("\\d{1,6}")) {
+            return Integer.parseInt(value);
+        }
+        return switch (value) {
+            case "minimal", "none", "off" -> 0;
+            case "low" -> 2048;
+            case "medium" -> 8192;
+            case "high" -> 16384;
+            default -> 8192;
         };
     }
 

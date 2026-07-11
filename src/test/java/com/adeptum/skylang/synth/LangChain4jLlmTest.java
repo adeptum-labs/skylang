@@ -106,4 +106,17 @@ class LangChain4jLlmTest {
         assertNull(LangChain4jLlm.degrade(OPENAI, full,
                 "The model `gpt-nope` does not exist or you do not have access to it."));
     }
+
+    @Test
+    void thinkingBudgetInterpretsNamedLevelsAndRawNumbers() {
+        assertEquals(16384, LangChain4jLlm.thinkingBudget(ReasoningEffort.HIGH));
+        assertEquals(8192, LangChain4jLlm.thinkingBudget(ReasoningEffort.MEDIUM));
+        assertEquals(2048, LangChain4jLlm.thinkingBudget(ReasoningEffort.LOW));
+        assertEquals(0, LangChain4jLlm.thinkingBudget(ReasoningEffort.MINIMAL),
+                "minimal disables thinking");
+        assertEquals(12000, LangChain4jLlm.thinkingBudget(ReasoningEffort.parse("12000")),
+                "a bare number is a direct token budget");
+        assertEquals(8192, LangChain4jLlm.thinkingBudget(ReasoningEffort.parse("xhigh")),
+                "an unfamiliar provider-specific level still gets a budget");
+    }
 }

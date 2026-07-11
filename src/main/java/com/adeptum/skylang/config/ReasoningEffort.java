@@ -24,31 +24,36 @@ package com.adeptum.skylang.config;
 import java.util.Locale;
 
 /**
- * How hard the model should think before answering. Maps to OpenAI's {@code reasoning_effort} and
- * to Anthropic's extended-thinking budget. Onboarding defaults to {@link #HIGH}.
+ * How hard the model should think before answering. It is deliberately a free value rather than a
+ * closed set: the common levels are {@code low}, {@code medium}, and {@code high}, but providers and
+ * individual models add their own — OpenAI's {@code minimal}, model-specific tiers, or even a bare
+ * token budget for Anthropic thinking. Whatever you set is passed through and the provider is the
+ * authority on what it accepts. Onboarding defaults to {@link #DEFAULT}.
  */
-public enum ReasoningEffort {
+public record ReasoningEffort(String value) {
 
-    LOW, MEDIUM, HIGH;
+    public ReasoningEffort {
+        if (value == null || value.isBlank()) {
+            throw new ConfigException("reasoning effort must not be blank");
+        }
+        value = value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /** The common levels, offered as conveniences; any other value is equally valid. */
+    public static final ReasoningEffort MINIMAL = new ReasoningEffort("minimal");
+    public static final ReasoningEffort LOW = new ReasoningEffort("low");
+    public static final ReasoningEffort MEDIUM = new ReasoningEffort("medium");
+    public static final ReasoningEffort HIGH = new ReasoningEffort("high");
 
     /** The default effort a fresh configuration is given. */
     public static final ReasoningEffort DEFAULT = HIGH;
 
     /** The lowercase form used on the wire and in the config file. */
     public String id() {
-        return name().toLowerCase(Locale.ROOT);
+        return value;
     }
 
     public static ReasoningEffort parse(String text) {
-        if (text != null) {
-            String t = text.trim().toUpperCase(Locale.ROOT);
-            for (ReasoningEffort effort : values()) {
-                if (effort.name().equals(t)) {
-                    return effort;
-                }
-            }
-        }
-        throw new ConfigException("unknown reasoning effort '" + text
-                + "' (expected: low, medium, or high)");
+        return new ReasoningEffort(text);
     }
 }
