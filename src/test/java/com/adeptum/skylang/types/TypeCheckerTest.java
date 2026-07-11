@@ -61,6 +61,46 @@ class TypeCheckerTest {
     }
 
     @Test
+    void aValuesConstantDefaultMayReferenceALaterEntity() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity User { id Int @id  role Role = Role.Member }
+                entity Role { name Text @id  values Member, Staff, Admin }
+                """));
+    }
+
+    @Test
+    void rejectsADefaultNamingAMissingValueConstant() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module shop
+                entity User { id Int @id  role Role = Role.Owner }
+                entity Role { name Text @id  values Member, Staff, Admin }
+                """));
+        assertTrue(e.getMessage().contains("no value 'Owner'"), e.getMessage());
+    }
+
+    @Test
+    void currencyAndPercentageAreBuiltinRefinements() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity Country { code Text @id  name Text(1..80)  currency Currency  vatRate Percentage }
+                """));
+    }
+
+    @Test
+    void aPercentageDefaultOutsideTheRangeIsRejected() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module shop
+                entity Country { code Text @id  vatRate Percentage = 250 }
+                """));
+        assertTrue(e.getMessage().contains("Percentage"), e.getMessage());
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity Country { code Text @id  vatRate Percentage = 25 }
+                """));
+    }
+
+    @Test
     void rejectsUnknownType() {
         CheckException e = assertThrows(CheckException.class, () -> check(service("""
                   f(x Widget) -> Int
@@ -305,9 +345,9 @@ class TypeCheckerTest {
     void rejectsRangeLiteralOutOfBounds() {
         CheckException e = assertThrows(CheckException.class, () -> check("""
                 module m
-                type Percentage = Int(0..100)
+                type Ratio = Int(0..100)
                 service S {
-                  f(p Percentage) -> Int
+                  f(p Ratio) -> Int
                     intent  "x"
                     example f(150) -> 1
                 }
@@ -351,15 +391,15 @@ class TypeCheckerTest {
     void namedTypesAreNominal() {
         CheckException e = assertThrows(CheckException.class, () -> check("""
                 module m
-                type Percentage = Int(0..100)
-                type Quantity   = Int(1..)
+                type Ratio    = Int(0..100)
+                type Quantity = Int(1..)
                 service S {
-                  f(p Percentage, q Quantity) -> Bool
+                  f(p Ratio, q Quantity) -> Bool
                     intent   "x"
                     requires p == q
                 }
                 """));
-        assertTrue(e.getMessage().contains("Percentage"), e.getMessage());
+        assertTrue(e.getMessage().contains("Ratio"), e.getMessage());
     }
 
     @Test

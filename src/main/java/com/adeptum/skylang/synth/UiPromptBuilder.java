@@ -172,6 +172,9 @@ public final class UiPromptBuilder {
                     case "Instant" -> "<f:converter converterId=\"sky.instant\"/>";
                     case "Email" -> "<f:validateRegex pattern=\""
                             + com.adeptum.skylang.types.Builtins.EMAIL_REGEX + "\"/>";
+                    case "Currency" -> "<f:validateRegex pattern=\""
+                            + com.adeptum.skylang.types.Builtins.CURRENCY_REGEX + "\"/>";
+                    case "Percentage" -> "<f:validateLongRange minimum=\"0\" maximum=\"100\"/>";
                     default -> "";
                 };
             }

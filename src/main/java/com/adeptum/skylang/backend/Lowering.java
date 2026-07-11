@@ -81,8 +81,8 @@ public final class Lowering {
             return javaName(declared.base(), types);
         }
         return switch (name) {
-            case "Int" -> "long";
-            case "Text", "Email" -> "String";
+            case "Int", "Percentage" -> "long";
+            case "Text", "Email", "Currency" -> "String";
             case "Bool" -> "boolean";
             case "Instant" -> "java.time.Instant";
             default -> name;   // Money, Bytes, and entities map to their staged class
@@ -251,8 +251,9 @@ public final class Lowering {
             case Ast.GenericType g -> g.name();
         };
         return switch (literal) {
-            case Ast.IntLit ignored -> base.equals("Int");
-            case Ast.StrLit ignored -> base.equals("Text") || base.equals("Email");
+            case Ast.IntLit ignored -> base.equals("Int") || base.equals("Percentage");
+            case Ast.StrLit ignored -> base.equals("Text") || base.equals("Email")
+                    || base.equals("Currency");
             case Ast.BoolLit ignored -> base.equals("Bool");
             case Ast.MoneyLit ignored -> base.equals("Money");
             default -> false;
@@ -348,6 +349,13 @@ public final class Lowering {
                 }
                 if (ref.name().equals("Email")) {
                     yield matchesCheck(var, Builtins.EMAIL_REGEX, label, "Email");
+                }
+                if (ref.name().equals("Currency")) {
+                    yield matchesCheck(var, Builtins.CURRENCY_REGEX, label, "Currency");
+                }
+                if (ref.name().equals("Percentage")) {
+                    yield rangeCheck(var, "Int", java.util.OptionalLong.of(0),
+                            java.util.OptionalLong.of(100), label, "Percentage");
                 }
                 Ast.TypeDecl d = types.get(ref.name());
                 if (d == null) {
@@ -453,10 +461,11 @@ public final class Lowering {
             };
         }
         return switch (ref.name()) {
-            case "Int" -> "1L";
+            case "Int", "Percentage" -> "1L";
             case "Text" -> "\"x\"";
             case "Bool" -> "true";
             case "Email" -> "\"a@example.com\"";
+            case "Currency" -> "\"EUR\"";
             case "Money" -> "Money.of(\"1\", \"EUR\")";
             case "Instant" -> "java.time.Instant.parse(\"2026-01-01T00:00:00Z\")";
             case "Bytes" -> "Bytes.ofUtf8(\"x\")";

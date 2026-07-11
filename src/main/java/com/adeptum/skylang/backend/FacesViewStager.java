@@ -203,6 +203,7 @@ public final class FacesViewStager {
             case "Money" -> "9.99 EUR";
             case "Instant" -> "2026-01-01T00:00:00Z";
             case "Email" -> "a@example.com";
+            case "Currency" -> "EUR";
             case "Text" -> "sample";
             default -> "1";
         };

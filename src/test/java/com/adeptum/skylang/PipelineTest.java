@@ -443,6 +443,31 @@ class PipelineTest {
     }
 
     @Test
+    void builtinRefinementsGuardTheEntityConstructor(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Country { code Text @id  currency Currency  vatRate Percentage }
+                service Geo {
+                  reprice(c Country, rate Percentage) -> Country
+                    intent "Return a copy with the new VAT rate."
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+
+        int code = new Pipeline(new StubLlm("return new Country(c.code(), c.currency(), rate);"),
+                ALWAYS_PASS).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code);
+        String country = Files.readString(
+                root.resolve("build/jvm-jakarta/src/main/java/shop/Country.java"));
+        assertTrue(country.contains("matches"),
+                "Currency lowers to a validated three-letter code:\n" + country);
+        assertTrue(country.contains("vatRate < 0L") && country.contains("vatRate > 100L"),
+                "Percentage lowers to a 0..100 guard:\n" + country);
+    }
+
+    @Test
     void secondBuildReusesFrozenBodyWithoutCallingModel(@TempDir Path root) {
         Ast.Module module = checkedModule();
         Path lock = root.resolve("sky.lock");

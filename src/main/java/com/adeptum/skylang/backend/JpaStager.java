@@ -371,10 +371,13 @@ public final class JpaStager {
     /** Classify a base name: a primitive kind, "values", "relation", or component (default). */
     private static String kindOf(String base, Ast.Module module) {
         switch (base) {
-            case "Int", "Bool", "Money", "Instant", "Bytes" -> {
+            case "Bool", "Money", "Instant", "Bytes" -> {
                 return base;
             }
-            case "Text", "Email" -> {
+            case "Int", "Percentage" -> {
+                return "Int";
+            }
+            case "Text", "Email", "Currency" -> {
                 return "Text";
             }
             default -> {

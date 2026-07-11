@@ -40,6 +40,7 @@ public final class PromptBuilder {
             - Output ONLY the Java statements that go inside the method body — no signature, no class,
               no markdown fences, no commentary.
             - Type lowering: Int -> long, Text -> String, Bool -> boolean, Email -> String,
+              Currency -> String (a three-letter code), Percentage -> long (0..100),
               Instant -> java.time.Instant, Maybe<T> -> java.util.Optional<T>,
               List/Set/Map -> java.util.List/Set/Map, and each entity to a Java record whose
               components are its fields in declaration order (accessed via component methods, e.g. p.stock()).

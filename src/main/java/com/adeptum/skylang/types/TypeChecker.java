@@ -202,7 +202,6 @@ public final class TypeChecker {
                     throw new CheckException("@unique is not valid on " + ty + " fields ("
                             + e.name() + "." + f.name() + ")");
                 }
-                f.defaultValue().ifPresent(v -> checkDefault(where, v, ty));
                 if (fields.put(f.name(), ty) != null) {
                     throw new CheckException("duplicate field '" + e.name() + "." + f.name() + "'");
                 }
@@ -217,6 +216,14 @@ public final class TypeChecker {
             requiredFields.put(e.name(), required);
             if (e.fields().stream().anyMatch(Ast.Field::id)) {
                 identified.add(e.name());
+            }
+        }
+        // Defaults are checked only after every value set is registered, so a field may
+        // default to a constant of an entity declared later in the file (role Role = Role.Member).
+        for (Ast.Entity e : module.entities()) {
+            for (Ast.Field f : e.fields()) {
+                String where = "field '" + e.name() + "." + f.name() + "'";
+                f.defaultValue().ifPresent(v -> checkDefault(where, v, entities.get(e.name()).get(f.name())));
             }
         }
     }
