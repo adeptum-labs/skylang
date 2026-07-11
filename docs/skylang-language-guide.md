@@ -773,8 +773,3 @@ Commands report the kind of failure through the exit code, so a CI job can act o
 7. **No null.** Absence is `Maybe<T>`; invariants live in refined types.
 8. **The core is target-independent.** Profiles supply the lowering, the frameworks, and
    the backend — never the semantics.
-
----
-
-*This document describes the language as imagined. It is a design sketch, not yet an
-implementation — the next step is to turn it into a concrete spec and a compiler plan.*
