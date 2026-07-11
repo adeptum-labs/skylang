@@ -313,26 +313,50 @@ catch toolchain or rendering drift.
 ## Credentials (build-time only)
 
 The model connection goes through **LangChain4j**, so synthesis can run against **OpenAI or
-Anthropic**. Configure it once with `sky onboard`:
+Anthropic**. Configure it once with `sky onboard`, which prompts for the provider, model,
+reasoning effort, and key (defaults shown in brackets, `Enter` accepts):
 
 ```sh
-sky onboard --provider anthropic --api-key sk-ant-...   # or: --provider openai --api-key sk-...
-# or just `sky onboard` and answer the prompts
+sky onboard
+#   Provider (anthropic / openai): anthropic
+#   Model [claude-opus-4-8]:                       # Enter for the provider default
+#   Reasoning effort (low / medium / high) [high]: # any provider value; Enter for high
+#   API key: ****
+# non-interactive equivalent:
+sky onboard --provider anthropic --model claude-opus-4-8 --reasoning-effort high --api-key sk-ant-...
 ```
 
-This validates the key with a small live call and writes `~/.sky/config` (mode `600`):
+It validates the key with a small live call (skip with `--no-validate`) and writes
+`~/.sky/config` (mode `600`):
 
 ```
 provider=anthropic
 model=claude-opus-4-8
+reasoning_effort=high
 api_key=sk-ant-...
 ```
 
-`sky build` resolves credentials in this order:
+**Changing settings later** — re-run `sky onboard` (it offers the current values as defaults and
+keeps the key on a blank line), or change one thing in place, reusing the stored provider and key:
 
-1. `~/.sky/config` (written by `sky onboard`) — provider + model + key.
-2. Otherwise the environment: `ANTHROPIC_API_KEY` **or** `OPENAI_API_KEY` (setting both is an
-   error — onboard or unset one); `SKY_MODEL` overrides the default model.
+```sh
+sky onboard --model gpt-5                 # switch model only
+sky onboard --reasoning-effort medium     # switch effort only
+sky onboard --show                        # print each key and the source it resolved from
+```
+
+**Reasoning effort** is a free value, not a fixed set — `low`/`medium`/`high`, OpenAI's `minimal`,
+a model-specific tier, or a bare Anthropic thinking budget. It drives OpenAI's `reasoning_effort`
+and Anthropic's extended-thinking budget; the provider is the authority on what it accepts.
+Requests self-heal across model generations: a model that rejects `reasoning_effort`, extended
+thinking, or the `max_tokens`/`max_completion_tokens` spelling has just that parameter dropped and
+the call retried.
+
+**Resolution is per key**: the configuration file wins for any key it defines, and the environment
+fills only the gaps — so removing a key from the file lets its variable take effect. `sky onboard
+--show` prints each resolved key with its source and flags a variable the file overrides. The
+recognised variables are `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (provider + key; setting both
+without a file provider is an error), `SKY_MODEL`, and `SKY_REASONING_EFFORT`.
 
 Both routes use pay-as-you-go API billing for the chosen provider. A Claude **Pro/Max
 subscription does not cover** these calls — that billing is reserved for Anthropic's first-party
@@ -352,4 +376,4 @@ build needs none.
 | `.../freeze/` | `sky.lock` read/write + spec hashing |
 | `.../backend/` | JVM profile: type/expression lowering + project stager |
 | `.../Pipeline.java` | orchestrates synthesize → stage → verify → freeze |
-| `.../cli/` | picocli commands (`check`, `build`) |
+| `.../cli/` | picocli commands: `onboard`, `check`, `build`, `preview`, `tdd`, `freeze`, `why`, `test`, `clean` |

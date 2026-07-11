@@ -632,21 +632,53 @@ Two invariants hold the design together:
 
 ## 13. Tooling sketch
 
-| Command          | Does                                                                    |
-|------------------|-------------------------------------------------------------------------|
-| `sky build`      | Type-check, synthesize/verify unfrozen bodies, emit the target artifact |
-| `sky check`      | Hard-layer type + contract check only; no synthesis (fast, offline)     |
-| `sky tdd`        | Watch mode: on a new/edited failing test, regenerate just that method until its tests + contracts are green, then freeze — the red→generate→green loop made native |
-| `sky freeze`     | Force-regenerate and re-verify all bodies, rewriting `sky.lock`         |
-| `sky clean`      | Delete the build directory; the next build re-materializes it from sources + `sky.lock` |
-| `sky why <m>`    | Show the intent, contracts, frozen body, and verification report for a method |
-| `sky test`       | Run all `example`/`spec` cases and `ensures` properties as a test suite |
+| Command             | Does                                                                    | Needs a model? |
+|---------------------|-------------------------------------------------------------------------|----------------|
+| `sky onboard`       | Configure the provider, model, reasoning effort, and key; writes `~/.sky/config` | no |
+| `sky check`         | Hard-layer type + contract check only; no synthesis (fast, offline)     | no |
+| `sky build`         | Type-check, synthesize/verify unfrozen bodies, emit the target artifact | only on a cache miss |
+| `sky preview`       | Serve the module's views live in a browser studio (default port 4599)   | no |
+| `sky tdd`           | Watch mode: on a new/edited failing test, regenerate just that method until its tests + contracts are green, then freeze — the red→generate→green loop made native | yes |
+| `sky freeze`        | Force-regenerate and re-verify all bodies, rewriting `sky.lock`         | yes |
+| `sky clean`         | Delete the build directory; the next build re-materializes it from sources + `sky.lock` | no |
+| `sky why <m>`       | Show the intent, contracts, frozen body, and verification report for a method | no |
+| `sky test`          | Run all `example`/`spec` cases and `ensures` properties as a test suite | no |
 
-`sky check` is the fast inner-loop command — it validates everything in the hard layer (types,
-refinements, effects, contract well-formedness) without touching the model, so editing
-signatures stays instant.
+Every command answers `--help` (`-h`). `sky check` is the fast inner-loop command — it validates
+everything in the hard layer (types, refinements, effects, contract well-formedness) without
+touching the model, so editing signatures stays instant. A model is contacted only when a body
+genuinely has to be generated; everything that reads the sources or the frozen lock is offline.
 
 The active profile is declared in `sky.project` (§11) and shown in the `sky build` output.
+
+### 13.1 Configuration and credentials
+
+`sky onboard` prompts for the provider (`anthropic`/`openai`), the model (default shown),
+the reasoning effort, and the key, validates the key with a small live call, and writes
+`~/.sky/config` (mode `600`). Re-running it edits an existing config — the current values come
+back as defaults and the key is kept on a blank line — or change one thing in place with
+`sky onboard --model NAME` / `--reasoning-effort VALUE`, reusing the stored provider and key.
+
+**Reasoning effort** is a free value, not a fixed set: `low`/`medium`/`high`, OpenAI's `minimal`,
+a model-specific tier, or a bare Anthropic thinking budget. It drives OpenAI's `reasoning_effort`
+and Anthropic's extended-thinking budget, and the provider decides what it accepts. Onboarding
+defaults it to `high`.
+
+**Resolution is per key**: the configuration file wins for any key it defines, and the environment
+fills only the gaps (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, `SKY_MODEL`, `SKY_REASONING_EFFORT`) —
+so removing a key from the file lets its variable take effect. `sky onboard --show` prints each
+resolved key with the source it came from, and flags a variable the file silently overrides.
+
+### 13.2 Exit codes
+
+Commands report the kind of failure through the exit code, so a CI job can act on it:
+
+| Exit | Meaning                                                                        |
+|------|-------------------------------------------------------------------------------|
+| `0`  | success — the command completed and all checks passed                          |
+| `1`  | a hard-layer error (type, contract well-formedness, effect, dependency)        |
+| `2`  | a verification failure — a body could not satisfy its contracts/examples/policies |
+| `3`  | a configuration or provider error — generation could not reach a model         |
 
 ---
 
