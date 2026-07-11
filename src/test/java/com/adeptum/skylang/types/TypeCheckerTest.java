@@ -101,6 +101,53 @@ class TypeCheckerTest {
     }
 
     @Test
+    void maybeReturnsAcceptNothingAndInnerValues() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity Review { id Int @id  rating Int }
+                service Reviews uses db {
+                  averageRating(id Int) -> Maybe<Int>
+                    intent  "The average star rating, or nothing if unreviewed."
+                    example averageRating(1) -> 3
+                    example averageRating(2) -> nothing
+                }
+                """));
+    }
+
+    @Test
+    void nothingNeedsAMaybeReturn() {
+        CheckException e = assertThrows(CheckException.class, () -> check(service("""
+                  f(x Int) -> Int
+                    example f(1) -> nothing
+                """)));
+        assertTrue(e.getMessage().contains("only a Maybe can be absent"), e.getMessage());
+    }
+
+    @Test
+    void whoseResultsTypeAgainstTheReturnedEntity() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity OrderStatus { name Text @id  values Draft, Placed }
+                entity Order { id Int @id  status OrderStatus = OrderStatus.Draft  placedAt Maybe<Instant> }
+                service Orders uses db, clock {
+                  place(id Int) -> Order
+                    intent  "Place the order."
+                    example place(1) -> an order whose status is Placed and whose placedAt is set
+                }
+                """));
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module shop
+                entity Order { id Int @id  total Int }
+                service Orders uses db {
+                  place(id Int) -> Order
+                    intent  "Place."
+                    example place(1) -> an order whose total is set
+                }
+                """));
+        assertTrue(e.getMessage().contains("'is set' needs a Maybe field"), e.getMessage());
+    }
+
+    @Test
     void rejectsUnknownType() {
         CheckException e = assertThrows(CheckException.class, () -> check(service("""
                   f(x Widget) -> Int

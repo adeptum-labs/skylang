@@ -611,6 +611,14 @@ public final class Pipeline {
             case Ast.ExprResult er -> Lowering.skyText(er.value());
             case Ast.EntityResult ent -> "a " + ent.typeName() + " with " + fieldsText(ent.fields());
             case Ast.FieldsResult fr -> fieldsText(fr.fields());
+            case Ast.NothingResult ignored -> "nothing";
+            case Ast.WhoseResult wr -> "a " + wr.typeName() + " whose " + wr.expects().stream()
+                    .map(e -> e.field() + switch (e.kind()) {
+                        case EQUALS -> " is " + Lowering.skyText(e.value().orElseThrow());
+                        case NOT_EQUALS -> " is not " + Lowering.skyText(e.value().orElseThrow());
+                        case IS_SET -> " is set";
+                    })
+                    .collect(java.util.stream.Collectors.joining(" and whose "));
         };
     }
 

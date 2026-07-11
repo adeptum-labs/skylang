@@ -657,6 +657,45 @@ class ParsingTest {
     }
 
     @Test
+    void nothingAndWhoseResultsParse() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text }
+                service Catalog uses db {
+                  find(id Int) -> Maybe<Product>
+                    intent  "The product with that id, if one exists."
+                    example find(999) -> nothing
+                  first() -> Product
+                    intent  "The first product."
+                    example first() -> a Product whose name is "Notebook" and whose id is not 0
+                }
+                """, "shop.sky");
+        Ast.Method find = m.services().get(0).methods().get(0);
+        assertInstanceOf(Ast.NothingResult.class, find.examples().get(0).result());
+        Ast.Method first = m.services().get(0).methods().get(1);
+        Ast.WhoseResult whose = (Ast.WhoseResult) first.examples().get(0).result();
+        assertEquals("Product", whose.typeName());
+        assertEquals(Ast.WhoseKind.EQUALS, whose.expects().get(0).kind());
+        assertEquals(Ast.WhoseKind.NOT_EQUALS, whose.expects().get(1).kind());
+    }
+
+    @Test
+    void whosePlacedAtIsSetParsesAsPresence() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Order { id Int  placedAt Maybe<Instant> }
+                service Orders uses db {
+                  place(o Order) -> Order
+                    intent  "Place it."
+                    example place(Order(1, Maybe.nothing)) -> an Order whose placedAt is set
+                }
+                """, "shop.sky");
+        Ast.WhoseResult whose = (Ast.WhoseResult)
+                m.services().get(0).methods().get(0).examples().get(0).result();
+        assertEquals(Ast.WhoseKind.IS_SET, whose.expects().get(0).kind());
+    }
+
+    @Test
     void parsesNativeTsBlocksWithTheirKeyword() {
         Ast.Module m = Parsing.parse("""
                 module t

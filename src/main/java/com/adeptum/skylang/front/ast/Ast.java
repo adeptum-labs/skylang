@@ -318,12 +318,30 @@ public final class Ast {
 
     // ----- example results ---------------------------------------------------
 
-    public sealed interface Result permits ExprResult, EntityResult, RaisesResult, FieldsResult {
+    public sealed interface Result
+            permits ExprResult, EntityResult, RaisesResult, FieldsResult, NothingResult, WhoseResult {
     }
 
     /** {@code -> raises BadInput} — the call must raise the named error. */
     public record RaisesResult(String error) implements Result {
     }
+
+    /** {@code -> nothing} — the absent case of a {@code Maybe} return. */
+    public record NothingResult() implements Result {
+    }
+
+    /**
+     * {@code -> a User whose email is "a@b.com" and whose password is not "raw"} — assertions
+     * on the result's fields by name: equality, negated equality, or presence of a Maybe.
+     */
+    public record WhoseResult(String typeName, List<WhoseExpect> expects) implements Result {
+    }
+
+    /** One {@code whose <field> is ...} assertion; {@code value} is empty for {@code is set}. */
+    public record WhoseExpect(String field, WhoseKind kind, Optional<Expr> value) {
+    }
+
+    public enum WhoseKind { EQUALS, NOT_EQUALS, IS_SET }
 
     /** {@code -> stock 8} — field expectations on the result, without naming its type. */
     public record FieldsResult(List<FieldExpect> fields) implements Result {

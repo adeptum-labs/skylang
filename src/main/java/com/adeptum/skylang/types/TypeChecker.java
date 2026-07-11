@@ -948,7 +948,10 @@ public final class TypeChecker {
             case Ast.ExprResult er -> {
                 String resultWhere = where + " example result";
                 Ty rt = infer(er.value(), Map.of(), resultWhere);
-                fits(resultWhere, er.value(), rt, returnType);
+                // A value against a Maybe return is the present case; it fits the inner type.
+                Ty target = returnType instanceof Ty.GenericTy g && g.kind().equals("Maybe")
+                        ? g.args().get(0) : returnType;
+                fits(resultWhere, er.value(), rt, target);
             }
             case Ast.EntityResult ent -> {
                 if (!(returnType instanceof Ty.EntityTy et) || !ent.typeName().equals(et.name())
@@ -969,6 +972,58 @@ public final class TypeChecker {
                     fits(feWhere, fe.expected(), valTy, fieldTy);
                 }
             }
+            case Ast.NothingResult ignored -> {
+                if (!(returnType instanceof Ty.GenericTy g) || !g.kind().equals("Maybe")) {
+                    throw new CheckException(where + " example expects nothing, but the method"
+                            + " returns " + returnType + " — only a Maybe can be absent");
+                }
+            }
+            case Ast.WhoseResult wr -> checkWhoseResult(where, wr, returnType);
+        }
+    }
+
+    /** {@code -> a User whose email is ...}: the fields exist and every expectation types. */
+    private void checkWhoseResult(String where, Ast.WhoseResult wr, Ty returnType) {
+        if (!(returnType instanceof Ty.EntityTy et) || !et.name().equalsIgnoreCase(wr.typeName())
+                || !entities.containsKey(et.name())) {
+            throw new CheckException(where + " example expects a " + wr.typeName()
+                    + " but the method returns " + returnType);
+        }
+        Map<String, Ty> fields = entities.get(et.name());
+        for (Ast.WhoseExpect we : wr.expects()) {
+            Ty fieldTy = fields.get(we.field());
+            if (fieldTy == null) {
+                throw new CheckException(where + " example refers to unknown field '"
+                        + et.name() + "." + we.field() + "'" + didYouMean(we.field(), fields.keySet()));
+            }
+            String feWhere = where + " example field '" + we.field() + "'";
+            if (we.kind() == Ast.WhoseKind.IS_SET) {
+                if (!(fieldTy instanceof Ty.GenericTy m && m.kind().equals("Maybe"))) {
+                    throw new CheckException(feWhere + ": 'is set' needs a Maybe field, not " + fieldTy);
+                }
+                continue;
+            }
+            Ast.Expr value = we.value().orElseThrow();
+            if (value instanceof Ast.NameExpr n && fieldTy instanceof Ty.EntityTy fieldEntity
+                    && valueSets.containsKey(fieldEntity.name())) {
+                // A bare constant qualifies against the field's closed value set: Placed, Member.
+                if (!valueSets.get(fieldEntity.name()).contains(n.name())) {
+                    throw new CheckException(feWhere + ": " + fieldEntity.name()
+                            + " has no value '" + n.name() + "'");
+                }
+                continue;
+            }
+            Ty valTy = infer(value, Map.of(), feWhere);
+            if (fieldTy instanceof Ty.GenericTy secret && secret.kind().equals("Secret")) {
+                // The comparison is against the revealed value; text against Secret<Bytes> is
+                // the not-the-raw-password idiom and compares byte forms.
+                Ty inner = secret.args().get(0);
+                if (!(inner.erased().equals(Ty.BYTES) && valTy.erased().equals(Ty.TEXT))) {
+                    fits(feWhere, value, valTy, inner);
+                }
+                continue;
+            }
+            fits(feWhere, value, valTy, fieldTy);
         }
     }
 

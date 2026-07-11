@@ -292,6 +292,10 @@ public final class TsStager {
             case Ast.EntityResult ent -> appendFieldAsserts(sb, ent.fields());
             case Ast.FieldsResult fr -> appendFieldAsserts(sb, fr.fields());
             case Ast.RaisesResult rr -> throw new IllegalStateException("raises returned above");
+            case Ast.NothingResult ignored -> throw new CheckException(
+                    "Maybe results are not yet supported by the ts-node profile");
+            case Ast.WhoseResult ignored -> throw new CheckException(
+                    "whose-results are not yet supported by the ts-node profile");
         }
         sb.append("});\n");
         return sb.toString();

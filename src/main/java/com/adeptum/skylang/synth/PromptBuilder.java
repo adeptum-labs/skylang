@@ -228,6 +228,14 @@ public final class PromptBuilder {
                         .collect(Collectors.joining(" and "));
                 yield "a " + ent.typeName() + (fields.isEmpty() ? "" : " with " + fields);
             }
+            case Ast.NothingResult ignored -> "nothing";
+            case Ast.WhoseResult wr -> "a " + wr.typeName() + " whose " + wr.expects().stream()
+                    .map(we -> we.field() + switch (we.kind()) {
+                        case EQUALS -> " is " + sky(we.value().orElseThrow());
+                        case NOT_EQUALS -> " is not " + sky(we.value().orElseThrow());
+                        case IS_SET -> " is set";
+                    })
+                    .collect(Collectors.joining(" and whose "));
         };
     }
 

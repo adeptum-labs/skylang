@@ -68,7 +68,11 @@ public final class SupportClasses {
                         case Ast.ExprResult er -> addExpr(er.value(), used);
                         case Ast.EntityResult er -> er.fields().forEach(fe -> addExpr(fe.expected(), used));
                         case Ast.FieldsResult fr -> fr.fields().forEach(fe -> addExpr(fe.expected(), used));
+                        case Ast.WhoseResult wr -> wr.expects().forEach(
+                                we -> we.value().ifPresent(v -> addExpr(v, used)));
                         case Ast.RaisesResult ignored -> {
+                        }
+                        case Ast.NothingResult ignored -> {
                         }
                     }
                 }

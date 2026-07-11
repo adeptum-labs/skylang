@@ -114,11 +114,14 @@ raisesCondition
     ;
 
 exampleResult
-    : ID ID withClause?                               # entityResult   // "a" TypeName ["with" ...]
+    : ID ID whosePart (AND whosePart)*                # whoseResult    // "a" User whose email is ...
+    | ID ID withClause?                               # entityResult   // "a" TypeName ["with" ...]
     | RAISES ID                                       # raisesResult   // -> raises BadInput
     | fieldExpect ((ID | AND | COMMA) fieldExpect)*   # fieldsResult   // -> stock 8
-    | expr                                            # exprResult     // e.g. -> 5
+    | expr                                            # exprResult     // e.g. -> 5 | -> nothing
     ;
+
+whosePart : ID ID IS NOT? expr ;   // "whose" field is [not] value; the value "set" means present
 
 withClause  : ID fieldExpect ((ID | AND | COMMA) fieldExpect)* ;  // "with" f v ("and"|",") ...
 fieldExpect : ID expr ;                                     // "stock 8"  =>  field == value

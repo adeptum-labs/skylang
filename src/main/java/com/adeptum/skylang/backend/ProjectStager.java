@@ -725,14 +725,64 @@ public final class ProjectStager {
         switch (ex.result()) {
             case Ast.RaisesResult rr ->
                     throw new IllegalStateException("raises results return before the call");
-            case Ast.ExprResult er -> sb.append("        assertEquals(")
-                    .append(Lowering.javaValue(er.value(), values)).append(", result, \"example result\");\n");
+            case Ast.ExprResult er -> {
+                String value = Lowering.javaValue(er.value(), values);
+                boolean maybe = m.returnType() instanceof Ast.GenericType g && g.name().equals("Maybe");
+                sb.append("        assertEquals(")
+                        .append(maybe ? "java.util.Optional.of(" + value + ")" : value)
+                        .append(", result, \"example result\");\n");
+            }
+            case Ast.NothingResult ignored ->
+                    sb.append("        assertTrue(result.isEmpty(), \"example: nothing\");\n");
             case Ast.EntityResult ent -> appendFieldAsserts(sb, ent.fields(), values);
             case Ast.FieldsResult fr -> appendFieldAsserts(sb, fr.fields(), values);
+            case Ast.WhoseResult wr -> appendWhoseAsserts(sb, wr, module, values);
         }
 
         sb.append("    }\n");
         return sb.toString();
+    }
+
+    /** {@code whose <field> is ...} assertions: equality, negated equality, or Maybe presence. */
+    private static void appendWhoseAsserts(StringBuilder sb, Ast.WhoseResult wr, Ast.Module module,
+                                           java.util.Set<String> values) {
+        Ast.Entity entity = module.entities().stream()
+                .filter(e -> e.name().equalsIgnoreCase(wr.typeName()))
+                .findFirst().orElseThrow();
+        for (Ast.WhoseExpect we : wr.expects()) {
+            Ast.Field field = entity.fields().stream()
+                    .filter(f -> f.name().equals(we.field())).findFirst().orElseThrow();
+            if (we.kind() == Ast.WhoseKind.IS_SET) {
+                sb.append("        assertTrue(result.").append(we.field())
+                        .append("().isPresent(), \"example: ").append(we.field()).append(" is set\");\n");
+                continue;
+            }
+            String expected = whoseValue(we.value().orElseThrow(), field, values);
+            String actual = "result." + we.field() + "()"
+                    + (isSecret(field.type()) ? ".reveal()" : "");
+            sb.append(we.kind() == Ast.WhoseKind.EQUALS ? "        assertEquals("
+                            : "        assertNotEquals(")
+                    .append(expected).append(", ").append(actual)
+                    .append(", ").append(Lowering.javaString("example: " + we.field())).append(");\n");
+        }
+    }
+
+    /**
+     * The expected value of a whose-assertion, resolved against the field: a bare constant of
+     * a values entity qualifies (Placed -> OrderStatus.Placed), and a string compared to a
+     * revealed {@code Secret<Bytes>} becomes its byte form.
+     */
+    private static String whoseValue(Ast.Expr value, Ast.Field field, java.util.Set<String> values) {
+        if (value instanceof Ast.NameExpr n
+                && field.type() instanceof Ast.TypeRef ref && values.contains(ref.name())) {
+            return ref.name() + "." + n.name();
+        }
+        if (value instanceof Ast.StrLit s && field.type() instanceof Ast.GenericType g
+                && g.name().equals("Secret") && g.args().get(0) instanceof Ast.TypeRef inner
+                && inner.name().equals("Bytes")) {
+            return "Bytes.ofUtf8(" + Lowering.javaString(s.value()) + ")";
+        }
+        return Lowering.javaValue(value, values);
     }
 
     private static void appendFieldAsserts(StringBuilder sb, List<Ast.FieldExpect> fields,

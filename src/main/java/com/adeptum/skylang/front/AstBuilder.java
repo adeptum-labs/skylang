@@ -408,7 +408,12 @@ public final class AstBuilder {
 
     private Ast.Result result(SkyLangParser.ExampleResultContext ctx) {
         return switch (ctx) {
-            case SkyLangParser.ExprResultContext er -> new Ast.ExprResult(expr(er.expr()));
+            case SkyLangParser.ExprResultContext er -> {
+                Ast.Expr value = expr(er.expr());
+                // "nothing" is a soft keyword: the absent case of a Maybe return.
+                yield value instanceof Ast.NameExpr n && n.name().equals("nothing")
+                        ? new Ast.NothingResult() : new Ast.ExprResult(value);
+            }
             case SkyLangParser.RaisesResultContext rr -> new Ast.RaisesResult(rr.ID().getText());
             case SkyLangParser.FieldsResultContext fr -> {
                 List<Ast.FieldExpect> fields = new ArrayList<>();
@@ -419,6 +424,26 @@ public final class AstBuilder {
             }
             case SkyLangParser.EntityResultContext en ->
                     new Ast.EntityResult(en.ID(1).getText(), fieldExpects(en.withClause()));
+            case SkyLangParser.WhoseResultContext wr -> {
+                List<Ast.WhoseExpect> expects = new ArrayList<>();
+                for (SkyLangParser.WhosePartContext part : wr.whosePart()) {
+                    if (!part.ID(0).getText().equals("whose")) {
+                        throw new IllegalArgumentException("expected 'whose', got '"
+                                + part.ID(0).getText() + "'");
+                    }
+                    String field = part.ID(1).getText();
+                    Ast.Expr value = expr(part.expr());
+                    if (part.NOT() != null) {
+                        expects.add(new Ast.WhoseExpect(field, Ast.WhoseKind.NOT_EQUALS,
+                                Optional.of(value)));
+                    } else if (value instanceof Ast.NameExpr n && n.name().equals("set")) {
+                        expects.add(new Ast.WhoseExpect(field, Ast.WhoseKind.IS_SET, Optional.empty()));
+                    } else {
+                        expects.add(new Ast.WhoseExpect(field, Ast.WhoseKind.EQUALS, Optional.of(value)));
+                    }
+                }
+                yield new Ast.WhoseResult(wr.ID(1).getText(), expects);
+            }
             default -> throw new IllegalStateException("unhandled example result: " + ctx.getClass());
         };
     }

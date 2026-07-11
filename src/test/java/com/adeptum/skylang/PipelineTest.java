@@ -469,6 +469,48 @@ class PipelineTest {
     }
 
     @Test
+    void maybeAndWhoseResultsStageHonestAssertions(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity OrderStatus { name Text @id  values Draft, Placed }
+                entity Order { id Int @id  status OrderStatus = OrderStatus.Draft  placedAt Maybe<Instant> }
+                entity User { id Int @id  email Email @unique  password Secret<Bytes> }
+                service Reviews uses db {
+                  averageRating(id Int) -> Maybe<Int>
+                    intent  "The average rating, or nothing."
+                    example averageRating(1) -> nothing
+                  register(email Email, password Text) -> User
+                    intent  "Create a user, storing only a hash."
+                    example register("a@b.com", "hunter2-longpw!")
+                            -> a User whose email is "a@b.com"
+                               and whose password is not "hunter2-longpw!"
+                  place(id Int) -> Order
+                    intent  "Place the order."
+                    example place(1) -> an order whose status is Placed and whose placedAt is set
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code);
+        String tests = Files.readString(
+                root.resolve("build/jvm-jakarta/src/test/java/shop/ReviewsTest.java"));
+        assertTrue(tests.contains("assertTrue(result.isEmpty(), \"example: nothing\")"),
+                "-> nothing asserts the absent Maybe:\n" + tests);
+        assertTrue(tests.contains("assertEquals(\"a@b.com\", result.email()"),
+                "whose email is ... asserts equality:\n" + tests);
+        assertTrue(tests.contains(
+                "assertNotEquals(Bytes.ofUtf8(\"hunter2-longpw!\"), result.password().reveal()"),
+                "whose password is not ... compares the revealed bytes:\n" + tests);
+        assertTrue(tests.contains("assertEquals(OrderStatus.Placed, result.status()"),
+                "a bare constant qualifies against the field's value set:\n" + tests);
+        assertTrue(tests.contains("assertTrue(result.placedAt().isPresent()"),
+                "whose placedAt is set asserts presence:\n" + tests);
+    }
+
+    @Test
     void secondBuildReusesFrozenBodyWithoutCallingModel(@TempDir Path root) {
         Ast.Module module = checkedModule();
         Path lock = root.resolve("sky.lock");
