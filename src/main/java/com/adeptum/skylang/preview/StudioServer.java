@@ -44,9 +44,14 @@ public final class StudioServer implements AutoCloseable {
     private volatile int appPort;
 
     public StudioServer(int controlPort, int appPort, List<String> views, EditHandler handler) throws IOException {
+        this(controlPort, appPort, views, handler, false);
+    }
+
+    public StudioServer(int controlPort, int appPort, List<String> views, EditHandler handler,
+                        boolean structuredPanel) throws IOException {
         this.appPort = appPort;
         server = HttpServer.create(new InetSocketAddress("localhost", controlPort), 0);
-        String shell = shell(views);
+        String shell = shell(views, structuredPanel);
 
         // /health reports the live container port so the shell can re-frame after a hot reload.
         server.createContext("/health", exchange -> respond(exchange, 200, Integer.toString(this.appPort), "text/plain; charset=utf-8"));
@@ -133,14 +138,93 @@ public final class StudioServer implements AutoCloseable {
         return form;
     }
 
-    private static String shell(List<String> views) {
+    private static String shell(List<String> views, boolean structuredPanel) {
         String first = views.isEmpty() ? "" : views.get(0);
         StringBuilder nav = new StringBuilder();
         for (String view : views) {
             nav.append("<a onclick=\"select('").append(view).append("')\">").append(view).append("</a>\n");
         }
-        return TEMPLATE.replace("%NAV%", nav.toString()).replace("%FIRST%", first);
+        return TEMPLATE.replace("%NAV%", nav.toString()).replace("%FIRST%", first)
+                .replace("%PANEL%", structuredPanel ? PANEL_HTML : "")
+                .replace("%PANELJS%", structuredPanel ? PANEL_JS : "function loadSpec() {}");
     }
+
+    /** The control-panel aside (Phase 1): deterministic knobs for the selected view. */
+    private static final String PANEL_HTML = """
+            <aside class="panel" id="panel">
+                <h3>Controls <span id="pname"></span></h3>
+                <div id="pbody"><p class="hint">select a view</p></div>
+              </aside>""";
+
+    /** The panel's client logic: read /spec, render knobs, POST each change to /set. Uses event
+     *  delegation with data- attributes so there are no inline handlers to quote-escape. */
+    private static final String PANEL_JS = """
+            let spec = null;
+                async function loadSpec() {
+                  const body = document.getElementById('pbody');
+                  if (!body) return;
+                  try {
+                    const res = await fetch('/spec?view=' + encodeURIComponent(view));
+                    if (!res.ok) { body.innerHTML = '<p class="hint">no editable spec for this view</p>'; return; }
+                    spec = await res.json();
+                    spec.order = (spec.columnOrder || spec.columns).slice();
+                    document.getElementById('pname').textContent = spec.name;
+                    renderPanel();
+                  } catch (e) { body.innerHTML = '<p class="hint">' + e + '</p>'; }
+                }
+                function esc(s) {
+                  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+                }
+                function options(values, cur) {
+                  return '<option value=""></option>' + values.map(v =>
+                    '<option' + (v === cur ? ' selected' : '') + '>' + esc(v) + '</option>').join('');
+                }
+                function renderPanel() {
+                  let h = '<div class="grp"><div class="lbl">Columns <em>verified</em></div><ul class="cols">';
+                  spec.order.forEach((c, i) => h += '<li><span>' + esc(c) + '</span><span class="mv">'
+                    + '<button data-mv="-1" data-i="' + i + '">&#8593;</button>'
+                    + '<button data-mv="1" data-i="' + i + '">&#8595;</button></span></li>');
+                  h += '</ul></div>';
+                  h += '<div class="grp"><div class="lbl">Rows density <em>verified</em></div>'
+                    + '<select data-op="setRowsStyle">' + options(spec.styles, spec.rowsStyle) + '</select></div>';
+                  h += '<div class="grp"><div class="lbl">Table style <em>verified</em></div>'
+                    + '<select data-op="setTableStyle">' + options(spec.styles, spec.tableStyle) + '</select></div>';
+                  spec.actions.forEach(a => {
+                    const cur = (spec.placements.find(p => p.label === a) || {}).region || '';
+                    h += '<div class="grp"><div class="lbl">' + esc(a) + ' region <em>verified</em></div>'
+                      + '<select data-region="' + esc(a) + '">' + options(spec.regions, cur) + '</select></div>';
+                  });
+                  document.getElementById('pbody').innerHTML = h;
+                }
+                function moveCol(i, d) {
+                  const j = i + d; if (j < 0 || j >= spec.order.length) return;
+                  const t = spec.order[i]; spec.order[i] = spec.order[j]; spec.order[j] = t;
+                  setChange('setColumnOrder', 'columns=' + encodeURIComponent(spec.order.join(',')));
+                }
+                async function setChange(op, params) {
+                  status('applying...');
+                  const res = await fetch('/set', { method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'op=' + op + '&view=' + encodeURIComponent(view) + '&' + params });
+                  status(await res.text());
+                  shownPort = 0;
+                  loadSpec();
+                }
+                document.addEventListener('click', e => {
+                  const b = e.target.closest('[data-mv]');
+                  if (b) moveCol(parseInt(b.getAttribute('data-i'), 10), parseInt(b.getAttribute('data-mv'), 10));
+                });
+                document.addEventListener('change', e => {
+                  const t = e.target;
+                  if (t.matches('[data-op]')) {
+                    if (t.value) setChange(t.getAttribute('data-op'), 'value=' + encodeURIComponent(t.value));
+                  } else if (t.matches('[data-region]')) {
+                    const label = t.getAttribute('data-region');
+                    if (t.value) setChange('setActionRegion',
+                      'label=' + encodeURIComponent(label) + '&region=' + encodeURIComponent(t.value));
+                    else setChange('clearActionRegion', 'label=' + encodeURIComponent(label));
+                  }
+                });""";
 
     private static final String TEMPLATE = """
             <!doctype html>
@@ -161,6 +245,16 @@ public final class StudioServer implements AutoCloseable {
                 .edit button { padding: 0.45rem 0.9rem; border: 0; border-radius: 4px; cursor: pointer; background: #0d3b3b; color: #fff; }
                 .edit button.ghost { background: #cdd6d6; color: #143; }
                 .status { min-width: 16ch; font-size: 0.8rem; color: #345; }
+                .panel { width: 264px; background: #f6f8f8; border-left: 1px solid #cdd; padding: 0.75rem; overflow: auto; font-size: 0.85rem; }
+                .panel h3 { margin: 0 0 0.6rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #345; }
+                .panel .grp { margin-bottom: 0.8rem; }
+                .panel .lbl { color: #234; margin-bottom: 0.25rem; }
+                .panel .lbl em { font-style: normal; font-size: 0.68rem; color: #2a7d5a; background: #dff3e8; padding: 0 0.3rem; border-radius: 3px; margin-left: 0.25rem; }
+                .panel select { width: 100%; padding: 0.3rem; border: 1px solid #bcc; border-radius: 4px; font: inherit; }
+                .panel ul.cols { list-style: none; margin: 0; padding: 0; }
+                .panel ul.cols li { display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0.4rem; background: #fff; border: 1px solid #dde; border-radius: 4px; margin-bottom: 0.2rem; }
+                .panel .mv button { border: 0; background: #e3eaea; border-radius: 3px; cursor: pointer; margin-left: 0.15rem; padding: 0.1rem 0.35rem; }
+                .panel .hint { color: #789; }
               </style>
             </head>
             <body>
@@ -178,10 +272,11 @@ public final class StudioServer implements AutoCloseable {
                   <span class="status" id="status"></span>
                 </div>
               </main>
+              %PANEL%
               <script>
                 let view = "%FIRST%";
                 let shownPort = 0;
-                function select(next) { view = next; shownPort = 0; }
+                function select(next) { view = next; shownPort = 0; loadSpec(); }
                 function status(msg) { document.getElementById('status').textContent = msg; }
                 async function refresh() {
                   try {
@@ -210,7 +305,9 @@ public final class StudioServer implements AutoCloseable {
                   status(await res.text());
                   shownPort = 0;
                 }
+                %PANELJS%
                 refresh();
+                loadSpec();
               </script>
             </body>
             </html>

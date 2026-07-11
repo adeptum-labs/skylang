@@ -31,6 +31,7 @@ import java.net.http.HttpResponse;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StudioServerTest {
@@ -145,6 +146,26 @@ class StudioServerTest {
                     .POST(BodyPublishers.ofString("op=bogus&view=ProductList")).build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(400, bad.statusCode(), "an unknown op is a 400");
+        }
+    }
+
+    @Test
+    void includesTheControlPanelOnlyWhenEnabled() throws Exception {
+        assertTrue(shell(true).contains("class=\"panel\""), "the panel is present when enabled");
+        assertTrue(shell(true).contains("loadSpec"), "the panel JS is present when enabled");
+        assertTrue(shell(true).contains("Send"), "the natural-language bar stays alongside the panel");
+
+        assertFalse(shell(false).contains("class=\"panel\""), "the panel is absent by default");
+        assertTrue(shell(false).contains("function loadSpec() {}"), "loadSpec is a no-op when disabled");
+    }
+
+    private static String shell(boolean panel) throws Exception {
+        try (StudioServer studio = panel
+                ? new StudioServer(0, 0, List.of("ProductList"), EditHandler.NONE, true)
+                : new StudioServer(0, 0, List.of("ProductList"), EditHandler.NONE)) {
+            return HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + studio.port() + "/")).build(),
+                    HttpResponse.BodyHandlers.ofString()).body();
         }
     }
 }

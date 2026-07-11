@@ -94,7 +94,7 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
             this.savedSource = activeSource;
             this.lastAppliedSource = activeSource;
             this.container = stageAndLaunch(module, out, err);
-            this.studio = new StudioServer(controlPort, container.appPort(), viewNames(module), this);
+            this.studio = new StudioServer(controlPort, container.appPort(), viewNames(module), this, true);
             return new Handle(studio.port(), container.appPort());
         }
     }
