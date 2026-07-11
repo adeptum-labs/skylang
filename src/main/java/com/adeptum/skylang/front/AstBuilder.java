@@ -211,7 +211,7 @@ public final class AstBuilder {
             } else if (c instanceof SkyLangParser.RequiresClauseContext rc) {
                 requires.add(expr(rc.expr()));
             } else if (c instanceof SkyLangParser.EnsuresClauseContext ec) {
-                ensures.add(expr(ec.expr()));
+                ec.expr().forEach(e -> ensures.add(expr(e)));
             } else if (c instanceof SkyLangParser.ExampleClauseContext xc) {
                 examples.add(example(xc));
             } else if (c instanceof SkyLangParser.RaisesClauseContext rz) {

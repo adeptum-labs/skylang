@@ -90,7 +90,7 @@ type
 clause
     : INTENT STRING                                # intentClause
     | REQUIRES expr                                # requiresClause
-    | ENSURES expr                                 # ensuresClause
+    | ENSURES expr+                                # ensuresClause   // continuation lines join one keyword
     | EXAMPLE call (ON seed)? ARROW exampleResult  # exampleClause
     | RAISES ID WHEN raisesCondition               # raisesClause
     | SPEC STRING LBRACE (GIVEN expr)? WHEN call THEN thenAssert+ RBRACE  # specClause

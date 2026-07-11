@@ -639,6 +639,24 @@ class ParsingTest {
     }
 
     @Test
+    void ensuresContinuationLinesJoinOneKeyword() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text  stock Int @min(0) }
+                service Catalog {
+                  add(name Text, price Int) -> Product
+                    intent  "Create a product with zero initial stock."
+                    ensures result.stock == 0
+                            result.name  == name
+                            result.price == price
+                }
+                """, "shop.sky");
+        Ast.Method add = m.services().get(0).methods().get(0);
+        assertEquals(3, add.ensures().size(),
+                "continuation lines under one ensures keyword are separate clauses");
+    }
+
+    @Test
     void parsesNativeTsBlocksWithTheirKeyword() {
         Ast.Module m = Parsing.parse("""
                 module t
