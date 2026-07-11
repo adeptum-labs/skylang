@@ -153,6 +153,16 @@ public final class Pipeline {
             out.printf("  profile %s   (changed from %s; regenerating all bodies)%n%n",
                     profile.id(), lock.profileId());
         }
+        if (!retarget) {
+            out.println("  profile " + profile.id());
+        }
+        for (Resolved r : deps.declared()) {
+            out.println("  " + r.name() + " " + r.constraint() + " \u25b8 resolved to "
+                    + r.coordinates().get(0) + " (pinned)");
+        }
+        if (!deps.declared().isEmpty()) {
+            out.println();
+        }
         lock.setProfile(profile.id(), profile.version());
         Map<String, Lock.Dep> pinned = new LinkedHashMap<>();
         for (Resolved r : deps.declared()) {
@@ -231,7 +241,20 @@ public final class Pipeline {
         }
         boolean pureRecheck = recheck && !anyFresh && !anyViewFresh;
         if (pureRecheck) {
-            out.println("  reading " + units.size() + " frozen bodies from sky.lock ... no model calls");
+            StringBuilder reading = new StringBuilder("  reading " + units.size() + " frozen bodies");
+            if (!viewUnits.isEmpty()) {
+                reading.append(", ").append(viewUnits.size())
+                        .append(viewUnits.size() == 1 ? " page" : " pages");
+            }
+            if (!module.flows().isEmpty()) {
+                reading.append(", ").append(module.flows().size())
+                        .append(module.flows().size() == 1 ? " flow" : " flows");
+            }
+            if (!module.components().isEmpty()) {
+                reading.append(", ").append(module.components().size())
+                        .append(module.components().size() == 1 ? " component" : " components");
+            }
+            out.println(reading.append(" from sky.lock ... no model calls"));
         }
         if (anyFresh || anyViewFresh || recheck) {
             int attempts = 0;
@@ -274,7 +297,7 @@ public final class Pipeline {
             lock.save(lockPath);
         }
 
-        report(units, viewUnits, out);
+        report(module, units, viewUnits, out);
         module.flows().forEach(f ->
                 out.println("  flow " + f.name() + "   ▸ checked (walking arrives with its staging)"));
         module.components().forEach(c ->
@@ -455,13 +478,13 @@ public final class Pipeline {
     }
 
     /** The build transcript, in the shape the freeze model promises: per unit, one line. */
-    private void report(List<Unit> units, List<ViewUnit> viewUnits, PrintStream out) {
+    private void report(Ast.Module module, List<Unit> units, List<ViewUnit> viewUnits, PrintStream out) {
         int width = 24;
         for (Unit u : units) {
             width = Math.max(width, (u.service.name() + "." + u.method.name()).length());
         }
         for (ViewUnit u : viewUnits) {
-            width = Math.max(width, ("view " + u.view.name()).length());
+            width = Math.max(width, ("page " + u.view.name()).length());
         }
         for (Unit u : units) {
             String label = u.service.name() + "." + u.method.name();
@@ -483,15 +506,20 @@ public final class Pipeline {
                     counted(contracts, "contract"), counted(examples, "example"));
         }
         for (ViewUnit u : viewUnits) {
-            String label = "view " + u.view.name();
+            String label = "page " + u.view.name();
             if (!u.fresh) {
                 out.printf("  %-" + width + "s \u25b8 frozen @ %s   (unchanged)%n",
                         label, Hashing.shortHash(u.specHash));
             } else {
-                out.printf("  %-" + width + "s \u25b8 synthesized \u25b8 verified \u25b8 frozen @ %s%s%n",
+                out.printf("  %-" + width + "s \u25b8 synthesized \u25b8 verified \u25b8 frozen @ %s%s%s%n",
                         label, Hashing.shortHash(u.specHash),
-                        counted(u.view.expects().size(), "expectation"));
+                        counted(u.view.expects().size(), "expect"),
+                        counted(u.view.appears().size(), "appears"));
             }
+        }
+        for (Ast.Policy policy : module.policies()) {
+            out.println("  policy " + policy.name() + "   \u2713 checked against "
+                    + units.size() + (units.size() == 1 ? " body" : " bodies"));
         }
     }
 
