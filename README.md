@@ -226,12 +226,30 @@ line fails as `dependency 'x' used but not declared in requires`. Two small list
 `uses` clauses and the `requires` block, bound everything the program reaches beyond its own
 logic.
 
-Not yet implemented (deferred): `page`/`flow`, further whenever-forms (audited deletes,
-money conservation, layer boundaries), the python profile and its `py` native keyword, the
-rest of the ts-node envelope (Money/Instant/Bytes/Secret, refined types, policies, specs,
-seeding, views), property-based `ensures`, article-form example arguments (`a Gold member`),
-a Jakarta Mail binding for the `mail` effect, and persistence for `Map` fields and lists of
-identified entities.
+The specification vocabulary carries the worked-behaviour chapter. One `ensures` keyword
+takes a column of continuation clauses. A `Maybe<T>` return answers its examples with a
+value (the present case) or `-> nothing`, and results may be described by their fields —
+`-> a User whose email is "a@b.com" and whose password is not "raw"`, `whose placedAt is
+set` — with bare constants qualifying against a field's closed value set and Secrets
+compared through their revealed form. `ensures every product in result has category ==
+category` quantifies over a list (an absent `Maybe` field satisfies nothing), and `ensures
+result.password is a bcrypt hash` pins the hashed-storage idiom with a real `$2a/b/y$`
+check. Raises conditions add the transition-guard phrase (`when the order's status is
+Shipped or Cancelled`, resolved against the value set) and free prose (`when the provider
+declines the charge`) that names the failure for the reader and the model while examples
+pin the behaviour. Aggregates snapshot through `old(...)`, so a captured order total
+survives later price changes, and policies gain the posted form: `whenever a Review is
+posted require the author has purchased the product else raise NotAPurchaser`. See
+`examples/worked/` for the whole shop — fourteen methods, two policies, three effects —
+whose checkpoint matches the book's.
+
+Not yet implemented (deferred): `page`/`flow`, article-form example arguments and results
+(`place(a Draft order with 2 items)`, `id of a Placed order`, `-> that product`), further
+whenever-forms (audited deletes, money conservation, layer boundaries), the python profile
+and its `py` native keyword, the rest of the ts-node envelope (Money/Instant/Bytes/Secret,
+refined types, policies, specs, seeding, views, Maybe/whose results), property-based
+`ensures`, a Jakarta Mail binding for the `mail` effect, and persistence for `Map` fields
+and lists of identified entities.
 
 ## Build & run
 

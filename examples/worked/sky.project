@@ -1,2 +1,6 @@
 project shop
 profile jvm-jakarta
+
+requires {
+  bcrypt ^4.0
+}

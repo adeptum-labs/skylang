@@ -99,7 +99,7 @@ class CheckCommandTest {
 
         assertEquals(0, exit);
         String transcript = out.toString(StandardCharsets.UTF_8);
-        assertTrue(transcript.contains("services: Catalog (2 methods)"), transcript);
+        assertTrue(transcript.contains("services: Catalog (2)"), transcript);
         assertTrue(transcript.contains("contracts well-formed ..."), transcript);
     }
 

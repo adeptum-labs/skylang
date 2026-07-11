@@ -236,11 +236,29 @@ public final class TypeChecker {
      * owner, and each field shape must have a column form.
      */
     private void validatePersistability(Ast.Module module) {
+        // Only what can actually reach the store must map to it: rows (identified entities)
+        // and the components embedded in them. A value entity that only travels as a method
+        // argument — a Cart — never persists and owes the storage nothing.
+        java.util.Set<String> embedded = new java.util.HashSet<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(identified);
+        while (!queue.isEmpty()) {
+            for (Ty ty : entities.getOrDefault(queue.poll(), new LinkedHashMap<>()).values()) {
+                Ty element = ty instanceof Ty.GenericTy g && !g.args().isEmpty()
+                        ? g.args().get(0) : ty;
+                if (element instanceof Ty.EntityTy et && !identified.contains(et.name())
+                        && !valueSets.containsKey(et.name()) && embedded.add(et.name())) {
+                    queue.add(et.name());
+                }
+            }
+        }
         for (Ast.Entity e : module.entities()) {
             if (!e.values().isEmpty()) {
                 continue;   // a closed value set persists as its carrier text
             }
             boolean component = !identified.contains(e.name());
+            if (component && !embedded.contains(e.name())) {
+                continue;   // a pure value argument; nothing stores it
+            }
             for (Ast.Field f : e.fields()) {
                 checkPersistable("entity '" + e.name() + "." + f.name() + "'",
                         entities.get(e.name()).get(f.name()), component);

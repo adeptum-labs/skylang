@@ -84,9 +84,12 @@ public final class CheckCommand implements Callable<Integer> {
             System.out.println("  values: " + values);
         }
         if (!module.services().isEmpty()) {
-            System.out.println("  services: " + module.services().stream()
-                    .map(s -> s.name() + " (" + s.methods().size() + " method"
-                            + (s.methods().size() == 1 ? "" : "s") + ")")
+            System.out.print(spaced("  services: ", module.services().stream()
+                    .map(s -> s.name() + " (" + s.methods().size() + ")").toList()));
+        }
+        if (!module.policies().isEmpty()) {
+            System.out.println("  policies: " + module.policies().stream()
+                    .map(Ast.Policy::name)
                     .collect(java.util.stream.Collectors.joining(", ")));
         }
         if (!module.views().isEmpty()) {
@@ -107,6 +110,26 @@ public final class CheckCommand implements Callable<Integer> {
             System.out.printf("  %-30s ok%n", "contracts well-formed ...");
         }
         System.out.println("  no model calls; nothing generated.");
+    }
+
+    /** Space-separated pieces wrapped at a readable width, aligned under the first one. */
+    private static String spaced(String head, java.util.List<String> pieces) {
+        StringBuilder sb = new StringBuilder(head);
+        String indent = " ".repeat(head.length());
+        int column = head.length();
+        for (int i = 0; i < pieces.size(); i++) {
+            String piece = pieces.get(i);
+            if (column + piece.length() > 64 && column > head.length()) {
+                sb.append('\n').append(indent);
+                column = indent.length();
+            } else if (i > 0) {
+                sb.append("  ");
+                column += 2;
+            }
+            sb.append(piece);
+            column += piece.length();
+        }
+        return sb.append('\n').toString();
     }
 
     /** A comma list wrapped at a readable width, continuations aligned under the first item. */

@@ -52,3 +52,152 @@ entity Country {
 entity Category {
   name Text(1..60) @id
 }
+
+// ----- behaviour (the worked chapter's services) -----------------------------
+
+policy NoSecretsInLogs {
+  whenever a Secret is passed to a logger
+  forbid
+}
+
+policy ReviewsFromCustomersOnly {
+  whenever a Review is posted
+  require  the author has purchased the product
+  else     raise NotAPurchaser
+}
+
+entity NotFound { }
+entity OutOfStock { }
+entity AlreadyPlaced { }
+entity EmptyOrder { }
+entity DuplicateEmail { requested Email }
+entity AlreadyShipped { }
+entity NotCancellable { }
+entity PaymentFailed { }
+entity AlreadyReviewed { }
+entity NotAPurchaser { }
+
+service Catalog uses db {
+
+  all() -> [Product]
+    intent "List every product in the catalog."
+
+  add(name Text(1..120), price Money) -> Product
+    intent  "Create a product with zero initial stock and persist it."
+    ensures result.stock == 0
+            result.name  == name
+            result.price == price
+    example add("Notebook", 9.99eur) -> a Product with stock 0
+
+  restock(id Int, units Int) -> Product
+    intent   "Increase the stock of the product by units."
+    requires units > 0
+    raises   NotFound  when no product has that id
+    ensures  result.stock == old(result.stock) + units
+    example  restock(1, 3) on a Product with stock 5 -> stock 8
+
+  sell(id Int, quantity Quantity) -> Product
+    intent   "Reduce the product's stock by quantity, recording the sale."
+    raises   NotFound      when no product has that id
+    raises   OutOfStock    when quantity > the product's stock
+    ensures  result.stock == old(result.stock) - quantity
+    example  sell(1, 2) on a Product with stock 8 -> stock 6
+    example  sell(1, 8) on a Product with stock 8 -> stock 0
+    example  sell(1, 9) on a Product with stock 8 -> raises OutOfStock
+
+  find(id Int) -> Maybe<Product>
+    intent  "The product with that id, if one exists."
+    example find(999) -> nothing
+
+  inCategory(category Category) -> [Product]
+    intent  "Every product in the given category."
+    ensures every product in result has category == category
+
+  totalStockValue() -> Money
+    intent  "The sum of price times stock over all products."
+    ensures result == sum of (p.price * p.stock for p in all products)
+    example totalStockValue() -> 0eur
+}
+
+service Orders uses db, clock {
+
+  place(order Order) -> Order
+    intent  "Place a draft order: stamp placedAt and capture the total."
+    raises  AlreadyPlaced when the order is already Placed
+    raises  EmptyOrder    when the order has no items
+    ensures result.total == sum of (item.product.price * item.quantity
+                                    for item in old(order.items))
+
+  cancel(id Int) -> Order
+    intent   "Cancel a placed order."
+    raises   NotFound        when no order has that id
+    raises   AlreadyShipped  when the order's status is Shipped
+    raises   NotCancellable  when the order's status is Draft or Cancelled
+    ensures  result.status == OrderStatus.Cancelled
+             result.items  == old(result.items)
+             result.placedAt == old(result.placedAt)
+}
+
+service AccountService uses db {
+
+  register(email Email, password Text(12..)) -> User
+    intent  "Create a user, storing only a hash of the password."
+    raises  DuplicateEmail  when email already registered
+    ensures result.email == email
+            result.password is a bcrypt hash
+    example register("a@b.com", "hunter2-longpw!")
+            -> a User whose email is "a@b.com"
+               and whose password is not "hunter2-longpw!"
+}
+
+entity Cart {
+  items [LineItem]              // no @id: a cart is a value; the order is the entity
+}
+
+entity Receipt {
+  amount    Money
+  reference Text(1..64)         // the provider's transaction reference
+}
+
+service Payments uses http {
+
+  charge(customer User, amount Money) -> Receipt
+    intent  "Charge the customer's stored payment method for the amount."
+    raises  PaymentFailed when the provider declines the charge
+    ensures result.amount == amount
+}
+
+service CheckoutService uses db, clock {
+
+  place(cart Cart, customer User) -> Order
+    intent  "Turn a cart into a placed order: reserve stock for each line,
+             charge the customer, then create and place the order."
+    raises  OutOfStock     when any line's quantity exceeds available stock
+    raises  PaymentFailed  when the charge is declined
+    ensures result.status == OrderStatus.Placed
+            result.customer == customer
+}
+
+type Rating = Int(1..5)
+
+entity Review {
+  id       Int          @id
+  product  Product
+  author   User
+  rating   Rating
+  body     Text(1..2000)
+  postedAt Instant       = now
+}
+
+service Reviews uses db, clock {
+
+  post(product Product, author User, rating Rating, body Text(1..2000)) -> Review
+    intent  "Post a review, at most one per author per product."
+    raises  AlreadyReviewed when the author has already reviewed this product
+    ensures result.product == product and result.author == author
+            result.rating  == rating
+
+  averageRating(productId Int) -> Maybe<Int>
+    intent  "The average star rating for a product, or nothing if unreviewed."
+    example averageRating(999) -> nothing
+}

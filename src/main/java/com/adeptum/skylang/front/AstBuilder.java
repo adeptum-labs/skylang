@@ -261,18 +261,15 @@ public final class AstBuilder {
     private Ast.RaiseCondition raisesCondition(SkyLangParser.RaisesConditionContext ctx) {
         return switch (ctx) {
             case SkyLangParser.ExistenceConditionContext e -> {
-                if (!e.ID(0).getText().equals("no") || !e.ID(2).getText().equals("that")) {
-                    throw new IllegalArgumentException("unrecognized raises condition; say e.g."
-                            + " 'when no product has that id'");
-                }
-                yield new Ast.NoSuch(e.ID(1).getText(), e.ID(3).getText());
+                // A near-miss of the existence shape is ordinary prose, not an error.
+                yield e.ID(0).getText().equals("no") && e.ID(2).getText().equals("that")
+                        ? new Ast.NoSuch(e.ID(1).getText(), e.ID(3).getText())
+                        : new Ast.Prose(joinedWords(e));
             }
             case SkyLangParser.PhraseConditionContext p -> {
-                if (!p.ID(0).getText().equals("already") || !p.ID(1).getText().equals("registered")) {
-                    throw new IllegalArgumentException("unrecognized raises condition; say e.g."
-                            + " 'when email already registered'");
-                }
-                yield new Ast.AlreadyRegistered(expr(p.expr()));
+                yield p.ID(0).getText().equals("already") && p.ID(1).getText().equals("registered")
+                        ? new Ast.AlreadyRegistered(expr(p.expr()))
+                        : new Ast.Prose(joinedWords(p));
             }
             case SkyLangParser.ExprConditionContext c -> new Ast.CondExpr(expr(c.expr()));
             case SkyLangParser.StatusConditionContext sc -> {
@@ -287,7 +284,7 @@ public final class AstBuilder {
                 yield new Ast.StatusIs(sc.ID(1).getText(), sc.ID(2).getText(), states);
             }
             case SkyLangParser.ProseConditionContext pc ->
-                    new Ast.Prose(pc.getText().isEmpty() ? "" : joinedProse(pc));
+                    new Ast.Prose(joinedWords(pc));
             default -> throw new IllegalStateException("unhandled raises condition: " + ctx.getClass());
         };
     }
@@ -309,10 +306,10 @@ public final class AstBuilder {
         }
     }
 
-    private static String joinedProse(SkyLangParser.ProseConditionContext pc) {
+    private static String joinedWords(org.antlr.v4.runtime.ParserRuleContext ctx) {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < pc.getChildCount(); i++) {
-            String word = pc.getChild(i).getText();
+        for (int i = 0; i < ctx.getChildCount(); i++) {
+            String word = ctx.getChild(i).getText();
             sb.append(sb.isEmpty() || word.equals("'s") ? "" : " ").append(word);
         }
         return sb.toString();
