@@ -1,0 +1,5 @@
+// The ts-node dependency registry: the same logical names, mapped onto pinned npm
+// packages. The package prefixes are import specifiers.
+bcrypt 4.0.2 -> bcryptjs:2.4.3 packages bcryptjs
+http-client 2.1.4 -> undici:6.19.2 packages undici
+json 2.1.3 -> json5:2.2.3 packages json5
