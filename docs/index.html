@@ -572,12 +572,15 @@
       <p class="eyebrow">The toolchain</p>
       <h2>A small set of verbs for the red → generate → green loop.</h2>
       <div class="cmds">
+        <div class="cmd"><code>sky onboard</code><p>Point the compiler at OpenAI or Anthropic — pick a model and reasoning effort, once.</p></div>
         <div class="cmd"><code>sky check</code><p>Type &amp; contract check only. Fast, offline, no model.</p></div>
         <div class="cmd"><code>sky build</code><p>Synthesise and verify unfrozen bodies, then emit the artifact.</p></div>
+        <div class="cmd"><code>sky preview</code><p>Serve your views live in a browser studio, re-rendering as you edit.</p></div>
         <div class="cmd"><code>sky tdd</code><p>Watch mode: on a failing test, regenerate just that method until it's green.</p></div>
         <div class="cmd"><code>sky why &lt;m&gt;</code><p>Show a method's intent, contracts, frozen body, and verification report.</p></div>
         <div class="cmd"><code>sky freeze</code><p>Force-regenerate and re-verify every body, rewriting <code>sky.lock</code>.</p></div>
         <div class="cmd"><code>sky test</code><p>Run every example, spec, and ensures clause as a suite.</p></div>
+        <div class="cmd"><code>sky clean</code><p>Delete the build directory; <code>sky.lock</code> re-materialises it next build.</p></div>
       </div>
     </div>
   </section>
