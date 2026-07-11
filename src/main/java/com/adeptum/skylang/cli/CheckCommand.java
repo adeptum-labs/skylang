@@ -52,10 +52,7 @@ public final class CheckCommand implements Callable<Integer> {
             Ast.Module module = Parsing.parseFile(file);
             new TypeChecker().check(module);
             ActiveProfile.activate(profile, file, module);   // the portability boundary is frontend
-            int methods = module.services().stream().mapToInt(s -> s.methods().size()).sum();
-            System.out.printf("ok: %s — %d entit%s, %d method%s%n",
-                    file, module.entities().size(), module.entities().size() == 1 ? "y" : "ies",
-                    methods, methods == 1 ? "" : "s");
+            checkpoint(module);
             return 0;
         } catch (SkyParseException | CheckException | ConfigException e) {
             System.err.println("error [frontend]: " + e.getMessage());
@@ -64,5 +61,57 @@ public final class CheckCommand implements Callable<Integer> {
             System.err.println("error: cannot read " + file + ": " + e.getMessage());
             return 1;
         }
+    }
+
+    /** The checkpoint transcript: what the hard layer contains, and that no model ran. */
+    private void checkpoint(Ast.Module module) {
+        System.out.printf("  %-30s ok%n", "parsing " + file.getFileName() + " ...");
+        if (!module.entities().isEmpty()) {
+            System.out.print(wrapped("  entities: ", module.entities().stream()
+                    .map(Ast.Entity::name).toList()));
+        }
+        if (!module.types().isEmpty()) {
+            System.out.printf("  %-30s ok%n", "refined types: " + module.types().stream()
+                    .map(Ast.TypeDecl::name).collect(java.util.stream.Collectors.joining(", ")));
+        }
+        String values = module.entities().stream()
+                .filter(e -> !e.values().isEmpty())
+                .map(e -> e.name() + " (" + e.values().size() + ")")
+                .collect(java.util.stream.Collectors.joining(", "));
+        if (!values.isEmpty()) {
+            System.out.println("  values: " + values);
+        }
+        if (!module.services().isEmpty()) {
+            System.out.println("  services: " + module.services().stream()
+                    .map(s -> s.name() + " (" + s.methods().size() + " method"
+                            + (s.methods().size() == 1 ? "" : "s") + ")")
+                    .collect(java.util.stream.Collectors.joining(", ")));
+        }
+        if (!module.views().isEmpty()) {
+            System.out.println("  views: " + module.views().stream()
+                    .map(Ast.View::name).collect(java.util.stream.Collectors.joining(", ")));
+        }
+        System.out.printf("  %-30s ok%n", "type-checking hard layer ...");
+        System.out.println("  no model calls; nothing generated.");
+    }
+
+    /** A comma list wrapped at a readable width, continuations aligned under the first item. */
+    private static String wrapped(String head, java.util.List<String> names) {
+        StringBuilder sb = new StringBuilder(head);
+        String indent = " ".repeat(head.length());
+        int column = head.length();
+        for (int i = 0; i < names.size(); i++) {
+            String piece = names.get(i) + (i < names.size() - 1 ? "," : "");
+            if (column + piece.length() > 64 && column > head.length()) {
+                sb.append('\n').append(indent);
+                column = indent.length();
+            } else if (i > 0) {
+                sb.append(' ');
+                column++;
+            }
+            sb.append(piece);
+            column += piece.length();
+        }
+        return sb.append('\n').toString();
     }
 }

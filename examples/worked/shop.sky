@@ -1,0 +1,54 @@
+module shop
+
+entity Product {
+  id       Int             @id
+  name     Text(1..120)
+  price    Money
+  stock    Int             @min(0)
+  category Maybe<Category>          // absent until merchandising files it
+}
+
+entity User {
+  id        Int           @id
+  email     Email         @unique
+  password  Secret<Bytes>
+  role      Role          = Role.Member
+  createdAt Instant       = now
+}
+
+entity Role {
+  name   Text @id
+  values Member, Staff, Admin
+}
+
+type Quantity = Int(1..)          // at least one
+
+entity LineItem {
+  product  Product
+  quantity Quantity
+}
+
+entity Order {
+  id       Int           @id
+  customer User
+  items    [LineItem]
+  status   OrderStatus   = OrderStatus.Draft
+  total    Money         = 0eur    // captured at placement — prices move
+  placedAt Maybe<Instant>          // absent until the order is placed
+}
+
+entity OrderStatus {
+  name   Text @id
+  values Draft, Placed, Shipped, Cancelled
+}
+
+entity Country {
+  code     Text @id          // ISO-style code, e.g. "SE"
+  name     Text(1..80)
+  currency Currency
+  vatRate  Percentage
+}
+
+entity Category {
+  name Text(1..60) @id
+}

@@ -65,13 +65,15 @@ type PositiveMoney = Money where amount > 0
 The special types cover the rest of the catalogue: `Bool` (`boolean`), `Money` (an exact
 fixed-point amount plus currency — arithmetic requires matching currencies, money times money
 does not exist), `Instant` (`java.time.Instant`), `Bytes` (an immutable content-equal wrapper),
-`Email` (a `Text` that cannot be constructed from a non-address), `Maybe<T>`
+`Email` (a `Text` that cannot be constructed from a non-address), `Currency` (a validated
+three-letter code), `Percentage` (an `Int` confined to 0..100), `Maybe<T>`
 (`java.util.Optional`; there is no null), `Secret<T>` (masked `toString`, no Faces getter,
 never renderable in a view), and `List<T>`/`Map<K,V>`/`Set<T>` (`[T]` stays the list
 shorthand). Every predicate is enforced where a value is constructed: entity compact
 constructors, guarded service-method parameters, and converter/validator-backed view inputs
 (`ask Money` renders with a staged `sky.money` Faces converter). See `examples/bank.sky`
-for the whole surface in one module.
+for the whole surface in one module, and `examples/worked/` for the book's worked shop
+project as it grows chapter by chapter.
 
 Entities and services carry their chapter-4 semantics. An `@id` entity compares by its
 identity; an entity without one is a value type compared by contents; an enum-like entity
