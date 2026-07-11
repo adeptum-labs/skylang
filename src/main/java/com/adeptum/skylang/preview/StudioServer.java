@@ -57,6 +57,28 @@ public final class StudioServer implements AutoCloseable {
         });
         server.createContext("/accept", exchange -> reply(exchange, handler.accept()));
         server.createContext("/reject", exchange -> reply(exchange, handler.reject()));
+
+        // /spec reports a view's editable state as JSON; /set applies a deterministic structured
+        // change (no model) — the control panel's read and write channels.
+        server.createContext("/spec", exchange -> {
+            Map<String, String> query = parseForm(rawQuery(exchange));
+            String json = handler.spec(query.getOrDefault("view", ""));
+            if (json == null) {
+                respond(exchange, 400, "no editable spec for that view", "text/plain; charset=utf-8");
+            } else {
+                respond(exchange, 200, json, "application/json; charset=utf-8");
+            }
+        });
+        server.createContext("/set", exchange -> {
+            StructuredChange change;
+            try {
+                change = StructuredChange.fromForm(parseForm(body(exchange)));
+            } catch (IllegalArgumentException e) {
+                respond(exchange, 400, e.getMessage(), "text/plain; charset=utf-8");
+                return;
+            }
+            reply(exchange, handler.apply(change));
+        });
         server.createContext("/", exchange -> respond(exchange, 200, shell, "text/html; charset=utf-8"));
         server.setExecutor(null);
         server.start();
@@ -92,6 +114,11 @@ public final class StudioServer implements AutoCloseable {
 
     private static String body(HttpExchange exchange) throws IOException {
         return new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    private static String rawQuery(HttpExchange exchange) {
+        String query = exchange.getRequestURI().getRawQuery();
+        return query == null ? "" : query;
     }
 
     private static Map<String, String> parseForm(String body) {

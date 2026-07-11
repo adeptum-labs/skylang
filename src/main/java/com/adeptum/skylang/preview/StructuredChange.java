@@ -27,8 +27,10 @@ import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.synth.AppearsCompiler;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 
@@ -49,6 +51,41 @@ public sealed interface StructuredChange {
 
     /** Rework the view's current {@code appears} set into the desired one. */
     List<Ast.Appears> transform(List<Ast.Appears> current);
+
+    /**
+     * Build a change from the studio's form fields (`op`, `view`, and the op's parameters).
+     * Throws {@link IllegalArgumentException} on an unknown op or a missing field.
+     */
+    static StructuredChange fromForm(Map<String, String> form) {
+        String op = form.getOrDefault("op", "");
+        String view = required(form, "view");
+        return switch (op) {
+            case "setColumnOrder" -> new SetColumnOrder(view, splitCsv(required(form, "columns")));
+            case "setTableStyle" -> new SetTableStyle(view, required(form, "value"));
+            case "setRowsStyle" -> new SetRowsStyle(view, required(form, "value"));
+            case "setActionRegion" -> new SetActionRegion(view, required(form, "label"), required(form, "region"));
+            case "clearActionRegion" -> new ClearActionRegion(view, required(form, "label"));
+            case "setActionState" -> new SetActionState(view, required(form, "label"), required(form, "state"),
+                    Optional.ofNullable(nullIfBlank(form.get("when"))));
+            default -> throw new IllegalArgumentException("unknown structured-change op '" + op + "'");
+        };
+    }
+
+    private static String required(Map<String, String> form, String key) {
+        String value = form.get(key);
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("missing '" + key + "'");
+        }
+        return value.trim();
+    }
+
+    private static List<String> splitCsv(String csv) {
+        return Arrays.stream(csv.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
+    }
+
+    private static String nullIfBlank(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
 
     /** Apply this change to the {@code .sky} source, returning the rewritten source. */
     default String applyTo(String source) {

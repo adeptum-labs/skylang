@@ -30,6 +30,16 @@ public interface EditHandler {
 
     EditResult reject();
 
+    /** The selected view's editable state as JSON for the control panel, or null if unavailable. */
+    default String spec(String view) {
+        return null;
+    }
+
+    /** Apply a deterministic structured change (no model call), returning the outcome. */
+    default EditResult apply(StructuredChange change) {
+        return EditResult.error("structured editing is not available");
+    }
+
     /** A handler that rejects everything — used when the studio is served without an editing session. */
     EditHandler NONE = new EditHandler() {
         @Override

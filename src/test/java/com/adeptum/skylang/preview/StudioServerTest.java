@@ -59,6 +59,19 @@ class StudioServerTest {
             rejected = true;
             return EditResult.ok("reverted");
         }
+
+        StructuredChange applied;
+
+        @Override
+        public String spec(String view) {
+            return "{\"kind\":\"view\",\"name\":\"" + view + "\"}";
+        }
+
+        @Override
+        public EditResult apply(StructuredChange change) {
+            this.applied = change;
+            return EditResult.ok("set: " + change.describe());
+        }
     }
 
     @Test
@@ -102,6 +115,36 @@ class StudioServerTest {
             http.send(HttpRequest.newBuilder(URI.create(base + "/reject")).POST(BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.ofString());
             assertTrue(handler.rejected, "reject should reach the handler");
+        }
+    }
+
+    @Test
+    void servesSpecAndAppliesStructuredChanges() throws Exception {
+        RecordingHandler handler = new RecordingHandler();
+        try (StudioServer studio = new StudioServer(0, 0, List.of("ProductList"), handler)) {
+            HttpClient http = HttpClient.newHttpClient();
+            String base = "http://localhost:" + studio.port();
+
+            HttpResponse<String> spec = http.send(
+                    HttpRequest.newBuilder(URI.create(base + "/spec?view=ProductList")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, spec.statusCode());
+            assertTrue(spec.body().contains("ProductList"), spec.body());
+
+            HttpResponse<String> set = http.send(HttpRequest.newBuilder(URI.create(base + "/set"))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(BodyPublishers.ofString("op=setColumnOrder&view=ProductList&columns=stock,name")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, set.statusCode());
+            assertTrue(handler.applied instanceof StructuredChange.SetColumnOrder, "the op is parsed");
+            assertEquals(List.of("stock", "name"),
+                    ((StructuredChange.SetColumnOrder) handler.applied).columns());
+
+            HttpResponse<String> bad = http.send(HttpRequest.newBuilder(URI.create(base + "/set"))
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(BodyPublishers.ofString("op=bogus&view=ProductList")).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(400, bad.statusCode(), "an unknown op is a 400");
         }
     }
 }

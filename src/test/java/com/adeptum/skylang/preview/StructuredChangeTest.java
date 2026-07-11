@@ -26,9 +26,11 @@ import com.adeptum.skylang.front.ast.Ast;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -107,5 +109,19 @@ class StructuredChangeTest {
 
         assertEquals(colsThenStyle, styleThenCols,
                 "canonical ordering keeps the source (and freeze hash) stable across equivalent edits");
+    }
+
+    @Test
+    void fromFormBuildsEachOpAndRejectsBadInput() {
+        assertTrue(StructuredChange.fromForm(
+                Map.of("op", "setColumnOrder", "view", "V", "columns", "a, b")) instanceof StructuredChange.SetColumnOrder);
+        StructuredChange region = StructuredChange.fromForm(
+                Map.of("op", "setActionRegion", "view", "V", "label", "Restock", "region", "toolbar"));
+        assertEquals("\"Restock\" in toolbar", region.describe());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> StructuredChange.fromForm(Map.of("op", "nope", "view", "V")), "unknown op");
+        assertThrows(IllegalArgumentException.class,
+                () -> StructuredChange.fromForm(Map.of("op", "setTableStyle", "view", "V")), "missing value");
     }
 }

@@ -197,6 +197,38 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
         }
     }
 
+    @Override
+    public String spec(String viewName) {
+        synchronized (lock) {
+            try {
+                return Parsing.parse(activeSource, "preview.sky").views().stream()
+                        .filter(v -> v.name().equals(viewName)).findFirst()
+                        .map(SpecJson::of).orElse(null);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+    }
+
+    /** Apply a deterministic structured change (no model), then re-render — mirrors {@link #edit}. */
+    @Override
+    public EditResult apply(StructuredChange change) {
+        synchronized (lock) {
+            try {
+                Ast.Module base = checked(activeSource);
+                if (base.views().stream().noneMatch(v -> v.name().equals(change.view()))) {
+                    return EditResult.error("no view named " + change.view());
+                }
+                String next = change.applyTo(activeSource);
+                relaunch(checked(next));   // re-render and gate it before showing
+                activeSource = next;
+                return EditResult.ok("set: " + change.describe());
+            } catch (Exception e) {
+                return EditResult.error("change failed: " + e.getMessage());
+            }
+        }
+    }
+
     // ----- machinery ---------------------------------------------------------
 
     private PreviewProcess stageAndLaunch(Ast.Module module, PrintStream out, PrintStream err) throws IOException {
