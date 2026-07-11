@@ -77,7 +77,7 @@ public final class FreezeCommand implements Callable<Integer> {
         Path root = file.toAbsolutePath().getParent();
         Path lockPath = root.resolve("sky.lock");
 
-        com.adeptum.skylang.backend.Profile active;
+        ActiveProfile.Activation active;
         try {
             active = ActiveProfile.activate(profile, file, module);
         } catch (ConfigException | CheckException e) {
@@ -94,8 +94,9 @@ public final class FreezeCommand implements Callable<Integer> {
 
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
-            return new Pipeline(llm, active.verifier(), Math.max(0, attempts - 1), active)
-                    .build(module, lockPath, root.resolve("build").resolve(active.id()),
+            return new Pipeline(llm, active.profile().verifier(), Math.max(0, attempts - 1),
+                    active.profile(), active.deps())
+                    .build(module, lockPath, root.resolve("build").resolve(active.profile().id()),
                             System.out, System.err);
         } catch (ConfigException | SynthException e) {
             System.err.println("error: " + e.getMessage());

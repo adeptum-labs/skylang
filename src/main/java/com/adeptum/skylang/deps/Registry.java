@@ -70,6 +70,14 @@ public final class Registry {
         return new Registry(profileId, entries);
     }
 
+    /** Every package prefix the registry knows, mapped to the logical name providing it. */
+    public Map<String, String> prefixIndex() {
+        Map<String, String> index = new LinkedHashMap<>();
+        entries.forEach((name, versions) -> versions.forEach(
+                e -> e.packages().forEach(prefix -> index.putIfAbsent(prefix, name))));
+        return index;
+    }
+
     public List<Resolved> resolve(List<Manifest.Require> requires) {
         List<Resolved> resolved = new ArrayList<>();
         for (Manifest.Require r : requires) {

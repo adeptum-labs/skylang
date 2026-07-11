@@ -47,12 +47,17 @@ public final class TsStager {
     private Map<String, Ast.Entity> stagedEntities = Map.of();
 
     public void stage(Ast.Module module, Map<String, String> bodies, Path dir) {
+        stage(module, bodies, java.util.List.of(), dir);
+    }
+
+    public void stage(Ast.Module module, Map<String, String> bodies,
+                      java.util.List<com.adeptum.skylang.deps.Resolved> deps, Path dir) {
         stagedEntities = module.entities().stream()
                 .collect(Collectors.toMap(Ast.Entity::name, e -> e, (a, b) -> a, LinkedHashMap::new));
         try {
             Path src = dir.resolve("src");
             Files.createDirectories(src);
-            write(dir.resolve("package.json"), packageJson(module));
+            write(dir.resolve("package.json"), packageJson(module, deps));
             write(dir.resolve("tsconfig.json"), tsconfig());
             write(src.resolve("node-shims.d.ts"), NODE_SHIMS);
             if (usesEffect(module, "db")) {
@@ -429,7 +434,14 @@ public final class TsStager {
 
     // ---- fixed project files --------------------------------------------------------------
 
-    private String packageJson(Ast.Module module) {
+    private String packageJson(Ast.Module module, java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
+        String dependencies = deps.isEmpty() ? "" : deps.stream()
+                .flatMap(r -> r.coordinates().stream())
+                .map(c -> {
+                    int cut = c.lastIndexOf(':');
+                    return "    \"" + c.substring(0, cut) + "\": \"" + c.substring(cut + 1) + "\"";
+                })
+                .collect(Collectors.joining(",\n", ",\n  \"dependencies\": {\n", "\n  }"));
         return """
                 {
                   "name": "%s",
@@ -437,9 +449,9 @@ public final class TsStager {
                   "type": "module",
                   "scripts": {
                     "test": "tsc && node --test dist/"
-                  }
+                  }%s
                 }
-                """.formatted(module.name());
+                """.formatted(module.name(), dependencies);
     }
 
     private String tsconfig() {

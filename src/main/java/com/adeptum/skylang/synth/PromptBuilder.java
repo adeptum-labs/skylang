@@ -80,8 +80,23 @@ public final class PromptBuilder {
     }
 
     public String user(Ast.Module module, Ast.Service service, Ast.Method method) {
+        return user(module, service, method, java.util.List.of());
+    }
+
+    public String user(Ast.Module module, Ast.Service service, Ast.Method method,
+                       java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
         StringBuilder sb = new StringBuilder();
         var types = Lowering.typesOf(module);
+
+        if (!deps.isEmpty()) {
+            sb.append("// Declared dependencies — the ONLY libraries beyond the JDK the body may use:\n");
+            for (var dep : deps) {
+                sb.append("//   ").append(dep.name()).append(' ').append(dep.constraint())
+                        .append(" -> ").append(String.join(", ", dep.coordinates()))
+                        .append(" (packages ").append(String.join(", ", dep.packages())).append(")\n");
+            }
+            sb.append('\n');
+        }
 
         if (!module.types().isEmpty()) {
             sb.append("// Declared refined types (predicates enforced at construction; erased in Java):\n");

@@ -115,9 +115,11 @@ public final class TddCommand implements Callable<Integer> {
         Path root = file.toAbsolutePath().getParent();
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
-            com.adeptum.skylang.backend.Profile active = ActiveProfile.activate(profile, file, module);
-            int code = new Pipeline(llm, active.verifier(), Math.max(0, attempts - 1), active)
-                    .build(module, root.resolve("sky.lock"), root.resolve("build").resolve(active.id()),
+            ActiveProfile.Activation active = ActiveProfile.activate(profile, file, module);
+            int code = new Pipeline(llm, active.profile().verifier(), Math.max(0, attempts - 1),
+                    active.profile(), active.deps())
+                    .build(module, root.resolve("sky.lock"),
+                            root.resolve("build").resolve(active.profile().id()),
                             System.out, System.err);
             System.out.println(code == 0
                     ? "  green — examples, specs and contracts hold; fresh bodies frozen"

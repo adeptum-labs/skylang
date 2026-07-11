@@ -36,6 +36,7 @@ import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -266,13 +267,15 @@ class PipelineTest {
             public String tag() { return "fk"; }
             public void validate(Ast.Module module) { }
             public boolean supportsViews() { return false; }
-            public void stage(Ast.Module module, java.util.Map<String, String> bodies, Path dir) {
-                stager.stage(module, bodies, dir);
+            public void stage(Ast.Module module, java.util.Map<String, String> bodies,
+                              List<com.adeptum.skylang.deps.Resolved> deps, Path dir) {
+                stager.stage(module, bodies, deps, dir);
             }
             public Verifier verifier() { return ALWAYS_PASS; }
             public String systemPrompt() { return prompts.system(); }
-            public String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method) {
-                return prompts.user(module, service, method);
+            public String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method,
+                                     List<com.adeptum.skylang.deps.Resolved> deps) {
+                return prompts.user(module, service, method, deps);
             }
             public String extractBody(String reply) { return prompts.extractBody(reply); }
         };
@@ -303,6 +306,83 @@ class PipelineTest {
         assertEquals(0, new Pipeline(settled, ALWAYS_PASS, 4, fakeTarget())
                 .build(module, lock, root.resolve("build/fake-target"), quiet(), quiet()));
         assertEquals(0, settled.calls(), "the retargeted lock freezes like any other");
+    }
+
+    private static com.adeptum.skylang.deps.Budget bookDeps() {
+        var registry = com.adeptum.skylang.deps.Registry
+                .forProfile("jvm-jakarta", java.util.Optional.empty());
+        return new com.adeptum.skylang.deps.Budget(
+                registry.resolve(List.of(new com.adeptum.skylang.config.Manifest.Require("bcrypt", "^4.0"))),
+                registry.prefixIndex());
+    }
+
+    @Test
+    void declaredDependenciesReachThePomAndTheLock(@TempDir Path root) throws IOException {
+        Ast.Module module = checkedModule();
+        Path lock = root.resolve("sky.lock");
+        int code = new Pipeline(new StubLlm(BODY), ALWAYS_PASS, 4,
+                com.adeptum.skylang.backend.JvmProfile.INSTANCE, bookDeps())
+                .build(module, lock, root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code);
+        String pom = Files.readString(root.resolve("build/jvm-jakarta/pom.xml"));
+        assertTrue(pom.contains("<artifactId>jbcrypt</artifactId>"),
+                "resolved coordinates land in the staged pom:\n" + pom);
+        String frozen = Files.readString(lock);
+        assertTrue(frozen.contains("org.mindrot:jbcrypt:0.4"),
+                "the lock pins the resolved coordinate:\n" + frozen);
+        assertTrue(frozen.contains("^4.0"), "the lock records what was requested:\n" + frozen);
+    }
+
+    @Test
+    void changingTheRequiresBlockRegeneratesBodies(@TempDir Path root) {
+        Ast.Module module = checkedModule();
+        Path lock = root.resolve("sky.lock");
+        new Pipeline(new StubLlm(BODY), ALWAYS_PASS)
+                .build(module, lock, root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        StubLlm after = new StubLlm(BODY);
+        int code = new Pipeline(after, ALWAYS_PASS, 4,
+                com.adeptum.skylang.backend.JvmProfile.INSTANCE, bookDeps())
+                .build(module, lock, root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code);
+        assertEquals(1, after.calls(),
+                "a changed requires block changes what a body may draw on — it regenerates");
+    }
+
+    @Test
+    void anUndeclaredDependencyIsRefusedByName(@TempDir Path root) {
+        Ast.Module module = checkedModule();
+        var registry = com.adeptum.skylang.deps.Registry
+                .forProfile("jvm-jakarta", java.util.Optional.empty());
+        var noneDeclared = new com.adeptum.skylang.deps.Budget(List.of(), registry.prefixIndex());
+        var err = new ByteArrayOutputStream();
+        StubLlm reaches = new StubLlm(
+                "return new Product(p.id(), org.mindrot.jbcrypt.BCrypt.hashpw(p.name(), \"s\"), p.stock() + units);");
+
+        int code = new Pipeline(reaches, ALWAYS_PASS, 0,
+                com.adeptum.skylang.backend.JvmProfile.INSTANCE, noneDeclared)
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        quiet(), new PrintStream(err));
+
+        assertEquals(1, code, "the registry is the only door; nothing enters through the side");
+        assertTrue(err.toString().contains("dependency 'bcrypt' used but not declared in requires"),
+                err.toString());
+    }
+
+    @Test
+    void aDeclaredDependencyMayBeUsed(@TempDir Path root) {
+        Ast.Module module = checkedModule();
+        StubLlm reaches = new StubLlm(
+                "return new Product(p.id(), org.mindrot.jbcrypt.BCrypt.hashpw(p.name(), \"s\"), p.stock() + units);");
+
+        int code = new Pipeline(reaches, ALWAYS_PASS, 0,
+                com.adeptum.skylang.backend.JvmProfile.INSTANCE, bookDeps())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        quiet(), quiet());
+
+        assertEquals(0, code, "what requires lists is exactly what a body may use");
     }
 
     @Test

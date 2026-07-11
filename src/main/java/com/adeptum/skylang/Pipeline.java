@@ -26,6 +26,8 @@ import com.adeptum.skylang.backend.JvmProfile;
 import com.adeptum.skylang.backend.Lowering;
 import com.adeptum.skylang.backend.Profile;
 import com.adeptum.skylang.backend.ProjectStager;
+import com.adeptum.skylang.deps.Budget;
+import com.adeptum.skylang.deps.Resolved;
 import com.adeptum.skylang.freeze.Hashing;
 import com.adeptum.skylang.freeze.Lock;
 import com.adeptum.skylang.front.ast.Ast;
@@ -61,6 +63,7 @@ public final class Pipeline {
     private final Llm client;
     private final Verifier verifier;
     private final Profile profile;
+    private final Budget deps;
     private final UiPromptBuilder uiPrompts = new UiPromptBuilder();
     private final FacesViewStager facesViewStager = new FacesViewStager();
     private final ViewVerifier viewVerifier = new ViewVerifier();
@@ -76,10 +79,15 @@ public final class Pipeline {
     }
 
     public Pipeline(Llm client, Verifier verifier, int maxRegenerations, Profile profile) {
+        this(client, verifier, maxRegenerations, profile, Budget.NONE);
+    }
+
+    public Pipeline(Llm client, Verifier verifier, int maxRegenerations, Profile profile, Budget deps) {
         this.client = client;
         this.verifier = verifier;
         this.maxRegenerations = maxRegenerations;
         this.profile = profile;
+        this.deps = deps;
     }
 
     /** One unit of work: a method plus everything needed to freeze it. */
@@ -139,13 +147,19 @@ public final class Pipeline {
                     profile.id(), lock.profileId());
         }
         lock.setProfile(profile.id(), profile.version());
+        Map<String, Lock.Dep> pinned = new LinkedHashMap<>();
+        for (Resolved r : deps.declared()) {
+            pinned.put(r.name(), new Lock.Dep(r.constraint(), r.version(), r.coordinates()));
+        }
+        lock.setDeps(pinned);
 
         // Resolve method bodies: reuse a frozen body when its hash matches, else synthesize.
         List<Unit> units = new ArrayList<>();
         for (Ast.Service s : module.services()) {
             for (Ast.Method m : s.methods()) {
                 String key = ProjectStager.methodKey(module.name(), s.name(), m.name());
-                units.add(new Unit(s, m, key, Hashing.sha256(specString(module, m, profile))));
+                units.add(new Unit(s, m, key,
+                        Hashing.sha256(specString(module, m, profile, deps.declared()))));
             }
         }
         boolean anyFresh = false;
@@ -158,9 +172,11 @@ public final class Pipeline {
                 // The escape hatch: the body is the author's, never the model's — but the
                 // effects budget and the contracts hold for it all the same.
                 u.body = Lock.canonical(u.method.nativeBody().get());
-                List<String> violations = EffectLinter.violations(u.body, u.service.uses(), module);
+                List<String> violations = new ArrayList<>(
+                        EffectLinter.violations(u.body, u.service.uses(), module));
+                violations.addAll(EffectLinter.dependencyViolations(u.body, deps));
                 if (!violations.isEmpty()) {
-                    err.println("build failed: " + u.key + " (native) reaches outside its effects budget:");
+                    err.println("build failed: " + u.key + " (native) reaches outside its budget:");
                     violations.forEach(v -> err.println("  " + v));
                     return 1;
                 }
@@ -180,7 +196,8 @@ public final class Pipeline {
         List<ViewUnit> viewUnits = new ArrayList<>();
         for (Ast.View v : module.views()) {
             String key = ProjectStager.viewKey(module.name(), v.name());
-            viewUnits.add(new ViewUnit(v, key, Hashing.sha256(viewSpecString(module, v, profile))));
+            viewUnits.add(new ViewUnit(v, key,
+                    Hashing.sha256(viewSpecString(module, v, profile, deps.declared()))));
         }
         boolean anyViewFresh = false;
         for (ViewUnit u : viewUnits) {
@@ -198,7 +215,7 @@ public final class Pipeline {
         }
 
         // Stage the project. If nothing changed, everything is already verified — skip the test run.
-        profile.stage(module, bodyMap(units), buildDir);
+        profile.stage(module, bodyMap(units), deps.declared(), buildDir);
         if (!module.views().isEmpty()) {
             facesViewStager.stage(module, viewArtifacts(viewUnits), baselines(viewUnits, lock), buildDir);
             clearCaptures(buildDir);   // a stale rasterization must never be adopted as a baseline
@@ -211,7 +228,7 @@ public final class Pipeline {
             while (!result.passed() && regenerable && attempts < maxRegenerations) {
                 attempts++;
                 regenerateFailing(module, units, result.output(), attempts, out);
-                profile.stage(module, bodyMap(units), buildDir);
+                profile.stage(module, bodyMap(units), deps.declared(), buildDir);
                 result = verifier.verify(buildDir);
             }
             if (!result.passed()) {
@@ -248,7 +265,7 @@ public final class Pipeline {
 
     private String synthesize(Ast.Module module, Unit u) {
         String reply = client.complete(profile.systemPrompt(),
-                profile.userPrompt(module, u.service, u.method));
+                profile.userPrompt(module, u.service, u.method, deps.declared()));
         return profile.extractBody(reply);
     }
 
@@ -259,21 +276,29 @@ public final class Pipeline {
      */
     private boolean resolveBody(Ast.Module module, Unit u, PrintStream out, PrintStream err) {
         u.body = synthesize(module, u);
-        List<String> violations = EffectLinter.violations(u.body, u.service.uses(), module);
+        List<String> violations = lint(module, u);
         int attempts = 0;
         while (!violations.isEmpty() && attempts < maxRegenerations) {
             attempts++;
-            out.println("  " + u.key + " broke its effects budget " + violations
+            out.println("  " + u.key + " broke its budget " + violations
                     + " — regenerating (attempt " + attempts + ")");
             u.body = synthesize(module, u);
-            violations = EffectLinter.violations(u.body, u.service.uses(), module);
+            violations = lint(module, u);
         }
         if (!violations.isEmpty()) {
-            err.println("build failed: " + u.key + " reaches outside its effects budget:");
+            err.println("build failed: " + u.key + " reaches outside its budget:");
             violations.forEach(v -> err.println("  " + v));
             return false;
         }
         return true;
+    }
+
+    /** Both budgets at once: the effects a service uses and the dependencies the manifest requires. */
+    private List<String> lint(Ast.Module module, Unit u) {
+        List<String> violations = new ArrayList<>(
+                EffectLinter.violations(u.body, u.service.uses(), module));
+        violations.addAll(EffectLinter.dependencyViolations(u.body, deps));
+        return violations;
     }
 
     /** Synthesize a view and re-synthesize until its expectations hold or the attempts run out. */
@@ -531,30 +556,46 @@ public final class Pipeline {
 
     /** The spec hash a method freezes under \u2014 the key auditing tools look up in the lock. */
     public static String methodSpecHash(Ast.Module module, Ast.Method method) {
-        return methodSpecHash(module, method, JvmProfile.INSTANCE);
+        return methodSpecHash(module, method, JvmProfile.INSTANCE, List.of());
     }
 
-    public static String methodSpecHash(Ast.Module module, Ast.Method method, Profile profile) {
-        return Hashing.sha256(specString(module, method, profile));
+    public static String methodSpecHash(Ast.Module module, Ast.Method method, Profile profile,
+                                        List<Resolved> deps) {
+        return Hashing.sha256(specString(module, method, profile, deps));
     }
 
     /**
-     * Canonical text whose hash freezes a method. Includes the profile and every entity, so any
-     * change that could affect the staged/verified code re-triggers synthesis (conservative).
+     * Canonical text whose hash freezes a method. Includes the profile, the resolved
+     * dependencies, and every entity, so any change that could affect the staged/verified
+     * code re-triggers synthesis (conservative).
      */
     static String specString(Ast.Module module, Ast.Method method) {
-        return specString(module, method, JvmProfile.INSTANCE);
+        return specString(module, method, JvmProfile.INSTANCE, List.of());
     }
 
-    static String specString(Ast.Module module, Ast.Method method, Profile profile) {
+    static String specString(Ast.Module module, Ast.Method method, Profile profile,
+                             List<Resolved> deps) {
         StringBuilder sb = new StringBuilder();
         sb.append("profile=").append(profile.id()).append('@').append(profile.version()).append('\n');
+        appendDeps(sb, deps);
         appendTypes(sb, module);
         for (Ast.Entity e : module.entities()) {
             sb.append("entity ").append(e).append('\n');
         }
         sb.append("method ").append(method).append('\n');
         return sb.toString();
+    }
+
+    /**
+     * Declared dependencies bound what a body may draw on, so they are part of every spec.
+     * A project without a requires block contributes nothing here, keeping older hashes exact.
+     */
+    private static void appendDeps(StringBuilder sb, List<Resolved> deps) {
+        for (Resolved r : deps) {
+            sb.append("require ").append(r.name()).append(' ').append(r.constraint())
+                    .append(" -> ").append(r.version())
+                    .append(' ').append(r.coordinates()).append('\n');
+        }
     }
 
     /**
@@ -576,12 +617,14 @@ public final class Pipeline {
      * signature the view may reference, so a change to the data it renders re-triggers synthesis.
      */
     static String viewSpecString(Ast.Module module, Ast.View view) {
-        return viewSpecString(module, view, JvmProfile.INSTANCE);
+        return viewSpecString(module, view, JvmProfile.INSTANCE, List.of());
     }
 
-    static String viewSpecString(Ast.Module module, Ast.View view, Profile profile) {
+    static String viewSpecString(Ast.Module module, Ast.View view, Profile profile,
+                                 List<Resolved> deps) {
         StringBuilder sb = new StringBuilder();
         sb.append("profile=").append(profile.id()).append('@').append(profile.version()).append('\n');
+        appendDeps(sb, deps);
         appendTypes(sb, module);
         for (Ast.Entity e : module.entities()) {
             sb.append("entity ").append(e).append('\n');

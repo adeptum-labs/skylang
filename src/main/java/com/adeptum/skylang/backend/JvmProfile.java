@@ -87,8 +87,9 @@ public final class JvmProfile implements Profile {
     }
 
     @Override
-    public void stage(Ast.Module module, Map<String, String> bodies, Path dir) {
-        stager.stage(module, bodies, dir);
+    public void stage(Ast.Module module, Map<String, String> bodies,
+                      java.util.List<com.adeptum.skylang.deps.Resolved> deps, Path dir) {
+        stager.stage(module, bodies, deps, dir);
     }
 
     @Override
@@ -102,8 +103,9 @@ public final class JvmProfile implements Profile {
     }
 
     @Override
-    public String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method) {
-        return prompts.user(module, service, method);
+    public String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method,
+                             java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
+        return prompts.user(module, service, method, deps);
     }
 
     @Override

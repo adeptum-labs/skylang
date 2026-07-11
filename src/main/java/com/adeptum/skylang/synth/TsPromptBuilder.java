@@ -56,7 +56,20 @@ public final class TsPromptBuilder {
     }
 
     public String user(Ast.Module module, Ast.Service service, Ast.Method method) {
+        return user(module, service, method, java.util.List.of());
+    }
+
+    public String user(Ast.Module module, Ast.Service service, Ast.Method method,
+                       java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
         StringBuilder sb = new StringBuilder();
+        if (!deps.isEmpty()) {
+            sb.append("// Declared dependencies — the ONLY packages beyond node built-ins the body may import:\n");
+            for (var dep : deps) {
+                sb.append("//   ").append(dep.name()).append(' ').append(dep.constraint())
+                        .append(" -> ").append(String.join(", ", dep.coordinates())).append('\n');
+            }
+            sb.append('\n');
+        }
         sb.append("// Entities in scope (their TypeScript class shapes):\n");
         for (Ast.Entity e : module.entities()) {
             if (e.fields().isEmpty()) {

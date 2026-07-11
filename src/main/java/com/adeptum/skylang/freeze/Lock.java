@@ -58,8 +58,13 @@ public final class Lock {
         }
     }
 
+    /** One pinned dependency: what the manifest requested and what the registry resolved. */
+    public record Dep(String requested, String version, java.util.List<String> coordinates) {
+    }
+
     private String profileId = "";
     private String profileVersion = "";
+    private final Map<String, Dep> deps = new LinkedHashMap<>();
     private final Map<String, Entry> methods = new LinkedHashMap<>();
     private final Map<String, ViewEntry> views = new LinkedHashMap<>();
 
@@ -74,6 +79,16 @@ public final class Lock {
                 if (map.get("profile") instanceof Map<?, ?> profile) {
                     lock.profileId = asString(profile.get("id"));
                     lock.profileVersion = asString(profile.get("version"));
+                }
+                if (map.get("deps") instanceof Map<?, ?> depMap) {
+                    for (Map.Entry<?, ?> e : depMap.entrySet()) {
+                        if (e.getValue() instanceof Map<?, ?> d) {
+                            java.util.List<String> coordinates = d.get("coordinates") instanceof java.util.List<?> l
+                                    ? l.stream().map(String::valueOf).toList() : java.util.List.of();
+                            lock.deps.put(String.valueOf(e.getKey()), new Dep(
+                                    asString(d.get("requested")), asString(d.get("version")), coordinates));
+                        }
+                    }
                 }
                 if (map.get("methods") instanceof Map<?, ?> methodMap) {
                     for (Map.Entry<?, ?> e : methodMap.entrySet()) {
@@ -129,6 +144,19 @@ public final class Lock {
 
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("profile", profile);
+        // The header pins the resolved dependency versions — omitted entirely when there are
+        // none, so locks written before the requires block existed keep their exact bytes.
+        if (!deps.isEmpty()) {
+            Map<String, Object> depMap = new LinkedHashMap<>();
+            deps.forEach((name, dep) -> {
+                Map<String, Object> d = new LinkedHashMap<>();
+                d.put("requested", dep.requested());
+                d.put("version", dep.version());
+                d.put("coordinates", dep.coordinates());
+                depMap.put(name, d);
+            });
+            root.put("deps", depMap);
+        }
         root.put("methods", methodMap);
         root.put("views", viewMap);
 
@@ -188,6 +216,16 @@ public final class Lock {
     /** The profile the lock was frozen under — {@code ""} for a fresh lock. */
     public String profileId() {
         return profileId;
+    }
+
+    /** The pinned dependency resolutions this build was verified against. */
+    public Map<String, Dep> deps() {
+        return deps;
+    }
+
+    public void setDeps(Map<String, Dep> pinned) {
+        deps.clear();
+        deps.putAll(pinned);
     }
 
     public Optional<Entry> get(String key) {

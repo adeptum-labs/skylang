@@ -72,6 +72,22 @@ public final class EffectLinter {
         return found;
     }
 
+    /**
+     * The dependency analogue of the effects rule: a body — synthesized or native — may
+     * reference a registry-known package only when the manifest requires its logical name.
+     * The registry is the only door; nothing enters through the side.
+     */
+    public static List<String> dependencyViolations(String body, com.adeptum.skylang.deps.Budget deps) {
+        List<String> found = new ArrayList<>();
+        deps.knownPrefixes().forEach((prefix, name) -> {
+            if (body.contains(prefix) && !deps.declares(name)) {
+                found.add("dependency '" + name + "' used but not declared in requires (found '"
+                        + prefix + "')");
+            }
+        });
+        return found;
+    }
+
     private static final List<String> LOGGER_TOKENS =
             List.of("log.", "logger.", "Logger", "System.out", "System.err");
 

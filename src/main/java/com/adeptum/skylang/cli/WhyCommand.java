@@ -57,7 +57,7 @@ public final class WhyCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         Ast.Module module;
-        Profile active;
+        ActiveProfile.Activation active;
         try {
             module = Parsing.parseFile(file);
             new TypeChecker().check(module);
@@ -88,7 +88,8 @@ public final class WhyCommand implements Callable<Integer> {
         return 0;
     }
 
-    private void print(Ast.Module module, Ast.Service service, Ast.Method method, Profile active) {
+    private void print(Ast.Module module, Ast.Service service, Ast.Method method,
+                       ActiveProfile.Activation active) {
         String params = method.params().stream()
                 .map(p -> p.name() + " " + p.type().sky())
                 .collect(Collectors.joining(", "));
@@ -107,7 +108,8 @@ public final class WhyCommand implements Callable<Integer> {
         method.specs().forEach(sp -> System.out.println("  spec      \"" + sp.title() + "\""));
 
         String key = module.name() + "." + service.name() + "." + method.name();
-        String hash = Pipeline.methodSpecHash(module, method, active);
+        String hash = Pipeline.methodSpecHash(module, method, active.profile(),
+                active.deps().declared());
         Lock lock = Lock.load(file.toAbsolutePath().getParent().resolve("sky.lock"));
         var frozen = lock.get(key);
         if (frozen.isEmpty()) {

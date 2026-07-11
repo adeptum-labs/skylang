@@ -21,10 +21,12 @@
 
 package com.adeptum.skylang.backend;
 
+import com.adeptum.skylang.deps.Resolved;
 import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.verify.Verifier;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -55,15 +57,18 @@ public interface Profile {
     /** Whether the profile carries the optional interface library ({@code view} et al). */
     boolean supportsViews();
 
-    /** Materialise the complete staged project — sources, spliced bodies, contracts as tests. */
-    void stage(Ast.Module module, Map<String, String> bodies, Path dir);
+    /**
+     * Materialise the complete staged project — sources, spliced bodies, contracts as tests,
+     * and the resolved dependencies in the native build manifest (pom.xml, package.json).
+     */
+    void stage(Ast.Module module, Map<String, String> bodies, List<Resolved> deps, Path dir);
 
     /** The platform's own toolchain, run as the verification harness over the staged project. */
     Verifier verifier();
 
     String systemPrompt();
 
-    String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method);
+    String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method, List<Resolved> deps);
 
     /** The proposed body, extracted from the model's fenced reply. */
     String extractBody(String reply);

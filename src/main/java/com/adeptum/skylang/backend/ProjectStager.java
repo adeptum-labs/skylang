@@ -54,6 +54,15 @@ public final class ProjectStager {
      * @param bodies map from {@link #methodKey} to the Java statements for that method body
      */
     public void stage(Ast.Module module, Map<String, String> bodies, Path buildDir) {
+        stage(module, bodies, java.util.List.of(), buildDir);
+    }
+
+    /**
+     * @param bodies map from {@link #methodKey} to the Java statements for that method body
+     * @param deps   the manifest's resolved dependencies; their pinned coordinates land in the pom
+     */
+    public void stage(Ast.Module module, Map<String, String> bodies,
+                      java.util.List<com.adeptum.skylang.deps.Resolved> deps, Path buildDir) {
         String pkg = module.name();
         Path main = buildDir.resolve("src/main/java").resolve(pkg);
         Path test = buildDir.resolve("src/test/java").resolve(pkg);
@@ -62,7 +71,8 @@ public final class ProjectStager {
             Files.createDirectories(main);
             Files.createDirectories(test);
             boolean db = SupportClasses.effectsOf(module).contains("db");
-            Files.writeString(buildDir.resolve("pom.xml"), module.views().isEmpty() ? pom(db) : webPom(db));
+            Files.writeString(buildDir.resolve("pom.xml"),
+                    module.views().isEmpty() ? pom(db, deps) : webPom(db, deps));
 
             for (String support : SupportClasses.used(module)) {
                 Files.writeString(main.resolve(support + ".java"),
@@ -989,8 +999,26 @@ public final class ProjectStager {
         return block.lines().map(l -> l.isBlank() ? l : prefix + l).collect(Collectors.joining("\n"));
     }
 
-    private static String pom(boolean db) {
-        String persistence = !db ? "" : """
+    /** The declared dependency budget, pinned coordinate by pinned coordinate. */
+    private static String depsXml(java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
+        StringBuilder sb = new StringBuilder();
+        for (com.adeptum.skylang.deps.Resolved r : deps) {
+            for (String coordinate : r.coordinates()) {
+                String[] gav = coordinate.split(":");
+                sb.append("""
+                            <dependency>
+                              <groupId>%s</groupId>
+                              <artifactId>%s</artifactId>
+                              <version>%s</version>
+                            </dependency>
+                        """.formatted(gav[0], gav[1], gav[2]));
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String pom(boolean db, java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
+        String persistence = depsXml(deps) + (!db ? "" : """
                     <dependency>
                       <groupId>jakarta.persistence</groupId>
                       <artifactId>jakarta.persistence-api</artifactId>
@@ -1008,7 +1036,7 @@ public final class ProjectStager {
                       <version>2.2.224</version>
                       <scope>test</scope>
                     </dependency>
-                """;
+                """);
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -1048,8 +1076,8 @@ public final class ProjectStager {
      * Mojarra as the sole Faces implementation, so a generated view renders in-container for
      * verification. TomEE provides the APIs, so the aggregate api jar stays off the runtime classpath.
      */
-    private static String webPom(boolean db) {
-        String persistence = !db ? "" : """
+    private static String webPom(boolean db, java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
+        String persistence = depsXml(deps) + (!db ? "" : """
                     <dependency>
                       <groupId>org.eclipse.persistence</groupId>
                       <artifactId>eclipselink</artifactId>
@@ -1061,7 +1089,7 @@ public final class ProjectStager {
                       <version>2.2.224</version>
                       <scope>runtime</scope>
                     </dependency>
-                """;
+                """);
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <project xmlns="http://maven.apache.org/POM/4.0.0"
