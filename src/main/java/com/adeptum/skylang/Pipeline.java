@@ -163,6 +163,7 @@ public final class Pipeline {
             }
         }
         boolean anyFresh = false;
+        List<Unit> toSynthesize = new ArrayList<>();
         for (Unit u : units) {
             var frozen = retarget ? java.util.Optional.<Lock.Entry>empty() : lock.get(u.key);
             if (frozen.isPresent() && frozen.get().specHash().equals(u.specHash)) {
@@ -184,12 +185,13 @@ public final class Pipeline {
                 anyFresh = true;
             } else {
                 u.stale = frozen.isPresent();
-                if (!resolveBody(module, u, out, err)) {
-                    return 1;
-                }
+                toSynthesize.add(u);
                 u.fresh = true;
                 anyFresh = true;
             }
+        }
+        if (!synthesizeAll(module, toSynthesize, out, err)) {
+            return 1;
         }
 
         // Resolve views: reuse frozen markup, else synthesize and dispose against its expectations.
@@ -274,6 +276,56 @@ public final class Pipeline {
      * it stays inside or the attempts run out. Nothing outside the budget may reach the
      * staged project, let alone the freeze store.
      */
+    /**
+     * Each method's generation is independent, so a first build synthesizes many bodies
+     * concurrently — the wall-clock cost of a large module grows far more slowly than its
+     * method count. Per-unit transcripts are buffered and replayed in declaration order.
+     */
+    private boolean synthesizeAll(Ast.Module module, List<Unit> fresh, PrintStream out, PrintStream err) {
+        if (fresh.isEmpty()) {
+            return true;
+        }
+        if (fresh.size() == 1) {
+            return resolveBody(module, fresh.get(0), out, err);
+        }
+        record Attempt(java.io.ByteArrayOutputStream transcript,
+                       java.util.concurrent.Future<Boolean> passed) {
+        }
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(Math.min(4, fresh.size()));
+        try {
+            List<Attempt> attempts = new ArrayList<>();
+            for (Unit u : fresh) {
+                var transcript = new java.io.ByteArrayOutputStream();
+                var stream = new PrintStream(transcript, true, java.nio.charset.StandardCharsets.UTF_8);
+                attempts.add(new Attempt(transcript,
+                        pool.submit(() -> resolveBody(module, u, stream, stream))));
+            }
+            boolean all = true;
+            for (Attempt attempt : attempts) {
+                boolean passed;
+                try {
+                    passed = attempt.passed().get();
+                } catch (java.util.concurrent.ExecutionException e) {
+                    if (e.getCause() instanceof RuntimeException cause) {
+                        throw cause;
+                    }
+                    throw new IllegalStateException(e.getCause());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+                String text = attempt.transcript().toString(java.nio.charset.StandardCharsets.UTF_8);
+                if (!text.isEmpty()) {
+                    (passed ? out : err).print(text);
+                }
+                all &= passed;
+            }
+            return all;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     private boolean resolveBody(Ast.Module module, Unit u, PrintStream out, PrintStream err) {
         u.body = synthesize(module, u);
         List<String> violations = lint(module, u);

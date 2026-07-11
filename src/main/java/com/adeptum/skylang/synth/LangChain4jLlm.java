@@ -53,7 +53,8 @@ public final class LangChain4jLlm implements Llm {
         this(() -> config);
     }
 
-    private ChatModel model() {
+    /** Bodies synthesize concurrently, so the lazy init must be safe to race. */
+    private synchronized ChatModel model() {
         if (model == null) {
             model = buildModel(configSupplier.get());
         }

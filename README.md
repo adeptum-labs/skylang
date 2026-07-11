@@ -173,7 +173,9 @@ The pipeline speaks specification when it fails. A red candidate is narrated per
 `▸ candidate 1: ensures result.stock == p.stock + units ✗ FAILED ▸ regenerating ...` — and
 only the implicated methods regenerate, so an innocent sibling never pays a model call for
 someone else's red test; each method gets five candidates by default (`--attempts N` on
-build/freeze/tdd). Errors carry their stage: `error [frontend]` is a specification you wrote
+build/freeze/tdd). Each method's generation is independent, so a first build synthesizes
+bodies concurrently — the wall-clock cost of a large module grows far more slowly than its
+method count, and every later build is cache hits. Errors carry their stage: `error [frontend]` is a specification you wrote
 inconsistently, with a `-> did you mean 'stock'?` hint on a near-miss field name; `error
 [synthesis]` names the method, the attempts spent and the violated clauses — and calls out
 two examples as unsatisfiable together when they demand different outcomes for the same

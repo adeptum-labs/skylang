@@ -406,6 +406,43 @@ class PipelineTest {
     }
 
     @Test
+    void aFirstBuildSynthesizesIndependentMethodsConcurrently(@TempDir Path root) {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text  stock Int @min(0) }
+                service Catalog {
+                  restock(p Product, units Int) -> Product
+                    intent "Increase stock."
+                  rename(p Product, name Text) -> Product
+                    intent "Rename the product."
+                  discontinue(p Product, gone Bool) -> Product
+                    intent "Mark the product discontinued."
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        var active = new java.util.concurrent.atomic.AtomicInteger();
+        var highWater = new java.util.concurrent.atomic.AtomicInteger();
+        StubLlm slowStub = new StubLlm((system, user) -> {
+            highWater.accumulateAndGet(active.incrementAndGet(), Math::max);
+            try {
+                Thread.sleep(80);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            active.decrementAndGet();
+            return BODY;
+        });
+
+        int code = new Pipeline(slowStub, ALWAYS_PASS).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(0, code);
+        assertTrue(highWater.get() >= 2,
+                "independent first-build methods should synthesize concurrently, saw "
+                        + highWater.get() + " in flight");
+    }
+
+    @Test
     void secondBuildReusesFrozenBodyWithoutCallingModel(@TempDir Path root) {
         Ast.Module module = checkedModule();
         Path lock = root.resolve("sky.lock");

@@ -21,16 +21,17 @@
 
 package com.adeptum.skylang.synth;
 
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
 /**
  * A test double for {@link Llm} that returns canned replies and counts calls — used to prove the
- * freeze path avoids the model on rebuilds.
+ * freeze path avoids the model on rebuilds. Thread-safe, because bodies synthesize concurrently.
  */
 public final class StubLlm implements Llm {
 
     private final BiFunction<String, String, String> reply;
-    private int calls;
+    private final AtomicInteger calls = new AtomicInteger();
 
     public StubLlm(String fixedReply) {
         this((system, user) -> fixedReply);
@@ -42,11 +43,11 @@ public final class StubLlm implements Llm {
 
     @Override
     public String complete(String system, String userMessage) {
-        calls++;
+        calls.incrementAndGet();
         return reply.apply(system, userMessage);
     }
 
     public int calls() {
-        return calls;
+        return calls.get();
     }
 }
