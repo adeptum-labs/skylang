@@ -139,10 +139,18 @@ public final class FacesViewStager {
         for (Ast.View view : module.views()) {
             String lower = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1);
             methods.append("\n    @Test\n    void ").append(lower).append("Renders() throws Exception {\n");
+            boolean isTable = view.shows().projection()
+                    .map(Ast.Projection::kind).filter("table"::equals).isPresent();
             methods.append("        String html = render(\"").append(view.name()).append(".xhtml\");\n");
             methods.append("        Document doc = Jsoup.parse(html);\n");
-            methods.append("        assertNotNull(doc.selectFirst(\"table\"), () -> \"view ")
-                    .append(view.name()).append(" did not render a table:\\n\" + html);\n");
+            if (isTable) {
+                methods.append("        assertNotNull(doc.selectFirst(\"table\"), () -> \"view ")
+                        .append(view.name()).append(" did not render a table:\\n\" + html);\n");
+            } else {
+                // A summary or form has no table; just require that it rendered a body.
+                methods.append("        assertFalse(doc.body().children().isEmpty(), () -> \"view ")
+                        .append(view.name()).append(" rendered nothing:\\n\" + html);\n");
+            }
             for (Ast.Action action : view.actions()) {
                 methods.append("        assertTrue(html.contains(\"").append(escape(action.label()))
                         .append("\"), \"action \\\"").append(escape(action.label())).append("\\\" should render\");\n");
@@ -153,7 +161,7 @@ public final class FacesViewStager {
                             .append("\").stream().anyMatch(e -> e.html().contains(\"").append(escape(p.label()))
                             .append("\")), \"\\\"").append(escape(p.label())).append("\\\" should render in region ")
                             .append(escape(p.region())).append("\");\n");
-                } else if (a instanceof Ast.AppearsStyle s) {
+                } else if (a instanceof Ast.AppearsStyle s && isTable) {
                     methods.append("        assertFalse(doc.select(\"table.").append(escape(s.value()))
                             .append("\").isEmpty(), \"the table should render with style ")
                             .append(escape(s.value())).append("\");\n");
