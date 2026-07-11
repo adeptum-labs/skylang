@@ -117,6 +117,10 @@ service Catalog uses db {
     intent  "The sum of price times stock over all products."
     ensures result == sum of (p.price * p.stock for p in all products)
     example totalStockValue() -> 0eur
+
+  lowStock(threshold Int) -> [Product]
+    intent  "Products whose stock is at or below the threshold, lowest first."
+    ensures every product in result has stock <= threshold
 }
 
 service Orders uses db, clock {
@@ -136,6 +140,17 @@ service Orders uses db, clock {
     ensures  result.status == OrderStatus.Cancelled
              result.items  == old(result.items)
              result.placedAt == old(result.placedAt)
+
+  find(id Int) -> Maybe<Order>
+    intent  "The order with that id, if one exists."
+    example find(999) -> nothing
+
+  today() -> [Order]
+    intent  "Orders placed since midnight, newest first."
+
+  forCustomer(customer User) -> [Order]
+    intent  "Every order belonging to the customer, newest first."
+    ensures every order in result has customer == customer
 }
 
 service AccountService uses db {
@@ -200,4 +215,68 @@ service Reviews uses db, clock {
   averageRating(productId Int) -> Maybe<Int>
     intent  "The average star rating for a product, or nothing if unreviewed."
     example averageRating(999) -> nothing
+
+  latest(count Int) -> [Review]
+    intent  "The most recent reviews, at most count of them."
+}
+
+// ----- the interface (the worked UI chapter) ---------------------------------
+
+component StockBadge(product Product) {
+  shows   product.stock as a badge
+  appears amber when product.stock <= 10
+  appears brick when product.stock == 0
+  expect  the badge shows the stock
+}
+
+page ProductList at "/products" {
+  shows   Catalog.all() as a sortable table of (name, price, stock)
+  action  "Restock" on a row -> Catalog.restock(row.id, prompt Quantity)
+
+  expect  table has columns (name, price, stock)
+  expect  action "Restock" is a button
+  appears action "Restock" in the row's toolbar
+  appears rows is compact
+  appears columns in order (name, stock, price)
+}
+
+page OrderDetail at "/orders/{id}" {
+  shows   Orders.find(id) as a summary of (id, status, total, placedAt)
+  action  "Cancel" on the order -> Orders.cancel(id)
+
+  expect  action "Cancel" is a button
+  expect  summary shows status and total
+  expect  placedAt shows only when present
+  appears action "Cancel" is disabled when status is Shipped
+}
+
+page Dashboard at "/admin" {
+  shows   Catalog.lowStock(10)  as a table of (name, StockBadge)          titled "Low stock"
+  shows   Orders.today()        as a table of (id, customer, total)       titled "Today's orders"
+  shows   Reviews.latest(5)     as a table of (product, author, rating)   titled "Latest reviews"
+
+  expect  three sections titled "Low stock", "Today's orders", "Latest reviews"
+  appears sections in a two-column grid
+  appears "Low stock" section highlights rows with stock 0
+}
+
+page OrderList at "/orders" {
+  shows   Orders.forCustomer(currentCustomer) as a table of (id, total, status)
+  action  "Cancel" on an order -> Orders.cancel(order.id)
+
+  expect  when there are no orders, an empty-state message is shown
+  expect  the empty state offers a "Start shopping" action
+  appears a failed "Cancel" shows the error's message inline
+}
+
+flow Checkout {
+  step Cart     -> collect items into a Cart
+  step Shipping -> collect address
+  step Pay      -> CheckoutService.place(the cart, the customer)
+
+  on success       -> page OrderConfirmed
+  on PaymentFailed -> back to step Pay with message
+
+  expect step Pay is reachable only after Shipping
+  expect no step follows success
 }

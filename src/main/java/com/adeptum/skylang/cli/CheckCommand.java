@@ -93,8 +93,25 @@ public final class CheckCommand implements Callable<Integer> {
                     .collect(java.util.stream.Collectors.joining(", ")));
         }
         if (!module.views().isEmpty()) {
-            System.out.println("  views: " + module.views().stream()
+            System.out.println("  pages: " + module.views().stream()
                     .map(Ast.View::name).collect(java.util.stream.Collectors.joining(", ")));
+        }
+        if (!module.flows().isEmpty()) {
+            System.out.println("  flows: " + module.flows().stream()
+                    .map(Ast.Flow::name).collect(java.util.stream.Collectors.joining(", ")));
+        }
+        if (!module.components().isEmpty()) {
+            System.out.println("  components: " + module.components().stream()
+                    .map(Ast.Component::name).collect(java.util.stream.Collectors.joining(", ")));
+        }
+        int expects = module.views().stream().mapToInt(v -> v.expects().size()).sum()
+                + module.flows().stream().mapToInt(f -> f.expects().size()).sum()
+                + module.components().stream().mapToInt(c -> c.expects().size()).sum();
+        int appears = module.views().stream().mapToInt(v -> v.appears().size()).sum()
+                + module.components().stream().mapToInt(c -> c.appears().size()).sum();
+        if (expects + appears > 0) {
+            System.out.printf("  %-30s ok%n",
+                    "interface contracts: " + expects + " expect, " + appears + " appears");
         }
         System.out.printf("  %-30s ok%n", "type-checking hard layer ...");
         if (!module.types().isEmpty()) {

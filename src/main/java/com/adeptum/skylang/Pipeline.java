@@ -275,6 +275,10 @@ public final class Pipeline {
         }
 
         report(units, viewUnits, out);
+        module.flows().forEach(f ->
+                out.println("  flow " + f.name() + "   ▸ checked (walking arrives with its staging)"));
+        module.components().forEach(c ->
+                out.println("  component " + c.name() + "   ▸ checked (isolation render arrives with its staging)"));
         out.println("staged: " + buildDir);
         return 0;
     }

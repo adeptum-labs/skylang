@@ -159,7 +159,7 @@ componentClause
 // Prose inside the interface layer: free words up to the next clause keyword.
 viewProse : (ID | STRING | INT | MONEY | COMMA | POSS | DOT | LPAREN | RPAREN
             | IS | IN | ON | OF | HAS | NOT | OR | AND | WHEN | COLUMNS
-            | LT | LE | GT | GE | EQ | ARROW)+ ;
+            | LT | LE | GT | GE | EQ | MINUS | ACTION | STEP | PAGE | SHOWS | TITLED)+ ;
 
 route : AT_KW STRING ;
 

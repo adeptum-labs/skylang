@@ -243,7 +243,25 @@ posted require the author has purchased the product else raise NotAPurchaser`. S
 `examples/worked/` for the whole shop — fourteen methods, two policies, three effects —
 whose checkpoint matches the book's.
 
-Not yet implemented (deferred): `page`/`flow`, article-form example arguments and results
+The interface layer carries the worked UI chapter. `page` joins `view` as the declaration
+keyword, and a page composes several `shows` (each optionally `titled`), sortable tables,
+`summary` projections driven by `Maybe`-returning queries, route parameters (`/orders/{id}`)
+that bind through shows and actions, `prompt <Type>` inputs whose validation derives from
+the type, action rows spoken with articles, conditional action states (`appears action
+"Cancel" is disabled when status is Shipped`), and prose `expect`/`appears` contracts
+(`placedAt shows only when present`) that are counted, prompt-carried, and awaiting their
+rendering forms. `flow` declares typed steps, transitions triggered by `success` or a
+declared error entity, and its own expects; `component` declares a reusable widget with
+typed parameters and state-dependent looks, usable as a table column wherever its entity is
+the row; and `currentCustomer` names the session's signed-in User. `sky check` lists pages,
+flows, components and the interface-contract counts — the worked shop's checkpoint matches
+the book's: nineteen methods, four pages, one flow, one component, and still nothing
+generated.
+
+Not yet implemented (deferred): render-time verification and staging of the new interface
+forms (summaries, dashboards, flow walking, component isolation renders, prose
+expect/appears, empty and failed states), ordered-by ensures, article-form example arguments
+and results
 (`place(a Draft order with 2 items)`, `id of a Placed order`, `-> that product`), further
 whenever-forms (audited deletes, money conservation, layer boundaries), the python profile
 and its `py` native keyword, the rest of the ts-node envelope (Money/Instant/Bytes/Secret,

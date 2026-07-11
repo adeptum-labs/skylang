@@ -41,6 +41,8 @@ public final class AstBuilder {
         List<Ast.Entity> entities = new ArrayList<>();
         List<Ast.Service> services = new ArrayList<>();
         List<Ast.View> views = new ArrayList<>();
+        List<Ast.Flow> flows = new ArrayList<>();
+        List<Ast.Component> components = new ArrayList<>();
         for (SkyLangParser.DeclContext decl : ctx.decl()) {
             if (decl.entity() != null) {
                 entities.add(entity(decl.entity()));
@@ -50,11 +52,16 @@ public final class AstBuilder {
                 types.add(typeDecl(decl.typeDecl()));
             } else if (decl.policy() != null) {
                 policies.add(policy(decl.policy()));
+            } else if (decl.flow() != null) {
+                flows.add(flow(decl.flow()));
+            } else if (decl.component() != null) {
+                components.add(component(decl.component()));
             } else {
                 views.add(view(decl.view()));
             }
         }
-        return new Ast.Module(ctx.ID().getText(), types, policies, entities, services, views);
+        return new Ast.Module(ctx.ID().getText(), types, policies, entities, services, views,
+                flows, components);
     }
 
     // ----- policies --------------------------------------------------------------
@@ -347,13 +354,18 @@ public final class AstBuilder {
                 : Optional.of(unquote(ctx.route().STRING().getText()));
 
         Ast.Shows shows = null;
+        List<Ast.Shows> moreShows = new ArrayList<>();
         List<Ast.Action> actions = new ArrayList<>();
         List<Ast.Expect> expects = new ArrayList<>();
         List<Ast.Appears> appears = new ArrayList<>();
 
         for (SkyLangParser.ViewClauseContext c : ctx.viewClause()) {
             if (c instanceof SkyLangParser.ShowsClauseContext sc) {
-                shows = shows(sc);
+                if (shows == null) {
+                    shows = shows(sc);
+                } else {
+                    moreShows.add(shows(sc));
+                }
             } else if (c instanceof SkyLangParser.ActionClauseContext ac) {
                 actions.add(action(ac));
             } else if (c instanceof SkyLangParser.ExpectClauseContext ec) {
@@ -362,7 +374,7 @@ public final class AstBuilder {
                 appears.add(appears(apc.appearsPred()));
             }
         }
-        return new Ast.View(ctx.ID().getText(), route, shows, actions, expects, appears);
+        return new Ast.View(ctx.ID().getText(), route, shows, actions, expects, appears, moreShows);
     }
 
     private Ast.Shows shows(SkyLangParser.ShowsClauseContext ctx) {
@@ -371,7 +383,10 @@ public final class AstBuilder {
         Optional<Ast.Projection> projection = ctx.projection() == null
                 ? Optional.empty()
                 : Optional.of(projection(ctx.projection()));
-        return new Ast.Shows(query, projection);
+        Optional<String> title = ctx.TITLED() == null
+                ? Optional.empty()
+                : Optional.of(unquote(ctx.STRING().getText()));
+        return new Ast.Shows(query, projection, title);
     }
 
     private Ast.Projection projection(SkyLangParser.ProjectionContext ctx) {
