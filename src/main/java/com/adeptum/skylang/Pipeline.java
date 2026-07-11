@@ -338,16 +338,19 @@ public final class Pipeline {
         }
         if (anyFresh || anyViewFresh || recheck) {
             int attempts = 0;
-            out.println("  verifying staged project (mvn test) ...");
-            VerificationResult result = verifier.verify(buildDir);
+            VerificationResult result;
+            try (Ticker ticker = Ticker.start(out, "verifying staged project")) {
+                result = verifier.verify(buildDir);
+            }
             boolean regenerable = units.stream()
                     .anyMatch(u -> u.fresh && u.method.nativeBody().isEmpty());
             while (!result.passed() && regenerable && attempts < maxRegenerations) {
                 attempts++;
                 regenerateFailing(module, units, result.output(), attempts, out);
                 profile.stage(module, bodyMap(units), deps.declared(), buildDir);
-                out.println("  re-verifying staged project (mvn test) ...");
-                result = verifier.verify(buildDir);
+                try (Ticker ticker = Ticker.start(out, "re-verifying staged project")) {
+                    result = verifier.verify(buildDir);
+                }
             }
             if (!result.passed()) {
                 return reportVerifyFailure(module, units, result.output(), err);
@@ -419,10 +422,9 @@ public final class Pipeline {
         int total = fresh.size();
         if (total == 1) {
             Unit only = fresh.get(0);
-            out.println("  synthesizing 1 body: " + label(only) + " ...");
-            boolean ok = resolveBody(module, only, out, err);
-            out.printf("  %-28s ▸ drafted (1/1)%n", label(only));
-            return ok;
+            try (Ticker ticker = Ticker.start(out, "synthesizing body " + label(only))) {
+                return resolveBody(module, only, out, err);
+            }
         }
         out.println("  synthesizing " + total + " bodies concurrently (model calls) ...");
         record Attempt(java.io.ByteArrayOutputStream transcript,
@@ -497,8 +499,9 @@ public final class Pipeline {
 
     /** Synthesize a view and re-synthesize until its expectations hold or the attempts run out. */
     private boolean resolveView(Ast.Module module, ViewUnit u, PrintStream out) {
-        out.println("  synthesizing page " + u.view.name() + " (markup + backing bean) ...");
-        u.artifact = synthesizeView(module, u.view);
+        try (Ticker ticker = Ticker.start(out, "synthesizing page " + u.view.name() + " (markup + backing bean)")) {
+            u.artifact = synthesizeView(module, u.view);
+        }
         List<String> unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup());
         int attempts = 0;
         while (!unmet.isEmpty() && attempts < maxRegenerations) {
@@ -522,9 +525,10 @@ public final class Pipeline {
 
     /** Synthesize a composite component and dispose it against its declaration. */
     private boolean resolveComponent(Ast.Module module, ComponentUnit u, PrintStream out) {
-        out.println("  synthesizing component " + u.component.name() + " ...");
-        u.markup = uiPrompts.extractFenced(client.complete(
-                uiPrompts.componentSystem(), uiPrompts.componentUser(module, u.component)), "xhtml");
+        try (Ticker ticker = Ticker.start(out, "synthesizing component " + u.component.name())) {
+            u.markup = uiPrompts.extractFenced(client.complete(
+                    uiPrompts.componentSystem(), uiPrompts.componentUser(module, u.component)), "xhtml");
+        }
         List<String> unmet = componentVerifier.unmetExpectations(u.component, u.markup);
         int attempts = 0;
         while (!unmet.isEmpty() && attempts < maxRegenerations) {
@@ -540,9 +544,10 @@ public final class Pipeline {
 
     /** Synthesize a flow's navigation graph and walk it against the declared expectations. */
     private boolean resolveFlow(FlowUnit u, PrintStream out) {
-        out.println("  synthesizing flow " + u.flow.name() + " ...");
-        u.graphJson = uiPrompts.extractFenced(client.complete(
-                uiPrompts.flowSystem(), uiPrompts.flowUser(u.flow)), "json");
+        try (Ticker ticker = Ticker.start(out, "synthesizing flow " + u.flow.name())) {
+            u.graphJson = uiPrompts.extractFenced(client.complete(
+                    uiPrompts.flowSystem(), uiPrompts.flowUser(u.flow)), "json");
+        }
         List<String> unmet = flowVerifier.unmetExpectations(u.flow, flowVerifier.parse(u.graphJson));
         int attempts = 0;
         while (!unmet.isEmpty() && attempts < maxRegenerations) {
