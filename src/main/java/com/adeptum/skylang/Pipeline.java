@@ -508,7 +508,7 @@ public final class Pipeline {
 
     /** Synthesize a view and re-synthesize until its expectations hold or the attempts run out. */
     private boolean resolveView(Ast.Module module, ViewUnit u, PrintStream out) {
-        try (Ticker ticker = Ticker.start(out, "synthesizing page " + u.view.name() + " (markup + backing bean)")) {
+        try (Ticker ticker = Ticker.start(out, "synthesizing page " + u.view.name())) {
             u.artifact = synthesizeView(module, u.view);
         }
         List<String> unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup());
