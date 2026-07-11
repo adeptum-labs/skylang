@@ -30,22 +30,33 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 
 /**
  * Reads and writes SkyLang's credential file, {@code ~/.sky/config} (a simple {@code key=value}
- * file). {@code sky onboard} writes it; {@code sky build} resolves from it, falling back to the
- * provider environment variables. The path is injectable for tests.
+ * file). {@code sky onboard} writes it; {@code sky build} resolves from it, filling any key the
+ * file omits from the provider environment variables. Resolution is per key: the file wins for
+ * every key it defines, and the environment fills only the gaps. Both the path and the environment
+ * are injectable for tests.
  */
 public final class ConfigStore {
 
+    private static final String MODEL_ENV = "SKY_MODEL";
+
     private final Path path;
+    private final UnaryOperator<String> env;
 
     public ConfigStore() {
         this(defaultPath());
     }
 
     public ConfigStore(Path path) {
+        this(path, System::getenv);
+    }
+
+    public ConfigStore(Path path, UnaryOperator<String> env) {
         this.path = path;
+        this.env = env;
     }
 
     public static Path defaultPath() {
@@ -56,18 +67,121 @@ public final class ConfigStore {
         return path;
     }
 
-    /** File first (explicit onboarding wins); then a single provider environment variable. */
-    public Optional<SkyConfig> load() {
-        if (Files.exists(path)) {
-            return Optional.of(readFile());
+    /** Where a resolved configuration key was read from — for {@code sky onboard --show}. */
+    public enum Origin {
+        CONFIG_FILE("config file"),
+        ANTHROPIC_ENV("ANTHROPIC_API_KEY"),
+        OPENAI_ENV("OPENAI_API_KEY"),
+        SKY_MODEL_ENV(MODEL_ENV),
+        PROVIDER_DEFAULT("provider default"),
+        UNSET("unset");
+
+        private final String label;
+
+        Origin(String label) {
+            this.label = label;
         }
-        return fromEnvironment();
+
+        public String label() {
+            return label;
+        }
+    }
+
+    /** The source of each resolved field. */
+    public record Origins(Origin provider, Origin model, Origin apiKey) {
+    }
+
+    /**
+     * A resolved configuration with the source of each field, plus which provider environment
+     * variables are set — enough for {@code sky onboard --show} to explain what won and why.
+     */
+    public record Resolution(Optional<SkyConfig> config, Origins origins,
+                             boolean anthropicEnvSet, boolean openaiEnvSet, boolean skyModelEnvSet) {
+    }
+
+    /** The merged configuration, or empty when neither a file nor the environment supplies one. */
+    public Optional<SkyConfig> load() {
+        return describe().config();
     }
 
     public SkyConfig resolve() {
         return load().orElseThrow(() -> new ConfigException(
                 "no LLM credentials configured. Run `sky onboard` to set a provider and key, "
                         + "or set ANTHROPIC_API_KEY / OPENAI_API_KEY."));
+    }
+
+    /**
+     * Resolve every field from the file first, then the environment, recording where each came
+     * from. The file wins for any key it defines; the environment fills only the gaps.
+     */
+    public Resolution describe() {
+        Map<String, String> file = Files.exists(path) ? readFileKv() : Map.of();
+        String anthropicKey = trimmedEnv(Provider.ANTHROPIC.envVar());
+        String openaiKey = trimmedEnv(Provider.OPENAI.envVar());
+        String skyModel = trimmedEnv(MODEL_ENV);
+        boolean anthropicSet = anthropicKey != null;
+        boolean openaiSet = openaiKey != null;
+        boolean skyModelSet = skyModel != null;
+
+        Provider provider;
+        Origin providerOrigin;
+        if (file.containsKey("provider")) {
+            provider = Provider.parse(file.get("provider"));
+            providerOrigin = Origin.CONFIG_FILE;
+        } else if (anthropicSet && openaiSet) {
+            throw new ConfigException("both ANTHROPIC_API_KEY and OPENAI_API_KEY are set — "
+                    + "run `sky onboard` to pick one, or unset the other.");
+        } else if (anthropicSet) {
+            provider = Provider.ANTHROPIC;
+            providerOrigin = Origin.ANTHROPIC_ENV;
+        } else if (openaiSet) {
+            provider = Provider.OPENAI;
+            providerOrigin = Origin.OPENAI_ENV;
+        } else {
+            return new Resolution(Optional.empty(),
+                    new Origins(Origin.UNSET, Origin.UNSET, Origin.UNSET),
+                    false, false, skyModelSet);
+        }
+
+        String providerEnvKey = provider == Provider.ANTHROPIC ? anthropicKey : openaiKey;
+        Origin providerEnvOrigin =
+                provider == Provider.ANTHROPIC ? Origin.ANTHROPIC_ENV : Origin.OPENAI_ENV;
+        String apiKey;
+        Origin apiKeyOrigin;
+        if (file.containsKey("api_key")) {
+            apiKey = file.get("api_key");
+            apiKeyOrigin = Origin.CONFIG_FILE;
+        } else if (providerEnvKey != null) {
+            apiKey = providerEnvKey;
+            apiKeyOrigin = providerEnvOrigin;
+        } else {
+            apiKey = null;
+            apiKeyOrigin = Origin.UNSET;
+        }
+
+        String model;
+        Origin modelOrigin;
+        if (file.containsKey("model")) {
+            model = file.get("model");
+            modelOrigin = Origin.CONFIG_FILE;
+        } else if (skyModel != null) {
+            model = skyModel;
+            modelOrigin = Origin.SKY_MODEL_ENV;
+        } else {
+            model = provider.defaultModel();
+            modelOrigin = Origin.PROVIDER_DEFAULT;
+        }
+
+        Origins origins = new Origins(providerOrigin, modelOrigin, apiKeyOrigin);
+        Optional<SkyConfig> config = apiKey == null ? Optional.empty()
+                : Optional.of(new SkyConfig(provider, apiKey.trim(), model));
+        return new Resolution(config, origins, anthropicSet, openaiSet, skyModelSet);
+    }
+
+    /** An environment value, trimmed, or null when unset or blank. */
+    private String trimmedEnv(String name) {
+        String value = env.apply(name);
+        return (value == null || value.isBlank()) ? null : value.trim();
     }
 
     public void save(SkyConfig config) {
@@ -89,7 +203,8 @@ public final class ConfigStore {
         }
     }
 
-    private SkyConfig readFile() {
+    /** Parse the {@code key=value} file into its defined keys, ignoring comments and blanks. */
+    private Map<String, String> readFileKv() {
         Map<String, String> kv = new HashMap<>();
         try {
             for (String line : Files.readAllLines(path)) {
@@ -99,41 +214,16 @@ public final class ConfigStore {
                 }
                 int eq = trimmed.indexOf('=');
                 if (eq > 0) {
-                    kv.put(trimmed.substring(0, eq).strip(), trimmed.substring(eq + 1).strip());
+                    String value = trimmed.substring(eq + 1).strip();
+                    if (!value.isEmpty()) {
+                        kv.put(trimmed.substring(0, eq).strip(), value);
+                    }
                 }
             }
         } catch (IOException e) {
             throw new UncheckedIOException("cannot read " + path, e);
         }
-        Provider provider = Provider.parse(kv.get("provider"));
-        String model = kv.getOrDefault("model", provider.defaultModel());
-        return new SkyConfig(provider, kv.get("api_key"), model);
-    }
-
-    private Optional<SkyConfig> fromEnvironment() {
-        String anthropic = System.getenv(Provider.ANTHROPIC.envVar());
-        String openai = System.getenv(Provider.OPENAI.envVar());
-        boolean hasAnthropic = anthropic != null && !anthropic.isBlank();
-        boolean hasOpenai = openai != null && !openai.isBlank();
-
-        if (hasAnthropic && hasOpenai) {
-            throw new ConfigException("both ANTHROPIC_API_KEY and OPENAI_API_KEY are set — "
-                    + "run `sky onboard` to pick one, or unset the other.");
-        }
-        String override = System.getenv("SKY_MODEL");
-        if (hasAnthropic) {
-            return Optional.of(config(Provider.ANTHROPIC, anthropic, override));
-        }
-        if (hasOpenai) {
-            return Optional.of(config(Provider.OPENAI, openai, override));
-        }
-        return Optional.empty();
-    }
-
-    private static SkyConfig config(Provider provider, String key, String modelOverride) {
-        String model = (modelOverride == null || modelOverride.isBlank())
-                ? provider.defaultModel() : modelOverride;
-        return new SkyConfig(provider, key.trim(), model);
+        return kv;
     }
 
     private static void trySetPerms(Path target, String perms) {

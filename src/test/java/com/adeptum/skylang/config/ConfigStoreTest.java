@@ -26,12 +26,17 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigStoreTest {
+
+    /** An environment that supplies nothing — keeps file-only tests independent of the host. */
+    private static final Map<String, String> NO_ENV = Map.of();
 
     @Test
     void savesAndLoadsRoundTrip(@TempDir Path dir) {
@@ -52,7 +57,7 @@ class ConfigStoreTest {
         Path file = dir.resolve("config");
         Files.writeString(file, "provider=anthropic\napi_key=sk-ant-xyz9876543210\n");
 
-        SkyConfig loaded = new ConfigStore(file).resolve();
+        SkyConfig loaded = new ConfigStore(file, NO_ENV::get).resolve();
         assertEquals(Provider.ANTHROPIC, loaded.provider());
         assertEquals(Provider.ANTHROPIC.defaultModel(), loaded.model());
     }
@@ -80,5 +85,91 @@ class ConfigStoreTest {
     @Test
     void rejectsUnknownProvider() {
         assertThrows(ConfigException.class, () -> Provider.parse("gemini"));
+    }
+
+    // ----- per-key resolution: the file wins per key, the environment fills the gaps -----------
+
+    @Test
+    void skyModelFillsTheModelGapWhenTheFileOmitsIt(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("config");
+        Files.writeString(file, "provider=anthropic\napi_key=sk-ant-xyz9876543210\n");
+        Map<String, String> env = Map.of("SKY_MODEL", "claude-tuned-1");
+
+        ConfigStore.Resolution r = new ConfigStore(file, env::get).describe();
+        assertEquals("claude-tuned-1", r.config().orElseThrow().model());
+        assertEquals(ConfigStore.Origin.SKY_MODEL_ENV, r.origins().model());
+        assertEquals(ConfigStore.Origin.CONFIG_FILE, r.origins().apiKey());
+        assertTrue(r.skyModelEnvSet());
+    }
+
+    @Test
+    void theEnvironmentKeyFillsTheGapWhenTheFileOmitsApiKey(@TempDir Path dir) throws Exception {
+        // The book's remedy: drop api_key from the file and the environment variable takes effect.
+        Path file = dir.resolve("config");
+        Files.writeString(file, "provider=anthropic\nmodel=claude-x\n");
+        Map<String, String> env = Map.of("ANTHROPIC_API_KEY", "sk-ant-fromenv-123456");
+
+        ConfigStore.Resolution r = new ConfigStore(file, env::get).describe();
+        assertEquals("sk-ant-fromenv-123456", r.config().orElseThrow().apiKey());
+        assertEquals(ConfigStore.Origin.ANTHROPIC_ENV, r.origins().apiKey());
+        assertEquals(ConfigStore.Origin.CONFIG_FILE, r.origins().model());
+    }
+
+    @Test
+    void theEnvironmentSuppliesEverythingWhenNoFileExists(@TempDir Path dir) {
+        Map<String, String> env = Map.of("ANTHROPIC_API_KEY", "sk-ant-only-env-123456");
+
+        ConfigStore.Resolution r = new ConfigStore(dir.resolve("absent"), env::get).describe();
+        SkyConfig config = r.config().orElseThrow();
+        assertEquals(Provider.ANTHROPIC, config.provider());
+        assertEquals("sk-ant-only-env-123456", config.apiKey());
+        assertEquals(Provider.ANTHROPIC.defaultModel(), config.model());
+        assertEquals(ConfigStore.Origin.ANTHROPIC_ENV, r.origins().provider());
+        assertEquals(ConfigStore.Origin.ANTHROPIC_ENV, r.origins().apiKey());
+        assertEquals(ConfigStore.Origin.PROVIDER_DEFAULT, r.origins().model());
+    }
+
+    @Test
+    void aCompleteFileWinsEveryKeyWhileTheEnvironmentIsFlaggedSet(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("config");
+        Files.writeString(file, "provider=anthropic\nmodel=claude-x\napi_key=sk-ant-fromfile-123456\n");
+        Map<String, String> env = Map.of("ANTHROPIC_API_KEY", "sk-ant-env-999999", "SKY_MODEL", "ignored");
+
+        ConfigStore.Resolution r = new ConfigStore(file, env::get).describe();
+        assertEquals("sk-ant-fromfile-123456", r.config().orElseThrow().apiKey());
+        assertEquals(ConfigStore.Origin.CONFIG_FILE, r.origins().provider());
+        assertEquals(ConfigStore.Origin.CONFIG_FILE, r.origins().model());
+        assertEquals(ConfigStore.Origin.CONFIG_FILE, r.origins().apiKey());
+        assertTrue(r.anthropicEnvSet(), "the ignored variable is still reported as set, so --show can flag it");
+        assertTrue(r.skyModelEnvSet());
+    }
+
+    @Test
+    void bothEnvironmentKeysWithoutAFileProviderConflict(@TempDir Path dir) {
+        Map<String, String> env = Map.of(
+                "ANTHROPIC_API_KEY", "sk-ant-123456789012", "OPENAI_API_KEY", "sk-openai-123456789012");
+
+        ConfigException e = assertThrows(ConfigException.class,
+                () -> new ConfigStore(dir.resolve("absent"), env::get).describe());
+        assertTrue(e.getMessage().contains("both"), e.getMessage());
+    }
+
+    @Test
+    void aFileProviderResolvesTheConflictTheEnvironmentWouldRaise(@TempDir Path dir) throws Exception {
+        // With the provider pinned in the file, both env keys being set is no longer ambiguous.
+        Path file = dir.resolve("config");
+        Files.writeString(file, "provider=anthropic\napi_key=sk-ant-fromfile-123456\n");
+        Map<String, String> env = Map.of(
+                "ANTHROPIC_API_KEY", "sk-ant-123456789012", "OPENAI_API_KEY", "sk-openai-123456789012");
+
+        ConfigStore.Resolution r = new ConfigStore(file, env::get).describe();
+        assertEquals(Provider.ANTHROPIC, r.config().orElseThrow().provider());
+    }
+
+    @Test
+    void nothingConfiguredResolvesEmpty(@TempDir Path dir) {
+        ConfigStore.Resolution r = new ConfigStore(dir.resolve("absent"), NO_ENV::get).describe();
+        assertTrue(r.config().isEmpty());
+        assertFalse(r.anthropicEnvSet());
     }
 }
