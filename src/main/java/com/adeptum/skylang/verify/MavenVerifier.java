@@ -30,6 +30,7 @@ import java.nio.file.Path;
  * harness (guide §10.1). Requires a JDK and Maven on PATH; the backend delegates the actual
  * compilation and test run here rather than doing it in-process.
  */
+@lombok.extern.slf4j.Slf4j
 public final class MavenVerifier implements Verifier {
 
     private final String mavenCommand;
@@ -47,10 +48,13 @@ public final class MavenVerifier implements Verifier {
         ProcessBuilder pb = new ProcessBuilder(mavenCommand, "-q", "-B", "test")
                 .directory(stagedProjectDir.toFile())
                 .redirectErrorStream(true);
+        log.debug("verify: {} -q -B test  (in {})", mavenCommand, stagedProjectDir);
         try {
             Process process = pb.start();
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             int exit = process.waitFor();
+            log.debug("verify: exit {} ({} output chars){}", exit, output.length(),
+                    exit == 0 ? "" : "\n" + output);
             return exit == 0 ? VerificationResult.pass() : VerificationResult.fail(output);
         } catch (IOException e) {
             return VerificationResult.fail("could not run '" + mavenCommand

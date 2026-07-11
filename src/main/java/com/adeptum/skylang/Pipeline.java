@@ -58,6 +58,7 @@ import java.util.stream.Stream;
  * newly-synthesized units. The model is called only for units whose spec hash changed. Method bodies
  * are verified by the target toolchain; views are verified against their structural expectations.
  */
+@lombok.extern.slf4j.Slf4j
 public final class Pipeline {
 
     /**
@@ -180,6 +181,7 @@ public final class Pipeline {
      */
     public int build(Ast.Module module, Path lockPath, Path buildDir, PrintStream out, PrintStream err,
                      boolean recheck) {
+        log.debug("build {} -> {} (profile {}, recheck={})", module.name(), buildDir, profile.id(), recheck);
         Lock lock = Lock.load(lockPath);
 
         // A body frozen as one profile's language has no meaning under another: switching the
@@ -382,6 +384,7 @@ public final class Pipeline {
 
         boolean anyVisualFrozen = adoptVisualCaptures(viewUnits, lock, buildDir, out);
         if (anyFresh || anyViewFresh || anyComponentFresh || anyFlowFresh || anyVisualFrozen) {
+            log.debug("froze sky.lock at {}", lockPath);
             lock.save(lockPath);
         }
 

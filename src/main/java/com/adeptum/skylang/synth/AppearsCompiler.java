@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
  * vocabulary a preview edit becomes, so a fuzzy instruction turns into a structural contract the
  * compiler can then synthesize toward and check.
  */
+@lombok.extern.slf4j.Slf4j
 public final class AppearsCompiler {
 
     private static final String SYSTEM = """
@@ -54,10 +55,12 @@ public final class AppearsCompiler {
     /** @return the {@code appears} source lines the instruction compiles to (possibly empty). */
     public List<String> compile(Ast.View view, String instruction) {
         String reply = llm.complete(SYSTEM, user(view, instruction));
-        return reply.lines()
+        List<String> lines = reply.lines()
                 .map(String::strip)
                 .filter(line -> line.startsWith("appears "))
                 .toList();
+        log.debug("appears for {} from \"{}\": {}", view.name(), instruction, lines);
+        return lines;
     }
 
     private String user(Ast.View view, String instruction) {

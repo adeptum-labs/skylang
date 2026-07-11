@@ -43,6 +43,7 @@ import java.util.regex.PatternSyntaxException;
  * base (widening) while the reverse needs a literal the checker can prove fits. Declared
  * type names are nominal: two named types never mix even over the same base.
  */
+@lombok.extern.slf4j.Slf4j
 public final class TypeChecker {
 
     /** entity name -> (field name -> type), in declaration order. */
@@ -73,6 +74,8 @@ public final class TypeChecker {
     private Ast.Service currentService;
 
     public void check(Ast.Module module) {
+        log.debug("type-checking module {} ({} services, {} entities)",
+                module.name(), module.services().size(), module.entities().size());
         registerTypeDecls(module);
         registerEntities(module);
         if (module.services().stream().anyMatch(s -> s.uses().contains("db"))) {
