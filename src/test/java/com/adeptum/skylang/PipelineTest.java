@@ -218,7 +218,7 @@ class PipelineTest {
         int code = new Pipeline(new StubLlm(BODY), alwaysFail).build(module, root.resolve("sky.lock"),
                 root.resolve("build/jvm-jakarta"), quiet(), new PrintStream(err));
 
-        assertEquals(1, code);
+        assertEquals(2, code);
         String report = err.toString();
         assertTrue(report.contains("error [synthesis]: shop.Catalog.restock"), report);
         assertTrue(report.contains("could not satisfy all clauses after 5 attempts."), report);
@@ -248,7 +248,7 @@ class PipelineTest {
                 .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
                         quiet(), new PrintStream(err));
 
-        assertEquals(1, code);
+        assertEquals(2, code);
         String report = err.toString();
         assertTrue(report.contains("unsatisfiable together:"), report);
         assertTrue(report.contains("example place(1) -> raises EmptyOrder"), report);
@@ -366,7 +366,7 @@ class PipelineTest {
                 .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
                         quiet(), new PrintStream(err));
 
-        assertEquals(1, code, "the registry is the only door; nothing enters through the side");
+        assertEquals(2, code, "the registry is the only door; nothing enters through the side");
         assertTrue(err.toString().contains("dependency 'bcrypt' used but not declared in requires"),
                 err.toString());
     }
@@ -673,7 +673,7 @@ class PipelineTest {
         int code = new Pipeline(routingStub(VIEW_REPLY_BAD), ALWAYS_PASS)
                 .build(module, lock, buildDir, quiet(), quiet());
 
-        assertEquals(1, code);
+        assertEquals(2, code);
     }
 
     private static PrintStream quiet() {
@@ -953,7 +953,7 @@ class PipelineTest {
                 ALWAYS_PASS).build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
                 quiet(), new PrintStream(err));
 
-        assertEquals(1, code, "a body reaching outside its effects budget must fail the build");
+        assertEquals(2, code, "a body reaching outside its effects budget must fail the build");
         assertTrue(err.toString().contains("clock.instant()"), err.toString());
     }
 
@@ -1198,7 +1198,7 @@ class PipelineTest {
                 ALWAYS_PASS).build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
                 quiet(), new PrintStream(err));
 
-        assertEquals(1, code, "a body breaking a forbid policy must fail the build");
+        assertEquals(2, code, "a body breaking a forbid policy must fail the build");
         assertTrue(err.toString().contains("NoSecretsInLogs"), err.toString());
     }
 
@@ -1227,7 +1227,7 @@ class PipelineTest {
         int code = new Pipeline(new StubLlm("return null;"), brokenCompile).build(module,
                 root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"), quiet(), new PrintStream(err));
 
-        assertEquals(1, code);
+        assertEquals(2, code);
         String report = err.toString();
         assertTrue(report.contains("error [backend]: the staged project did not compile"), report);
         assertTrue(report.contains("Hasher.java:[14,9] cannot find symbol"), report);
@@ -1289,7 +1289,7 @@ class PipelineTest {
         int code = new Pipeline(stub, ALWAYS_PASS).build(module, root.resolve("sky.lock"),
                 root.resolve("build/jvm-jakarta"), quiet(), new PrintStream(err));
 
-        assertEquals(1, code, "hand-written bodies obey the same effects budget");
+        assertEquals(2, code, "hand-written bodies obey the same effects budget");
         assertEquals(0, stub.calls(), "a native violation must not trigger regeneration");
         assertTrue(err.toString().contains("clock"), err.toString());
     }
@@ -1304,7 +1304,7 @@ class PipelineTest {
         int code = new Pipeline(stub, alwaysFail).build(module, root.resolve("sky.lock"),
                 root.resolve("build/jvm-jakarta"), quiet(), quiet());
 
-        assertEquals(1, code, "a native body failing its contracts fails the build");
+        assertEquals(2, code, "a native body failing its contracts fails the build");
         assertEquals(0, stub.calls(), "the model must never be asked to rewrite a native body");
     }
 

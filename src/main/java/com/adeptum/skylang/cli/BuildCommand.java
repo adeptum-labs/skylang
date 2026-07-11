@@ -99,8 +99,9 @@ public final class BuildCommand implements Callable<Integer> {
                     .build(module, lockPath, root.resolve("build").resolve(active.profile().id()),
                             System.out, System.err, recheck);
         } catch (ConfigException | SynthException e) {
+            // Exit 3: generation could not reach a model — a configuration or provider error.
             System.err.println("error: " + e.getMessage());
-            return 1;
+            return 3;
         }
     }
 }

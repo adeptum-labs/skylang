@@ -60,6 +60,13 @@ import java.util.stream.Stream;
  */
 public final class Pipeline {
 
+    /**
+     * The exit-code convention: 0 success; 1 a hard-layer error (raised before the pipeline
+     * runs); 2 a verification failure — a body could not satisfy its contracts, examples, or
+     * policies; 3 a configuration or provider error (raised by the CLI around the pipeline).
+     */
+    public static final int VERIFICATION_FAILED = 2;
+
     private final Llm client;
     private final Verifier verifier;
     private final Profile profile;
@@ -179,7 +186,7 @@ public final class Pipeline {
                 if (!violations.isEmpty()) {
                     err.println("build failed: " + u.key + " (native) reaches outside its budget:");
                     violations.forEach(v -> err.println("  " + v));
-                    return 1;
+                    return VERIFICATION_FAILED;
                 }
                 u.fresh = true;
                 anyFresh = true;
@@ -191,7 +198,7 @@ public final class Pipeline {
             }
         }
         if (!synthesizeAll(module, toSynthesize, out, err)) {
-            return 1;
+            return VERIFICATION_FAILED;
         }
 
         // Resolve views: reuse frozen markup, else synthesize and dispose against its expectations.
@@ -212,7 +219,7 @@ public final class Pipeline {
             } else {
                 err.println("build failed: view " + u.view.name()
                         + " did not satisfy its expectations after " + (maxRegenerations + 1) + " attempt(s).");
-                return 1;
+                return VERIFICATION_FAILED;
             }
         }
 
@@ -531,13 +538,13 @@ public final class Pipeline {
                 err.println("  -> the failing file is in the staged project; the fix belongs in the");
                 err.println("     java block of the .sky source.");
             }
-            return 1;
+            return VERIFICATION_FAILED;
         }
         List<VerifyReport.ClauseFailure> failures = VerifyReport.clauseFailures(output);
         if (failures.isEmpty()) {
             err.println("build failed: synthesized code did not satisfy its contracts/examples.");
             err.println(output);
-            return 1;
+            return VERIFICATION_FAILED;
         }
         for (Unit u : units) {
             List<String> clauses = failures.stream()
@@ -567,7 +574,7 @@ public final class Pipeline {
                 clauses.forEach(c -> err.println("    " + c));
             }
         }
-        return 1;
+        return VERIFICATION_FAILED;
     }
 
     /** Two examples with the same arguments demanding different outcomes can never both pass. */

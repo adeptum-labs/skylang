@@ -80,8 +80,9 @@ public final class PreviewCommand implements Callable<Integer> {
             Path buildDir = root.resolve("build").resolve(ActiveProfile.resolve(profile, file));
             return new PreviewSession(llm).run(module, file, lockPath, buildDir, port, "mvn", System.out, System.err);
         } catch (ConfigException | SynthException e) {
+            // Exit 3: generation could not reach a model — a configuration or provider error.
             System.err.println("error: " + e.getMessage());
-            return 1;
+            return 3;
         }
     }
 }

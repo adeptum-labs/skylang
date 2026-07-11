@@ -108,6 +108,6 @@ class TsStagedVerifyE2ETest {
         int code = new Pipeline(new StubLlm(wrong), new NodeVerifier(), 0, TsProfile.INSTANCE)
                 .build(checkedModule(), root.resolve("sky.lock"), root.resolve("build/ts-node"),
                         new PrintStream(new ByteArrayOutputStream()), new PrintStream(err));
-        assertEquals(1, code, "wrong arithmetic must fail the ensures test");
+        assertEquals(2, code, "wrong arithmetic must fail the ensures test — a verification failure");
     }
 }
