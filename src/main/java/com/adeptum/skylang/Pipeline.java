@@ -414,20 +414,31 @@ public final class Pipeline {
         if (fresh.isEmpty()) {
             return true;
         }
-        if (fresh.size() == 1) {
-            return resolveBody(module, fresh.get(0), out, err);
+        int total = fresh.size();
+        if (total == 1) {
+            Unit only = fresh.get(0);
+            out.println("  synthesizing 1 body: " + label(only) + " ...");
+            boolean ok = resolveBody(module, only, out, err);
+            out.printf("  %-28s ▸ drafted (1/1)%n", label(only));
+            return ok;
         }
+        out.println("  synthesizing " + total + " bodies concurrently (model calls) ...");
         record Attempt(java.io.ByteArrayOutputStream transcript,
                        java.util.concurrent.Future<Boolean> passed) {
         }
-        var pool = java.util.concurrent.Executors.newFixedThreadPool(Math.min(4, fresh.size()));
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(Math.min(4, total));
+        var done = new java.util.concurrent.atomic.AtomicInteger();
         try {
             List<Attempt> attempts = new ArrayList<>();
             for (Unit u : fresh) {
                 var transcript = new java.io.ByteArrayOutputStream();
                 var stream = new PrintStream(transcript, true, java.nio.charset.StandardCharsets.UTF_8);
-                attempts.add(new Attempt(transcript,
-                        pool.submit(() -> resolveBody(module, u, stream, stream))));
+                attempts.add(new Attempt(transcript, pool.submit(() -> {
+                    boolean ok = resolveBody(module, u, stream, stream);
+                    out.printf("  %-28s ▸ %s (%d/%d)%n", label(u),
+                            ok ? "drafted" : "over budget", done.incrementAndGet(), total);
+                    return ok;
+                })));
             }
             boolean all = true;
             for (Attempt attempt : attempts) {
@@ -484,6 +495,7 @@ public final class Pipeline {
 
     /** Synthesize a view and re-synthesize until its expectations hold or the attempts run out. */
     private boolean resolveView(Ast.Module module, ViewUnit u, PrintStream out) {
+        out.println("  synthesizing page " + u.view.name() + " (markup + backing bean) ...");
         u.artifact = synthesizeView(module, u.view);
         List<String> unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup());
         int attempts = 0;
@@ -508,6 +520,7 @@ public final class Pipeline {
 
     /** Synthesize a composite component and dispose it against its declaration. */
     private boolean resolveComponent(Ast.Module module, ComponentUnit u, PrintStream out) {
+        out.println("  synthesizing component " + u.component.name() + " ...");
         u.markup = uiPrompts.extractFenced(client.complete(
                 uiPrompts.componentSystem(), uiPrompts.componentUser(module, u.component)), "xhtml");
         List<String> unmet = componentVerifier.unmetExpectations(u.component, u.markup);
@@ -525,6 +538,7 @@ public final class Pipeline {
 
     /** Synthesize a flow's navigation graph and walk it against the declared expectations. */
     private boolean resolveFlow(FlowUnit u, PrintStream out) {
+        out.println("  synthesizing flow " + u.flow.name() + " ...");
         u.graphJson = uiPrompts.extractFenced(client.complete(
                 uiPrompts.flowSystem(), uiPrompts.flowUser(u.flow)), "json");
         List<String> unmet = flowVerifier.unmetExpectations(u.flow, flowVerifier.parse(u.graphJson));
@@ -783,11 +797,17 @@ public final class Pipeline {
                     || (!implicated.isEmpty() && !implicated.contains(label(u)))) {
                 continue;
             }
-            String pad = " ".repeat(2 + Math.max(28, label(u).length()) + 1);
-            failures.stream().filter(f -> (f.service() + "." + f.method()).equals(label(u)))
-                    .forEach(f -> out.printf("  %-28s \u25b8 candidate %d: %s  \u2717 FAILED%n",
-                            label(u), u.candidate, f.clause()));
-            out.println(pad + "\u25b8 regenerating ...");
+            List<VerifyReport.ClauseFailure> mine = failures.stream()
+                    .filter(f -> (f.service() + "." + f.method()).equals(label(u)))
+                    .toList();
+            mine.forEach(f -> out.printf("  %-28s \u25b8 candidate %d: %s  \u2717 FAILED%n",
+                    label(u), u.candidate, f.clause()));
+            if (mine.isEmpty()) {
+                out.printf("  %-28s \u25b8 regenerating ...%n", label(u));
+            } else {
+                String pad = " ".repeat(2 + Math.max(28, label(u).length()) + 1);
+                out.println(pad + "\u25b8 regenerating ...");
+            }
             u.body = synthesize(module, u);
             u.candidate++;
         }
