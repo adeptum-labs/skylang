@@ -181,7 +181,7 @@ public final class StudioServer implements AutoCloseable {
                 }
                 function renderPanel() {
                   let h = '<div class="grp"><div class="lbl">Columns <em>verified</em></div><ul class="cols">';
-                  spec.order.forEach((c, i) => h += '<li data-col="' + esc(c) + '"><span>' + esc(c) + '</span><span class="mv">'
+                  spec.order.forEach((c, i) => h += '<li draggable="true" data-col="' + esc(c) + '" data-i="' + i + '"><span>' + esc(c) + '</span><span class="mv">'
                     + '<button data-mv="-1" data-i="' + i + '">&#8593;</button>'
                     + '<button data-mv="1" data-i="' + i + '">&#8595;</button></span></li>');
                   h += '</ul></div>';
@@ -224,6 +224,24 @@ public final class StudioServer implements AutoCloseable {
                       'label=' + encodeURIComponent(label) + '&region=' + encodeURIComponent(t.value));
                     else setChange('clearActionRegion', 'label=' + encodeURIComponent(label));
                   }
+                });
+                let dragCol = null;
+                document.addEventListener('dragstart', e => {
+                  const li = e.target.closest('.panel li[data-col]');
+                  if (li) { dragCol = parseInt(li.getAttribute('data-i'), 10); e.dataTransfer.effectAllowed = 'move'; }
+                });
+                document.addEventListener('dragover', e => { if (e.target.closest('.panel li[data-col]')) e.preventDefault(); });
+                document.addEventListener('drop', e => {
+                  const li = e.target.closest('.panel li[data-col]');
+                  if (!li || dragCol === null) return;
+                  e.preventDefault();
+                  const to = parseInt(li.getAttribute('data-i'), 10);
+                  if (to !== dragCol) {
+                    const moved = spec.order.splice(dragCol, 1)[0];
+                    spec.order.splice(to, 0, moved);
+                    setChange('setColumnOrder', 'columns=' + encodeURIComponent(spec.order.join(',')));
+                  }
+                  dragCol = null;
                 });
                 function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s; }
                 window.addEventListener('message', e => {
@@ -269,7 +287,7 @@ public final class StudioServer implements AutoCloseable {
                 .panel .lbl em { font-style: normal; font-size: 0.68rem; color: #2a7d5a; background: #dff3e8; padding: 0 0.3rem; border-radius: 3px; margin-left: 0.25rem; }
                 .panel select { width: 100%; padding: 0.3rem; border: 1px solid #bcc; border-radius: 4px; font: inherit; }
                 .panel ul.cols { list-style: none; margin: 0; padding: 0; }
-                .panel ul.cols li { display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0.4rem; background: #fff; border: 1px solid #dde; border-radius: 4px; margin-bottom: 0.2rem; }
+                .panel ul.cols li { display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0.4rem; background: #fff; border: 1px solid #dde; border-radius: 4px; margin-bottom: 0.2rem; cursor: grab; }
                 .panel .mv button { border: 0; background: #e3eaea; border-radius: 3px; cursor: pointer; margin-left: 0.15rem; padding: 0.1rem 0.35rem; }
                 .panel .hint { color: #789; }
                 .panel .sel { outline: 2px solid #2a7d5a; outline-offset: 1px; border-radius: 4px; }
