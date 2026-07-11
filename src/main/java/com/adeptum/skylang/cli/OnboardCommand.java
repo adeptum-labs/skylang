@@ -35,15 +35,21 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 
 /**
- * {@code sky onboard} — one-time setup. Picks a provider (OpenAI or Anthropic), captures an API
- * key, validates it with a small live call, and writes {@code ~/.sky/config}. After this,
- * {@code sky build} needs no environment variables.
+ * {@code sky onboard} — provider setup. Picks a provider (OpenAI or Anthropic), a model, and an API
+ * key, validates the key with a small live call, and writes {@code ~/.sky/config}. Re-running it
+ * edits an existing config: the current provider, model, and key are offered as defaults, so
+ * changing just the model is a matter of accepting the rest. {@code sky onboard --model NAME} on an
+ * existing config changes only the model, reusing the stored provider and key.
  */
-@Command(name = "onboard", description = "Configure the LLM provider and API key (writes ~/.sky/config).")
+@Command(name = "onboard", description = "Configure the provider, model, and API key (writes ~/.sky/config).")
 public final class OnboardCommand implements Callable<Integer> {
+
+    /** The credential store; injectable so tests need not touch the real {@code ~/.sky}. */
+    ConfigStore store;
 
     @Option(names = {"-p", "--provider"}, description = "anthropic or openai")
     String provider;
@@ -51,7 +57,9 @@ public final class OnboardCommand implements Callable<Integer> {
     @Option(names = {"-k", "--api-key", "--key"}, description = "API key (prompted if omitted)")
     String apiKey;
 
-    @Option(names = "--model", description = "Model name (defaults to the provider's default).")
+    @Option(names = "--model",
+            description = "Model name. On an existing config, changes only the model, reusing the "
+                    + "stored provider and key. Prompted (with a default) if omitted.")
     String model;
 
     @Option(names = "--no-validate", description = "Skip the live validation call before saving.")
@@ -63,35 +71,29 @@ public final class OnboardCommand implements Callable<Integer> {
 
     @Override
     public Integer call() {
+        ConfigStore store = store();
         if (show) {
-            return showResolved();
+            return showResolved(store);
         }
         try {
-            Provider p = (provider != null && !provider.isBlank())
-                    ? Provider.parse(provider) : promptProvider();
-            String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : promptKey();
-            String chosenModel = (model != null && !model.isBlank()) ? model : p.defaultModel();
+            Optional<SkyConfig> existing = store.load();
 
-            SkyConfig config = new SkyConfig(p, key.trim(), chosenModel);
-
-            if (!noValidate) {
-                System.out.print("Validating " + p.id() + " key against " + chosenModel + " … ");
-                System.out.flush();
-                try {
-                    LangChain4jLlm.validate(config);
-                    System.out.println("ok");
-                } catch (RuntimeException e) {
-                    System.out.println("failed");
-                    System.err.println("error: " + e.getMessage());
-                    System.err.println("(use --no-validate to save the key without checking it)");
-                    return 1;
-                }
+            // `sky onboard --model NAME` on an existing config changes only the model.
+            if (hasModelFlag() && provider == null && apiKey == null && existing.isPresent()) {
+                return changeModel(store, existing.get(), model.trim());
             }
 
-            ConfigStore store = new ConfigStore();
+            Provider p = (provider != null && !provider.isBlank())
+                    ? Provider.parse(provider) : promptProvider(existing);
+            String chosenModel = hasModelFlag() ? model.trim() : promptModel(p, existing);
+            String key = (apiKey != null && !apiKey.isBlank()) ? apiKey : promptKey(existing);
+
+            SkyConfig config = new SkyConfig(p, key.trim(), chosenModel);
+            if (!validate(config)) {
+                return 1;
+            }
             store.save(config);
-            System.out.printf("Saved %s%n  provider: %s%n  model:    %s%n  key:      %s%n",
-                    store.path(), p.id(), chosenModel, config.maskedKey());
+            printSaved(store, config);
             return 0;
         } catch (ConfigException e) {
             System.err.println("error: " + e.getMessage());
@@ -99,8 +101,52 @@ public final class OnboardCommand implements Callable<Integer> {
         }
     }
 
-    private Integer showResolved() {
-        ConfigStore store = new ConfigStore();
+    private ConfigStore store() {
+        return store != null ? store : new ConfigStore();
+    }
+
+    private boolean hasModelFlag() {
+        return model != null && !model.isBlank();
+    }
+
+    /** Change only the model, keeping the stored provider and key. */
+    private Integer changeModel(ConfigStore store, SkyConfig existing, String newModel) {
+        SkyConfig updated = new SkyConfig(existing.provider(), existing.apiKey(), newModel);
+        if (!validate(updated)) {
+            return 1;
+        }
+        store.save(updated);
+        System.out.printf("Updated model to %s (provider %s).%n  %s%n",
+                newModel, updated.provider().id(), store.path());
+        return 0;
+    }
+
+    /** Validate the key against the model with a small live call, unless {@code --no-validate}. */
+    private boolean validate(SkyConfig config) {
+        if (noValidate) {
+            return true;
+        }
+        System.out.print("Validating " + config.provider().id()
+                + " key against " + config.model() + " … ");
+        System.out.flush();
+        try {
+            LangChain4jLlm.validate(config);
+            System.out.println("ok");
+            return true;
+        } catch (RuntimeException e) {
+            System.out.println("failed");
+            System.err.println("error: " + e.getMessage());
+            System.err.println("(use --no-validate to save without checking it)");
+            return false;
+        }
+    }
+
+    private void printSaved(ConfigStore store, SkyConfig config) {
+        System.out.printf("Saved %s%n  provider: %s%n  model:    %s%n  key:      %s%n",
+                store.path(), config.provider().id(), config.model(), config.maskedKey());
+    }
+
+    private Integer showResolved(ConfigStore store) {
         try {
             System.out.print(renderShow(store.describe(), store.path()));
             return 0;
@@ -144,33 +190,63 @@ public final class OnboardCommand implements Callable<Integer> {
         return String.format("  %-9s %-24s (%s)%n", key, value, origin.label());
     }
 
-    private Provider promptProvider() {
-        String answer = readLine("Provider [anthropic/openai]: ");
+    private Provider promptProvider(Optional<SkyConfig> existing) {
+        Optional<Provider> current = existing.map(SkyConfig::provider);
+        String suffix = current.map(c -> " [" + c.id() + "]").orElse("");
+        String answer = readLine("Provider (anthropic / openai)" + suffix + ": ");
+        if (answer.isBlank() && current.isPresent()) {
+            return current.get();
+        }
         return Provider.parse(answer);
     }
 
-    private String promptKey() {
+    private String promptModel(Provider p, Optional<SkyConfig> existing) {
+        String preset = defaultModel(p, existing);
+        String answer = readLine("Model [" + preset + "]: ");
+        return answer.isBlank() ? preset : answer.trim();
+    }
+
+    /** The model the prompt offers by default: the current one for this provider, else its default. */
+    static String defaultModel(Provider p, Optional<SkyConfig> existing) {
+        return existing.filter(e -> e.provider() == p).map(SkyConfig::model).orElse(p.defaultModel());
+    }
+
+    private String promptKey(Optional<SkyConfig> existing) {
+        String prompt = existing.isPresent() ? "API key (enter to keep current): " : "API key: ";
         Console console = System.console();
         if (console != null) {
-            char[] chars = console.readPassword("API key: ");
+            char[] chars = console.readPassword(prompt);
             if (chars == null || chars.length == 0) {
-                throw new ConfigException("no API key entered");
+                return keepOrFail(existing);
             }
             return new String(chars);
         }
-        String key = readLine("API key: ");
+        String key = readLine(prompt);
         if (key.isBlank()) {
-            throw new ConfigException("no API key entered");
+            return keepOrFail(existing);
         }
         return key;
     }
 
+    private static String keepOrFail(Optional<SkyConfig> existing) {
+        if (existing.isPresent()) {
+            return existing.get().apiKey();
+        }
+        throw new ConfigException("no API key entered");
+    }
+
+    // One reader for the whole command: a fresh reader per prompt would lose input its buffer
+    // already read ahead, so piped answers past the first prompt would vanish.
+    private BufferedReader stdin;
+
     private String readLine(String prompt) {
         System.out.print(prompt);
         System.out.flush();
+        if (stdin == null) {
+            stdin = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        }
         try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
-            String line = reader.readLine();
+            String line = stdin.readLine();
             return line == null ? "" : line.strip();
         } catch (IOException e) {
             throw new ConfigException("could not read input: " + e.getMessage());
