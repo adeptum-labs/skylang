@@ -27,7 +27,9 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -39,6 +41,16 @@ import java.util.concurrent.TimeUnit;
 public final class PreviewProcess implements AutoCloseable {
 
     private static final String READY_MARKER = "PREVIEW READY app=";
+
+    // Every container subprocess is tracked from the moment it starts, so a JVM shutdown — Ctrl-C
+    // while a launch is still waiting for the readiness marker, before any owner can hold a
+    // reference — still force-kills it instead of orphaning a TomEE.
+    private static final Set<Process> LIVE = ConcurrentHashMap.newKeySet();
+
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(
+                () -> LIVE.forEach(Process::destroyForcibly), "sky-preview-reaper"));
+    }
 
     private final Process process;
     private final int appPort;
@@ -57,6 +69,7 @@ public final class PreviewProcess implements AutoCloseable {
                 .directory(buildDir.toFile())
                 .redirectErrorStream(true)
                 .start();
+        LIVE.add(process);
 
         // A single reader drains all child output, completing when it sees the readiness marker.
         CompletableFuture<Integer> ready = new CompletableFuture<>();
@@ -83,6 +96,7 @@ public final class PreviewProcess implements AutoCloseable {
             int port = ready.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             return new PreviewProcess(process, port);
         } catch (Exception e) {
+            LIVE.remove(process);
             process.destroyForcibly();
             throw new IOException("preview server did not become ready in time", e);
         }
@@ -99,6 +113,7 @@ public final class PreviewProcess implements AutoCloseable {
 
     @Override
     public void close() {
+        LIVE.remove(process);
         process.destroy();
         try {
             if (!process.waitFor(5, TimeUnit.SECONDS)) {

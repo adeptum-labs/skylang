@@ -22,6 +22,7 @@
 package com.adeptum.skylang.preview;
 
 import com.adeptum.skylang.Pipeline;
+import com.adeptum.skylang.Ticker;
 import com.adeptum.skylang.backend.Profile;
 import com.adeptum.skylang.deps.Budget;
 import com.adeptum.skylang.front.Parsing;
@@ -72,8 +73,8 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
     private String activeSource;        // the .sky text the container currently reflects
     private String savedSource;         // the .sky text on disk (last accepted)
     private String lastAppliedSource;   // suppresses the watcher's echo of our own writes
-    private PreviewProcess container;
-    private StudioServer studio;
+    private volatile PreviewProcess container;
+    private volatile StudioServer studio;
 
     public PreviewSession(Llm llm, Verifier verifier, Profile profile, Budget deps) {
         this.llm = llm;
@@ -115,9 +116,18 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
 
     @Override
     public void close() {
-        studio.close();
-        synchronized (lock) {
-            container.close();
+        // Deliberately not under `lock`. This runs from the JVM shutdown hook, and the main thread
+        // may hold `lock` while blocked in a launch that is waiting for the container to report
+        // ready. Waiting for the lock here would freeze Ctrl-C at "staged: ..." until that launch
+        // times out. Destroying the container instead makes the wait fail fast, so the preview stops
+        // at once. The fields are volatile so the shutdown thread sees the latest instances.
+        StudioServer currentStudio = studio;
+        if (currentStudio != null) {
+            currentStudio.close();
+        }
+        PreviewProcess currentContainer = container;
+        if (currentContainer != null) {
+            currentContainer.close();
         }
     }
 
@@ -254,7 +264,9 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
                     + "`sky freeze` to regenerate frozen bodies, then preview again. "
                     + "(the studio was not launched)");
         }
-        return PreviewProcess.launch(buildDir, mavenCommand, module.name(), Duration.ofMinutes(5));
+        try (Ticker ticker = Ticker.start(out, "starting the preview container")) {
+            return PreviewProcess.launch(buildDir, mavenCommand, module.name(), Duration.ofMinutes(5));
+        }
     }
 
     /** Launch a fresh container for {@code module}, swap it in, and re-frame the studio. */
