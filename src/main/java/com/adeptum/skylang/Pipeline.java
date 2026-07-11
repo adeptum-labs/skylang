@@ -201,6 +201,10 @@ public final class Pipeline {
         if (!deps.declared().isEmpty()) {
             out.println();
         }
+        for (String warning : com.adeptum.skylang.types.ViewFeasibility.warnings(module)) {
+            out.println(warning);
+            out.println();
+        }
         lock.setProfile(profile.id(), profile.version());
         Map<String, Lock.Dep> pinned = new LinkedHashMap<>();
         for (Resolved r : deps.declared()) {

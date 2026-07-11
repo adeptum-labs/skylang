@@ -55,6 +55,10 @@ public final class CheckCommand implements Callable<Integer> {
             new TypeChecker().check(module);
             ActiveProfile.activate(profile, file, module);   // the portability boundary is frontend
             checkpoint(module);
+            for (String warning : com.adeptum.skylang.types.ViewFeasibility.warnings(module)) {
+                System.out.println();
+                System.out.println(warning);
+            }
             return 0;
         } catch (SkyParseException | CheckException | ConfigException e) {
             System.err.println("error [frontend]: " + e.getMessage());
