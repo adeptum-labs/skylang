@@ -21,6 +21,9 @@
 
 package com.adeptum.skylang;
 
+import com.adeptum.skylang.backend.JvmProfile;
+import com.adeptum.skylang.deps.Budget;
+import com.adeptum.skylang.deps.Registry;
 import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.preview.EditResult;
@@ -42,6 +45,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -95,6 +100,15 @@ class PreviewSessionE2ETest {
     private static final String RESTOCK_BODY = "return new Product(id, \"Item\", units);";
     private static final Verifier ALWAYS_PASS = dir -> VerificationResult.pass();
 
+    /** A no-dependency budget for the jvm-jakarta profile, matching the frozen fixture. */
+    private static Budget noDeps() {
+        return new Budget(List.of(), Registry.forProfile("jvm-jakarta", Optional.empty()).prefixIndex());
+    }
+
+    private static PreviewSession preview(Llm llm) {
+        return new PreviewSession(llm, ALWAYS_PASS, JvmProfile.INSTANCE, noDeps());
+    }
+
     /** Serves method bodies, view markup, and — for an edit — an appears predicate. */
     private static StubLlm studioStub() {
         return new StubLlm((system, user) -> {
@@ -129,7 +143,7 @@ class PreviewSessionE2ETest {
         Llm forbidden = (system, user) -> {
             throw new AssertionError("the model was called for a frozen view");
         };
-        try (PreviewSession session = new PreviewSession(forbidden)) {
+        try (PreviewSession session = preview(forbidden)) {
             PreviewSession.Handle handle = session.open(module, sky, lock, buildDir, 0, "mvn", quiet(), quiet());
             HttpResponse<String> view = get("http://localhost:" + handle.appPort() + "/app/ProductList.xhtml");
             assertEquals(200, view.statusCode(), () -> view.body());
@@ -147,7 +161,7 @@ class PreviewSessionE2ETest {
 
         new Pipeline(studioStub(), ALWAYS_PASS).build(module, lock, buildDir, quiet(), quiet());
 
-        try (PreviewSession session = new PreviewSession(studioStub())) {
+        try (PreviewSession session = preview(studioStub())) {
             session.open(module, sky, lock, buildDir, 0, "mvn", quiet(), quiet());
 
             EditResult edit = session.edit("ProductList", "make the rows compact");

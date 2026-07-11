@@ -22,13 +22,14 @@
 package com.adeptum.skylang.preview;
 
 import com.adeptum.skylang.Pipeline;
+import com.adeptum.skylang.backend.Profile;
+import com.adeptum.skylang.deps.Budget;
 import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.SourceEditor;
 import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.synth.AppearsCompiler;
 import com.adeptum.skylang.synth.Llm;
 import com.adeptum.skylang.types.TypeChecker;
-import com.adeptum.skylang.verify.VerificationResult;
 import com.adeptum.skylang.verify.Verifier;
 
 import java.io.IOException;
@@ -51,10 +52,13 @@ import java.util.List;
  */
 public final class PreviewSession implements EditHandler, AutoCloseable {
 
-    /** Staging skips the Maven verifier — the preview server compiles and serves the project itself. */
-    private static final Verifier STAGE_ONLY = dir -> VerificationResult.pass();
+    /** Candidates per method the preview build tries before giving up (retries = attempts − 1). */
+    private static final int PREVIEW_ATTEMPTS = 4;
 
     private final Llm llm;
+    private final Verifier verifier;
+    private final Profile profile;
+    private final Budget deps;
     private final AppearsCompiler appearsCompiler;
     private final Object lock = new Object();
 
@@ -71,8 +75,11 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
     private PreviewProcess container;
     private StudioServer studio;
 
-    public PreviewSession(Llm llm) {
+    public PreviewSession(Llm llm, Verifier verifier, Profile profile, Budget deps) {
         this.llm = llm;
+        this.verifier = verifier;
+        this.profile = profile;
+        this.deps = deps;
         this.appearsCompiler = new AppearsCompiler(llm);
     }
 
@@ -93,7 +100,7 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
             this.activeSource = Files.readString(sourceFile);
             this.savedSource = activeSource;
             this.lastAppliedSource = activeSource;
-            this.container = stageAndLaunch(module, out, err);
+            this.container = stageAndLaunch(module, true, out, err);   // full verify before launching
             this.studio = new StudioServer(controlPort, container.appPort(), viewNames(module), this, true);
             return new Handle(studio.port(), container.appPort());
         }
@@ -231,17 +238,28 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
 
     // ----- machinery ---------------------------------------------------------
 
-    private PreviewProcess stageAndLaunch(Ast.Module module, PrintStream out, PrintStream err) throws IOException {
-        int staged = new Pipeline(llm, STAGE_ONLY).preview().build(module, lockPath, buildDir, out, err);
+    /**
+     * Synthesize any unbuilt bodies and verify the staged project the same way {@code sky build}
+     * does, so the preview only ever launches code that compiles and passes. With {@code recheck}
+     * the whole project is re-verified even when every body is frozen, which catches a stale or
+     * broken {@code sky.lock}. A verification failure aborts before the container is launched.
+     */
+    private PreviewProcess stageAndLaunch(Ast.Module module, boolean recheck, PrintStream out, PrintStream err)
+            throws IOException {
+        int staged = new Pipeline(llm, verifier, PREVIEW_ATTEMPTS, profile, deps)
+                .preview().build(module, lockPath, buildDir, out, err, recheck);
         if (staged != 0) {
-            throw new IOException("could not stage the views for preview");
+            throw new IOException("the project did not verify — it does not compile, or a contract, "
+                    + "test, or view check failed (see the errors above). Fix the spec, or run "
+                    + "`sky freeze` to regenerate frozen bodies, then preview again. "
+                    + "(the studio was not launched)");
         }
         return PreviewProcess.launch(buildDir, mavenCommand, module.name(), Duration.ofMinutes(5));
     }
 
     /** Launch a fresh container for {@code module}, swap it in, and re-frame the studio. */
     private void relaunch(Ast.Module module) throws IOException {
-        PreviewProcess next = stageAndLaunch(module, out, err);
+        PreviewProcess next = stageAndLaunch(module, false, out, err);
         container.close();
         container = next;
         studio.setAppPort(next.appPort());

@@ -82,11 +82,20 @@ public final class PreviewCommand implements Callable<Integer> {
         Path root = file.toAbsolutePath().getParent();
         Path lockPath = root.resolve("sky.lock");
 
+        ActiveProfile.Activation active;
+        try {
+            active = ActiveProfile.activate(profile, file, module);
+        } catch (ConfigException | CheckException e) {
+            System.err.println("error [frontend]: " + e.getMessage());
+            return 1;
+        }
+
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);   // resolved lazily; frozen views need no key
 
         try {
-            Path buildDir = root.resolve("build").resolve(ActiveProfile.resolve(profile, file));
-            return new PreviewSession(llm).run(module, file, lockPath, buildDir, port, "mvn", System.out, System.err);
+            Path buildDir = root.resolve("build").resolve(active.profile().id());
+            return new PreviewSession(llm, active.profile().verifier(), active.profile(), active.deps())
+                    .run(module, file, lockPath, buildDir, port, "mvn", System.out, System.err);
         } catch (ConfigException | SynthException e) {
             // Exit 3: generation could not reach a model — a configuration or provider error.
             System.err.println("error: " + e.getMessage());
