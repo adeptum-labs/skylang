@@ -321,13 +321,11 @@ public final class ProjectStager {
         boolean web = !module.views().isEmpty();
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(pkg).append(";\n\n");
-        if (web) {
-            // A view's backing bean injects the service, so under the web profile it is a CDI bean.
-            sb.append("@jakarta.enterprise.context.ApplicationScoped\n");
-            sb.append("public class ").append(service.name()).append(" {\n");
-        } else {
-            sb.append("public final class ").append(service.name()).append(" {\n");
-        }
+        // Every generated service is a CDI bean, so a SkyLang module drops into an existing
+        // application's injection container like any hand-written service — the annotation
+        // costs nothing outside a container, and web views inject the service anyway.
+        sb.append("@jakarta.enterprise.context.ApplicationScoped\n");
+        sb.append("public class ").append(service.name()).append(" {\n");
         sb.append(effectHandles(service, web));
         for (Ast.Method m : service.methods()) {
             String key = methodKey(module.name(), service.name(), m.name());
@@ -1156,6 +1154,12 @@ public final class ProjectStager {
                   </properties>
                   <dependencies>
                 %s    <dependency>
+                      <groupId>jakarta.enterprise</groupId>
+                      <artifactId>jakarta.enterprise.cdi-api</artifactId>
+                      <version>4.0.1</version>
+                      <scope>provided</scope>
+                    </dependency>
+                    <dependency>
                       <groupId>org.junit.jupiter</groupId>
                       <artifactId>junit-jupiter</artifactId>
                       <version>5.10.2</version>
