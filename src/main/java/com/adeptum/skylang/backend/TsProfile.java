@@ -167,6 +167,32 @@ public final class TsProfile implements Profile {
     }
 
     @Override
+    public boolean emit(String projectName, Path buildDir, java.io.PrintStream out) {
+        String tsc = System.getenv().getOrDefault("SKY_TSC", "tsc");
+        ProcessBuilder pb = new ProcessBuilder(tsc, "-p", ".")
+                .directory(buildDir.toFile())
+                .redirectErrorStream(true);
+        try {
+            Process process = pb.start();
+            String output = new String(process.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            if (process.waitFor() != 0) {
+                out.println("error [backend]: tsc failed");
+                out.print(output);
+                return false;
+            }
+        } catch (java.io.IOException e) {
+            out.println("error [backend]: could not run '" + tsc + "' (set SKY_TSC): " + e.getMessage());
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        out.println("  build/" + ID + " ▸ tsc ▸ dist/" + projectName);
+        return true;
+    }
+
+    @Override
     public String systemPrompt() {
         return prompts.system();
     }

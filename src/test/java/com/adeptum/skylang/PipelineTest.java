@@ -272,6 +272,7 @@ class PipelineTest {
                 stager.stage(module, bodies, deps, dir);
             }
             public Verifier verifier() { return ALWAYS_PASS; }
+            public boolean emit(String projectName, Path dir, java.io.PrintStream out) { return true; }
             public String systemPrompt() { return prompts.system(); }
             public String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method,
                                      List<com.adeptum.skylang.deps.Resolved> deps) {

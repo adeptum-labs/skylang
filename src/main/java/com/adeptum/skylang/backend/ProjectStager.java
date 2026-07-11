@@ -72,7 +72,8 @@ public final class ProjectStager {
             Files.createDirectories(test);
             boolean db = SupportClasses.effectsOf(module).contains("db");
             Files.writeString(buildDir.resolve("pom.xml"),
-                    module.views().isEmpty() ? pom(db, deps) : webPom(db, deps));
+                    module.views().isEmpty() ? pom(module.name(), db, deps)
+                            : webPom(module.name(), db, deps));
 
             for (String support : SupportClasses.used(module)) {
                 Files.writeString(main.resolve(support + ".java"),
@@ -1017,7 +1018,8 @@ public final class ProjectStager {
         return sb.toString();
     }
 
-    private static String pom(boolean db, java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
+    private static String pom(String name, boolean db,
+                              java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
         String persistence = depsXml(deps) + (!db ? "" : """
                     <dependency>
                       <groupId>jakarta.persistence</groupId>
@@ -1059,6 +1061,7 @@ public final class ProjectStager {
                     </dependency>
                   </dependencies>
                   <build>
+                    <finalName>%s</finalName>
                     <plugins>
                       <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
@@ -1068,7 +1071,7 @@ public final class ProjectStager {
                     </plugins>
                   </build>
                 </project>
-                """.formatted(persistence);
+                """.formatted(persistence, name);
     }
 
     /**
@@ -1076,7 +1079,8 @@ public final class ProjectStager {
      * Mojarra as the sole Faces implementation, so a generated view renders in-container for
      * verification. TomEE provides the APIs, so the aggregate api jar stays off the runtime classpath.
      */
-    private static String webPom(boolean db, java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
+    private static String webPom(String name, boolean db,
+                                 java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
         String persistence = depsXml(deps) + (!db ? "" : """
                     <dependency>
                       <groupId>org.eclipse.persistence</groupId>
@@ -1167,6 +1171,7 @@ public final class ProjectStager {
                     </dependency>
                   </dependencies>
                   <build>
+                    <finalName>%s</finalName>
                     <plugins>
                       <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
@@ -1189,6 +1194,6 @@ public final class ProjectStager {
                     </plugins>
                   </build>
                 </project>
-                """.formatted(persistence);
+                """.formatted(persistence, name);
     }
 }

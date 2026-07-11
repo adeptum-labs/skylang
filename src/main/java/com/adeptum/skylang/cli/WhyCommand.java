@@ -127,13 +127,30 @@ public final class WhyCommand implements Callable<Integer> {
             return;
         }
         boolean current = frozen.get().specHash().equals(hash);
-        System.out.println("  status    " + (current
-                ? "frozen @ " + Hashing.shortHash(hash)
-                : "stale — the specification changed since the freeze (run sky build)"));
+        if (!current) {
+            System.out.println("  status    stale — the specification changed since the freeze"
+                    + " (run sky build)");
+        } else {
+            String language = switch (active.profile().nativeKeyword()) {
+                case "ts" -> "TypeScript";
+                default -> "Java";
+            };
+            long lines = frozen.get().body().lines().count();
+            System.out.println("  frozen    @ " + Hashing.shortHash(hash)
+                    + "   (" + language + ", " + lines + (lines == 1 ? " line)" : " lines)"));
+            int contracts = method.requires().size() + method.ensures().size() + method.raises().size();
+            int examples = method.examples().size() + method.specs().size();
+            System.out.println("  verified  " + counted(contracts, "contract")
+                    + counted(examples, "example"));
+        }
         String origin = method.nativeBody().isPresent() ? " (native, hand-written)" : " (synthesized, verified)";
         System.out.println();
         System.out.println("  body" + origin + ":");
         frozen.get().body().lines().forEach(line -> System.out.println("    " + line));
+    }
+
+    private static String counted(int n, String noun) {
+        return n == 0 ? "" : "✓ " + n + " " + noun + (n == 1 ? "" : "s") + "   ";
     }
 
     private static String condition(Ast.RaiseCondition condition) {

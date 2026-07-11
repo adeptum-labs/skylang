@@ -229,6 +229,10 @@ public final class Pipeline {
             facesViewStager.stage(module, viewArtifacts(viewUnits), baselines(viewUnits, lock), buildDir);
             clearCaptures(buildDir);   // a stale rasterization must never be adopted as a baseline
         }
+        boolean pureRecheck = recheck && !anyFresh && !anyViewFresh;
+        if (pureRecheck) {
+            out.println("  reading " + units.size() + " frozen bodies from sky.lock ... no model calls");
+        }
         if (anyFresh || anyViewFresh || recheck) {
             int attempts = 0;
             VerificationResult result = verifier.verify(buildDir);
@@ -242,6 +246,9 @@ public final class Pipeline {
             }
             if (!result.passed()) {
                 return reportVerifyFailure(module, units, result.output(), err);
+            }
+            if (pureRecheck) {
+                out.println("  re-verifying contracts, examples, policies, expectations ... all ✓");
             }
             for (Unit u : units) {
                 if (u.candidate > 1) {

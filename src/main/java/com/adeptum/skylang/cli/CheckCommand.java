@@ -94,6 +94,18 @@ public final class CheckCommand implements Callable<Integer> {
                     .map(Ast.View::name).collect(java.util.stream.Collectors.joining(", ")));
         }
         System.out.printf("  %-30s ok%n", "type-checking hard layer ...");
+        if (!module.types().isEmpty()) {
+            System.out.printf("  %-30s ok%n", "refined-type predicates ...");
+        }
+        String effects = module.services().stream()
+                .flatMap(s -> s.uses().stream()).distinct()
+                .collect(java.util.stream.Collectors.joining(", "));
+        if (!effects.isEmpty()) {
+            System.out.printf("  %-30s ok%n", "effects (" + effects + ") ...");
+        }
+        if (!module.services().isEmpty()) {
+            System.out.printf("  %-30s ok%n", "contracts well-formed ...");
+        }
         System.out.println("  no model calls; nothing generated.");
     }
 

@@ -103,9 +103,16 @@ public final class BuildCommand implements Callable<Integer> {
         Verifier verifier = active.profile().verifier();
 
         try {
-            return new Pipeline(llm, verifier, Math.max(0, attempts - 1), active.profile(), active.deps())
-                    .build(module, lockPath, root.resolve("build").resolve(active.profile().id()),
-                            System.out, System.err, recheck);
+            Path buildDir = root.resolve("build").resolve(active.profile().id());
+            int code = new Pipeline(llm, verifier, Math.max(0, attempts - 1),
+                    active.profile(), active.deps())
+                    .build(module, lockPath, buildDir, System.out, System.err, recheck);
+            if (code != 0 || recheck) {
+                return code;   // --recheck verifies the lock; it does not package an artifact
+            }
+            String name = com.adeptum.skylang.config.Manifest.load(root)
+                    .map(com.adeptum.skylang.config.Manifest::project).orElse(module.name());
+            return active.profile().emit(name, buildDir, System.out) ? 0 : 2;
         } catch (ConfigException | SynthException e) {
             // Exit 3: generation could not reach a model — a configuration or provider error.
             System.err.println("error: " + e.getMessage());

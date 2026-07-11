@@ -184,6 +184,19 @@ two examples as unsatisfiable together when they demand different outcomes for t
 arguments; `error [backend]` is the staged project failing to compile, with a pointer back
 to the `java` block when a native body is the culprit.
 
+The `sky` command line is a small set of focused commands, and every project command runs
+bare inside a project directory (the sole `.sky` file is the source): `check` (offline
+hard-layer checkpoint), `build` (full pipeline, ending in `build/jvm-jakarta ▸ mvn package ▸
+target/shop.jar`; `--recheck` is the offline CI form), `tdd` (watch-mode generation),
+`preview` (live view studio), `freeze` (deliberate full regeneration), `clean` (delete the
+disposable staged project; the lock is untouched), `why` (explain one method — `sky why
+Catalog.restock` prints its spec, `frozen @ <hash> (Java, N lines)` and its verified
+counts), `test` (the whole suite from the frozen lock, offline, with per-service counts and
+the policies that held), and `onboard` (credentials). Exit codes distinguish the failure
+kinds: 1 is a hard-layer error, 2 a verification failure, 3 a provider/configuration error —
+so a pipeline can respond to each. Only the generating commands (`build` on a cache miss,
+`tdd`, `freeze`) ever reach a model.
+
 The core is platform-independent; a **profile** binds it to one target. A build activates
 exactly one, declared in the `sky.project` manifest (`project shop` / `profile jvm-jakarta`;
 `--profile` overrides for experiments), and retargeting is editing that line: the profile is

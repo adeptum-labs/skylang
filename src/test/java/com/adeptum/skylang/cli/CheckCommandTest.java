@@ -100,6 +100,27 @@ class CheckCommandTest {
         assertEquals(0, exit);
         String transcript = out.toString(StandardCharsets.UTF_8);
         assertTrue(transcript.contains("services: Catalog (2 methods)"), transcript);
+        assertTrue(transcript.contains("contracts well-formed ..."), transcript);
+    }
+
+    @Test
+    void declaredEffectsAndPredicatesJoinTheListing() throws IOException {
+        Path file = dir.resolve("shop.sky");
+        Files.writeString(file, """
+                module shop
+                type Quantity = Int(1..)
+                entity Product { id Int @id  stock Int @min(0) }
+                service Catalog uses db, clock {
+                  restock(id Int, units Quantity) -> Product  intent "x"
+                }
+                """);
+
+        int exit = new CommandLine(new SkyCli()).execute("check", file.toString());
+
+        assertEquals(0, exit);
+        String transcript = out.toString(StandardCharsets.UTF_8);
+        assertTrue(transcript.contains("refined-type predicates ..."), transcript);
+        assertTrue(transcript.contains("effects (db, clock) ..."), transcript);
     }
 
     @Test

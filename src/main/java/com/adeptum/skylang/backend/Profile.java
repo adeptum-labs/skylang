@@ -66,6 +66,14 @@ public interface Profile {
     /** The platform's own toolchain, run as the verification harness over the staged project. */
     Verifier verifier();
 
+    /**
+     * Package the verified staged project into the target artifact with the platform's own
+     * toolchain, printing the emission line ({@code build/<id> ▸ mvn package ▸ target/<name>.jar}).
+     *
+     * @return true when the artifact was produced
+     */
+    boolean emit(String projectName, Path buildDir, java.io.PrintStream out);
+
     String systemPrompt();
 
     String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method, List<Resolved> deps);

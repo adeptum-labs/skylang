@@ -113,8 +113,10 @@ class WhyCommandTest {
         lock.save(dir.resolve("sky.lock"));
 
         String output = run("why", file.toString(), "Catalog.restock");
-        assertTrue(output.contains("frozen @ " + Hashing.shortHash(hash)),
-                "a matching hash means frozen:\n" + output);
+        assertTrue(output.contains("frozen    @ " + Hashing.shortHash(hash) + "   (Java, 1 line)"),
+                "a matching hash means frozen, with language and size:\n" + output);
+        assertTrue(output.contains("verified  ✓ 2 contracts   ✓ 1 example"),
+                "the verification report rides along:\n" + output);
         assertTrue(output.contains("body (synthesized, verified):"), output);
         assertTrue(output.contains("    return new Product(p.id(), p.name(), p.stock() + units);"),
                 "the frozen body should be printed indented:\n" + output);

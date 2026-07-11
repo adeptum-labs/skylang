@@ -102,10 +102,17 @@ public final class FreezeCommand implements Callable<Integer> {
 
         Llm llm = new LangChain4jLlm(new ConfigStore()::resolve);
         try {
-            return new Pipeline(llm, active.profile().verifier(), Math.max(0, attempts - 1),
+            System.out.println("  regenerating all bodies ...");
+            int code = new Pipeline(llm, active.profile().verifier(), Math.max(0, attempts - 1),
                     active.profile(), active.deps())
                     .build(module, lockPath, root.resolve("build").resolve(active.profile().id()),
                             System.out, System.err);
+            if (code == 0) {
+                int bodies = module.services().stream().mapToInt(s -> s.methods().size()).sum();
+                System.out.println("  " + bodies + " bodies re-synthesized, verified, and frozen;"
+                        + " sky.lock rewritten.");
+            }
+            return code;
         } catch (ConfigException | SynthException e) {
             // Exit 3: generation could not reach a model — a configuration or provider error.
             System.err.println("error: " + e.getMessage());

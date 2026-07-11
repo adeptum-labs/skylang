@@ -25,6 +25,7 @@ import com.adeptum.skylang.front.ast.Ast;
 import com.adeptum.skylang.synth.PromptBuilder;
 import com.adeptum.skylang.types.CheckException;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
@@ -95,6 +96,33 @@ public final class JvmProfile implements Profile {
     @Override
     public com.adeptum.skylang.verify.Verifier verifier() {
         return new com.adeptum.skylang.verify.MavenVerifier();
+    }
+
+    @Override
+    public boolean emit(String projectName, Path buildDir, java.io.PrintStream out) {
+        ProcessBuilder pb = new ProcessBuilder("mvn", "-q", "-B", "-DskipTests", "package")
+                .directory(buildDir.toFile())
+                .redirectErrorStream(true);
+        try {
+            Process process = pb.start();
+            String output = new String(process.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            if (process.waitFor() != 0) {
+                out.println("error [backend]: mvn package failed");
+                out.print(output);
+                return false;
+            }
+        } catch (java.io.IOException e) {
+            out.println("error [backend]: could not run 'mvn' (is Maven on PATH?): " + e.getMessage());
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        String artifact = Files.exists(buildDir.resolve("target/" + projectName + ".war"))
+                ? projectName + ".war" : projectName + ".jar";
+        out.println("  build/" + ID + " ▸ mvn package ▸ target/" + artifact);
+        return true;
     }
 
     @Override
