@@ -426,7 +426,7 @@ public final class Pipeline {
                 return resolveBody(module, only, out, err);
             }
         }
-        out.println("  synthesizing " + total + " bodies concurrently (model calls) ...");
+        Ticker ticker = Ticker.start(out, "synthesizing " + total + " bodies (0/" + total + ")");
         record Attempt(java.io.ByteArrayOutputStream transcript,
                        java.util.concurrent.Future<Boolean> passed) {
         }
@@ -439,12 +439,14 @@ public final class Pipeline {
                 var stream = new PrintStream(transcript, true, java.nio.charset.StandardCharsets.UTF_8);
                 attempts.add(new Attempt(transcript, pool.submit(() -> {
                     boolean ok = resolveBody(module, u, stream, stream);
-                    out.printf("  %-28s ▸ %s (%d/%d)%n", label(u),
-                            ok ? "drafted" : "over budget", done.incrementAndGet(), total);
+                    ticker.label("synthesizing " + total + " bodies ("
+                            + done.incrementAndGet() + "/" + total + ", " + label(u) + ")");
                     return ok;
                 })));
             }
             boolean all = true;
+            List<String> texts = new ArrayList<>();
+            List<Boolean> flags = new ArrayList<>();
             for (Attempt attempt : attempts) {
                 boolean passed;
                 try {
@@ -458,14 +460,21 @@ public final class Pipeline {
                     Thread.currentThread().interrupt();
                     return false;
                 }
-                String text = attempt.transcript().toString(java.nio.charset.StandardCharsets.UTF_8);
-                if (!text.isEmpty()) {
-                    (passed ? out : err).print(text);
-                }
+                flags.add(passed);
+                texts.add(attempt.transcript().toString(java.nio.charset.StandardCharsets.UTF_8));
                 all &= passed;
+            }
+            // Stop the indicator before replaying buffered per-unit transcripts, so no animation
+            // frame interleaves with them.
+            ticker.close();
+            for (int i = 0; i < texts.size(); i++) {
+                if (!texts.get(i).isEmpty()) {
+                    (flags.get(i) ? out : err).print(texts.get(i));
+                }
             }
             return all;
         } finally {
+            ticker.close();
             pool.shutdownNow();
         }
     }
@@ -506,8 +515,10 @@ public final class Pipeline {
         int attempts = 0;
         while (!unmet.isEmpty() && attempts < maxRegenerations) {
             attempts++;
-            out.println("  view " + u.view.name() + " unmet " + unmet + " — regenerating (attempt " + attempts + ")");
-            u.artifact = synthesizeView(module, u.view);
+            out.println("  page " + u.view.name() + " unmet " + unmet + " (attempt " + attempts + ")");
+            try (Ticker ticker = Ticker.start(out, "regenerating page " + u.view.name())) {
+                u.artifact = synthesizeView(module, u.view);
+            }
             unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup());
         }
         return unmet.isEmpty();
@@ -534,9 +545,11 @@ public final class Pipeline {
         while (!unmet.isEmpty() && attempts < maxRegenerations) {
             attempts++;
             out.println("  component " + u.component.name() + " unmet " + unmet
-                    + " — regenerating (attempt " + attempts + ")");
-            u.markup = uiPrompts.extractFenced(client.complete(
-                    uiPrompts.componentSystem(), uiPrompts.componentUser(module, u.component)), "xhtml");
+                    + " (attempt " + attempts + ")");
+            try (Ticker ticker = Ticker.start(out, "regenerating component " + u.component.name())) {
+                u.markup = uiPrompts.extractFenced(client.complete(
+                        uiPrompts.componentSystem(), uiPrompts.componentUser(module, u.component)), "xhtml");
+            }
             unmet = componentVerifier.unmetExpectations(u.component, u.markup);
         }
         return unmet.isEmpty();
@@ -553,9 +566,11 @@ public final class Pipeline {
         while (!unmet.isEmpty() && attempts < maxRegenerations) {
             attempts++;
             out.println("  flow " + u.flow.name() + " unmet " + unmet
-                    + " — regenerating (attempt " + attempts + ")");
-            u.graphJson = uiPrompts.extractFenced(client.complete(
-                    uiPrompts.flowSystem(), uiPrompts.flowUser(u.flow)), "json");
+                    + " (attempt " + attempts + ")");
+            try (Ticker ticker = Ticker.start(out, "regenerating flow " + u.flow.name())) {
+                u.graphJson = uiPrompts.extractFenced(client.complete(
+                        uiPrompts.flowSystem(), uiPrompts.flowUser(u.flow)), "json");
+            }
             unmet = flowVerifier.unmetExpectations(u.flow, flowVerifier.parse(u.graphJson));
         }
         return unmet.isEmpty();
@@ -804,18 +819,12 @@ public final class Pipeline {
                     || (!implicated.isEmpty() && !implicated.contains(label(u)))) {
                 continue;
             }
-            List<VerifyReport.ClauseFailure> mine = failures.stream()
-                    .filter(f -> (f.service() + "." + f.method()).equals(label(u)))
-                    .toList();
-            mine.forEach(f -> out.printf("  %-28s \u25b8 candidate %d: %s  \u2717 FAILED%n",
-                    label(u), u.candidate, f.clause()));
-            if (mine.isEmpty()) {
-                out.printf("  %-28s \u25b8 regenerating ...%n", label(u));
-            } else {
-                String pad = " ".repeat(2 + Math.max(28, label(u).length()) + 1);
-                out.println(pad + "\u25b8 regenerating ...");
+            failures.stream().filter(f -> (f.service() + "." + f.method()).equals(label(u)))
+                    .forEach(f -> out.printf("  %-28s \u25b8 candidate %d: %s  \u2717 FAILED%n",
+                            label(u), u.candidate, f.clause()));
+            try (Ticker ticker = Ticker.start(out, "regenerating " + label(u))) {
+                u.body = synthesize(module, u);
             }
-            u.body = synthesize(module, u);
             u.candidate++;
         }
     }

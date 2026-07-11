@@ -26,8 +26,10 @@ import java.io.PrintStream;
 /**
  * A one-line activity indicator for a long, otherwise silent step — a dot that bounces back and
  * forth in a small track so a running build never looks frozen. On an interactive terminal it
- * animates in place; when the output is piped or captured it simply prints the label once, so
- * carriage-return frames never leak into a log or a test transcript.
+ * animates in place and leaves a plain summary line when it stops; when the output is piped or
+ * captured it only prints that summary line, so carriage-return frames never leak into a log or a
+ * test transcript. The label may be updated while running (via {@link #label}) to reflect
+ * progress, such as a running count.
  */
 public final class Ticker implements AutoCloseable {
 
@@ -35,9 +37,10 @@ public final class Ticker implements AutoCloseable {
     private static final long FRAME_MILLIS = 120;
 
     private final PrintStream out;
-    private final String message;
     private final boolean animated;
+    private volatile String message;
     private volatile boolean running = true;
+    private boolean closed;
     private Thread thread;
 
     private Ticker(PrintStream out, String message) {
@@ -49,14 +52,17 @@ public final class Ticker implements AutoCloseable {
     /** Begin indicating activity for {@code message}; close the returned ticker when the step ends. */
     public static Ticker start(PrintStream out, String message) {
         Ticker ticker = new Ticker(out, message);
-        if (!ticker.animated) {
-            out.println("  " + message + " ...");
-            return ticker;
+        if (ticker.animated) {
+            ticker.thread = new Thread(ticker::animate, "sky-ticker");
+            ticker.thread.setDaemon(true);
+            ticker.thread.start();
         }
-        ticker.thread = new Thread(ticker::animate, "sky-ticker");
-        ticker.thread.setDaemon(true);
-        ticker.thread.start();
         return ticker;
+    }
+
+    /** Update the running label — the animated frame and the summary line pick it up. */
+    public void label(String message) {
+        this.message = message;
     }
 
     private void animate() {
@@ -83,17 +89,20 @@ public final class Ticker implements AutoCloseable {
 
     @Override
     public void close() {
-        if (!animated) {
+        if (closed) {
             return;
         }
+        closed = true;
         running = false;
-        try {
-            thread.join(FRAME_MILLIS * 4);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        if (animated) {
+            try {
+                thread.join(FRAME_MILLIS * 4);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            int span = ("  " + message + " [" + " ".repeat(WIDTH) + "]").length();
+            out.print("\r" + " ".repeat(span) + "\r");
         }
-        int clear = ("  " + message + " [" + " ".repeat(WIDTH) + "]").length();
-        out.print("\r" + " ".repeat(clear) + "\r");
         out.println("  " + message + " ...");
     }
 }

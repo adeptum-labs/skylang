@@ -177,7 +177,7 @@ class PipelineTest {
         assertTrue(transcript.contains("Catalog.restock"), transcript);
         assertTrue(transcript.contains("▸ candidate 1: ensures: result.stock == p.stock + units  ✗ FAILED"),
                 "the violated clause should be named on the failing candidate:\n" + transcript);
-        assertTrue(transcript.contains("▸ regenerating ..."), transcript);
+        assertTrue(transcript.contains("regenerating Catalog.restock"), transcript);
         assertTrue(transcript.contains("▸ candidate 2: all contracts ✓"),
                 "the passing candidate should be announced:\n" + transcript);
     }
