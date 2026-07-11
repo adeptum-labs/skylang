@@ -212,6 +212,7 @@ public final class AstBuilder {
                 requires.add(expr(rc.expr()));
             } else if (c instanceof SkyLangParser.EnsuresClauseContext ec) {
                 ec.expr().forEach(e -> ensures.add(expr(e)));
+                collapseBcryptPhrase(ensures);
             } else if (c instanceof SkyLangParser.ExampleClauseContext xc) {
                 examples.add(example(xc));
             } else if (c instanceof SkyLangParser.RaisesClauseContext rz) {
@@ -262,8 +263,47 @@ public final class AstBuilder {
                 yield new Ast.AlreadyRegistered(expr(p.expr()));
             }
             case SkyLangParser.ExprConditionContext c -> new Ast.CondExpr(expr(c.expr()));
+            case SkyLangParser.StatusConditionContext sc -> {
+                if (!sc.ID(0).getText().equals("the")) {
+                    throw new IllegalArgumentException("unrecognized raises condition; say e.g."
+                            + " 'when the order's status is Shipped'");
+                }
+                List<String> states = new ArrayList<>();
+                for (int i = 3; i < sc.ID().size(); i++) {
+                    states.add(sc.ID(i).getText());
+                }
+                yield new Ast.StatusIs(sc.ID(1).getText(), sc.ID(2).getText(), states);
+            }
+            case SkyLangParser.ProseConditionContext pc ->
+                    new Ast.Prose(pc.getText().isEmpty() ? "" : joinedProse(pc));
             default -> throw new IllegalStateException("unhandled raises condition: " + ctx.getClass());
         };
+    }
+
+    /**
+     * {@code x is a bcrypt hash} parses as an equality against 'a' followed by two stray
+     * names, because 'is' is the general comparison; collapse that shape back into the
+     * phrase node.
+     */
+    private static void collapseBcryptPhrase(List<Ast.Expr> ensures) {
+        for (int i = 0; i + 2 < ensures.size(); i++) {
+            if (ensures.get(i) instanceof Ast.BinExpr be && be.op().equals("==")
+                    && be.right() instanceof Ast.NameExpr a && a.name().equals("a")
+                    && ensures.get(i + 1) instanceof Ast.NameExpr b && b.name().equals("bcrypt")
+                    && ensures.get(i + 2) instanceof Ast.NameExpr h && h.name().equals("hash")) {
+                ensures.subList(i, i + 3).clear();
+                ensures.add(i, new Ast.BcryptHash(be.left()));
+            }
+        }
+    }
+
+    private static String joinedProse(SkyLangParser.ProseConditionContext pc) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < pc.getChildCount(); i++) {
+            String word = pc.getChild(i).getText();
+            sb.append(sb.isEmpty() || word.equals("'s") ? "" : " ").append(word);
+        }
+        return sb.toString();
     }
 
     private Ast.Type type(SkyLangParser.TypeContext ctx) {

@@ -450,6 +450,9 @@ public final class ProjectStager {
         }
         java.util.Set<String> support = SupportClasses.used(module);
         sb.append(opHelpers(support.contains("Money"), support.contains("Bytes")));
+        if (needsBcryptHelper(module)) {
+            sb.append(bcryptHelper(support.contains("Secret"), support.contains("Bytes")));
+        }
         sb.append("}\n");
         return sb.toString();
     }
@@ -592,6 +595,25 @@ public final class ProjectStager {
      * resolution gives each lowered type its correct semantics (primitive comparison for
      * long, value equality for objects, currency-safe arithmetic for Money).
      */
+    /** Whether any ensures anywhere states the bcrypt-hash phrase. */
+    private static boolean needsBcryptHelper(Ast.Module module) {
+        return module.services().stream()
+                .flatMap(s -> s.methods().stream())
+                .flatMap(m -> m.ensures().stream())
+                .map(Lowering::skyText)
+                .anyMatch(t -> t.contains(" is a bcrypt hash"));
+    }
+
+    /** The runtime check behind 'is a bcrypt hash': unwrap a Secret, decode Bytes, match $2a/b/y$. */
+    private static String bcryptHelper(boolean secret, boolean bytes) {
+        return "\n    private static boolean isBcryptHash(Object v) {\n"
+                + (secret ? "        if (v instanceof Secret<?> s) { return isBcryptHash(s.reveal()); }\n" : "")
+                + (bytes ? "        if (v instanceof Bytes b) { return isBcryptHash(new String("
+                        + "b.toByteArray(), java.nio.charset.StandardCharsets.UTF_8)); }\n" : "")
+                + "        return v instanceof String s2 && s2.matches(\"^\\\\$2[aby]\\\\$.*\");\n"
+                + "    }\n";
+    }
+
     private static String opHelpers(boolean money, boolean bytes) {
         String base = """
 

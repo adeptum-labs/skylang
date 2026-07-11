@@ -847,6 +847,34 @@ public final class TypeChecker {
                 }
                 requireDb(where, svc, "the uniqueness phrase");
             }
+            case Ast.StatusIs si -> {
+                String entity = entityByWord(si.entityWord());
+                if (entity == null) {
+                    throw new CheckException(where + ": cannot resolve 'the " + si.entityWord()
+                            + "\\u2019s ...' — no entity matches '" + si.entityWord() + "'");
+                }
+                Ty fieldTy = entities.get(entity).get(si.fieldWord());
+                if (fieldTy == null) {
+                    throw new CheckException(where + ": " + entity + " has no field '" + si.fieldWord()
+                            + "'" + didYouMean(si.fieldWord(), entities.get(entity).keySet()));
+                }
+                if (!(fieldTy instanceof Ty.EntityTy statusEntity)
+                        || !valueSets.containsKey(statusEntity.name())) {
+                    throw new CheckException(where + ": '" + si.fieldWord()
+                            + "' must be a closed value set to name its states");
+                }
+                for (String state : si.values()) {
+                    if (!valueSets.get(statusEntity.name()).contains(state)) {
+                        throw new CheckException(where + ": " + statusEntity.name()
+                                + " has no value '" + state + "'");
+                    }
+                }
+                requireDb(where, svc, "the status phrase");
+            }
+            case Ast.Prose ignored -> {
+                // Free prose names the failure for the reader and the model; the examples
+                // pin the behaviour, so there is nothing to resolve statically.
+            }
         }
     }
 
@@ -1128,6 +1156,16 @@ public final class TypeChecker {
             }
             case Ast.AggExpr ae -> inferAggregate(ae, env, where);
             case Ast.ForallExpr fe -> inferForall(fe, env, where);
+            case Ast.BcryptHash bh -> {
+                Ty target = infer(bh.value(), env, where + " bcrypt-hash");
+                boolean hashable = target.erased().equals(Ty.TEXT) || target.erased().equals(Ty.BYTES)
+                        || target instanceof Ty.GenericTy g && g.kind().equals("Secret");
+                if (!hashable) {
+                    throw new CheckException(where + ": 'is a bcrypt hash' applies to Text, Bytes or"
+                            + " a Secret of either, not " + target);
+                }
+                yield Ty.BOOL;
+            }
         };
     }
 

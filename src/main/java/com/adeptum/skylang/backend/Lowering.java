@@ -162,6 +162,8 @@ public final class Lowering {
                     throw new UnsupportedOperationException("old(...) must be snapshotted before lowering");
             case Ast.AggExpr a -> aggToJava(a, env, valueEntities, module);
             case Ast.ForallExpr f -> forallToJava(f, env, valueEntities, module);
+            case Ast.BcryptHash b ->
+                    "isBcryptHash(" + exprToJava(b.value(), env, valueEntities, module) + ")";
         };
     }
 
@@ -549,6 +551,7 @@ public final class Lowering {
             case Ast.AggExpr a -> a.kind() + " of (...)";
             case Ast.ForallExpr f -> "every " + f.var() + " in " + skyText(f.source())
                     + " has " + skyText(f.predicate());
+            case Ast.BcryptHash b -> skyText(b.value()) + " is a bcrypt hash";
         };
     }
 

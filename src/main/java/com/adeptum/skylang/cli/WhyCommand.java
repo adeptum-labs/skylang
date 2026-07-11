@@ -158,6 +158,9 @@ public final class WhyCommand implements Callable<Integer> {
             case Ast.CondExpr c -> Lowering.skyText(c.expr());
             case Ast.NoSuch ns -> "no " + ns.entityWord() + " has that " + ns.fieldWord();
             case Ast.AlreadyRegistered ar -> Lowering.skyText(ar.value()) + " already registered";
+            case Ast.StatusIs si -> "the " + si.entityWord() + "'s " + si.fieldWord() + " is "
+                    + String.join(" or ", si.values());
+            case Ast.Prose pr -> pr.text();
         };
     }
 }

@@ -65,6 +65,7 @@ OLD      : 'old' ;
 NOT      : 'not' ;
 FOR      : 'for' ;
 EVERY    : 'every' ;
+POSS     : '\'s' ;
 SPEC     : 'spec' ;
 GIVEN    : 'given' ;
 THEN     : 'then' ;

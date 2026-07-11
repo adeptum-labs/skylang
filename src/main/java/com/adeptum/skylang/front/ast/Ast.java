@@ -280,7 +280,7 @@ public final class Ast {
     public record Raise(String error, RaiseCondition condition) {
     }
 
-    public sealed interface RaiseCondition permits CondExpr, NoSuch, AlreadyRegistered {
+    public sealed interface RaiseCondition permits CondExpr, NoSuch, AlreadyRegistered, StatusIs, Prose {
     }
 
     /** A formal boolean condition: {@code when units <= 0}. */
@@ -293,6 +293,18 @@ public final class Ast {
 
     /** {@code when email already registered} — the @unique value is already stored. */
     public record AlreadyRegistered(Expr value) implements RaiseCondition {
+    }
+
+    /** {@code the order's status is Shipped or Cancelled} — the transition-guard phrase. */
+    public record StatusIs(String entityWord, String fieldWord, List<String> values)
+            implements RaiseCondition {
+    }
+
+    /**
+     * A free-prose condition ({@code the provider declines the charge}): it names the failure
+     * for the reader and the model; the examples pin the behaviour.
+     */
+    public record Prose(String text) implements RaiseCondition {
     }
 
     /**
@@ -421,7 +433,11 @@ public final class Ast {
 
     public sealed interface Expr
             permits IntLit, StrLit, BoolLit, MoneyLit, NameExpr, MemberExpr, CallExpr, BinExpr,
-            NotExpr, OldExpr, EmptyCheck, AggExpr, ForallExpr {
+            NotExpr, OldExpr, EmptyCheck, AggExpr, ForallExpr, BcryptHash {
+    }
+
+    /** {@code result.password is a bcrypt hash} — the stored value has the bcrypt shape. */
+    public record BcryptHash(Expr value) implements Expr {
     }
 
     /**

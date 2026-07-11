@@ -172,6 +172,55 @@ class TypeCheckerTest {
     }
 
     @Test
+    void statusPhraseAndProseRaisesConditionsCheck() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity OrderStatus { name Text @id  values Draft, Placed, Shipped, Cancelled }
+                entity Order { id Int @id  status OrderStatus = OrderStatus.Draft }
+                entity AlreadyShipped { }
+                entity PaymentFailed { }
+                service Orders uses db {
+                  cancel(id Int) -> Order
+                    intent  "Cancel a placed order."
+                    raises  AlreadyShipped when the order's status is Shipped
+                    raises  PaymentFailed when the provider declines the charge
+                }
+                """));
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module shop
+                entity OrderStatus { name Text @id  values Draft, Placed }
+                entity Order { id Int @id  status OrderStatus = OrderStatus.Draft }
+                entity Nope { }
+                service Orders uses db {
+                  cancel(id Int) -> Order
+                    intent  "x"
+                    raises  Nope when the order's status is Vanished
+                }
+                """));
+        assertTrue(e.getMessage().contains("no value 'Vanished'"), e.getMessage());
+    }
+
+    @Test
+    void bcryptHashEnsuresAppliesToSecretsAndText() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity User { id Int @id  email Email @unique  password Secret<Bytes> }
+                service AccountService uses db {
+                  register(email Email, password Text(12..)) -> User
+                    intent  "Create a user, storing only a hash of the password."
+                    ensures result.email == email
+                            result.password is a bcrypt hash
+                }
+                """));
+        CheckException e = assertThrows(CheckException.class, () -> check(service("""
+                  f(x Int) -> Int
+                    intent "x"
+                    ensures x is a bcrypt hash
+                """)));
+        assertTrue(e.getMessage().contains("'is a bcrypt hash' applies to"), e.getMessage());
+    }
+
+    @Test
     void rejectsUnknownType() {
         CheckException e = assertThrows(CheckException.class, () -> check(service("""
                   f(x Widget) -> Int

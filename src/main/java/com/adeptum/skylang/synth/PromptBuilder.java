@@ -278,6 +278,9 @@ public final class PromptBuilder {
             case Ast.CondExpr c -> sky(c.expr());
             case Ast.NoSuch ns -> "no " + ns.entityWord() + " has that " + ns.fieldWord();
             case Ast.AlreadyRegistered ar -> sky(ar.value()) + " already registered";
+            case Ast.StatusIs si -> "the " + si.entityWord() + "'s " + si.fieldWord() + " is "
+                    + String.join(" or ", si.values());
+            case Ast.Prose pr -> pr.text();
         };
     }
 
@@ -310,6 +313,7 @@ public final class PromptBuilder {
                     + a.where().map(w -> " where " + sky(w)).orElse("") + ")";
             case Ast.ForallExpr f -> "every " + f.var() + " in " + sky(f.source())
                     + " has " + sky(f.predicate());
+            case Ast.BcryptHash b -> sky(b.value()) + " is a bcrypt hash";
         };
     }
 

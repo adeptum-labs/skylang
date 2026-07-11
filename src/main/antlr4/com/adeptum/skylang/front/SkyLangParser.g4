@@ -108,10 +108,14 @@ thenAssert
 // ("no product has that id", "email already registered") the checker resolves
 // against the declared model. Phrase words stay soft and are validated in the builder.
 raisesCondition
-    : ID ID HAS ID ID     # existenceCondition   // no product has that id
-    | expr ID ID          # phraseCondition      // email already registered
-    | expr                # exprCondition        // units <= 0
+    : ID ID HAS ID ID                  # existenceCondition   // no product has that id
+    | expr ID ID                       # phraseCondition      // email already registered
+    | ID ID POSS ID IS ID (OR ID)*     # statusCondition      // the order's status is Shipped or Cancelled
+    | expr                             # exprCondition        // units <= 0
+    | proseWord+                       # proseCondition       // free prose: guides the model, checked by examples
     ;
+
+proseWord : ID | HAS | IS | OR | AND | NOT | IN | OF | ON | INT | STRING | GT | LT | GE | LE | POSS ;
 
 exampleResult
     : ID ID whosePart (AND whosePart)*                # whoseResult    // "a" User whose email is ...
