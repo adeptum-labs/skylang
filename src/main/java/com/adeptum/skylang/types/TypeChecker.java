@@ -660,11 +660,14 @@ public final class TypeChecker {
         }
 
         // The query must resolve to a service method returning a list (a table's rows) or a
-        // Maybe (a summary's subject) of an entity — the row type.
+        // Maybe (a summary's subject) of an entity — the row type. Every shows contributes
+        // a row type an action subject may bind to, in declaration order.
         String rowType = checkShows(v, v.shows(), services, where);
         LinkedHashMap<String, Ty> rowFields = entities.get(rowType);
+        List<String> rowTypes = new ArrayList<>();
+        rowTypes.add(rowType);
         for (Ast.Shows extra : v.moreShows()) {
-            checkShows(v, extra, services, where);
+            rowTypes.add(checkShows(v, extra, services, where));
         }
 
         // Each action must call a declared method with row-typed / prompted arguments of matching type.
@@ -674,7 +677,7 @@ public final class TypeChecker {
             checkArgCount(actionWhere, a.service() + "." + a.method(), a.args().size(), sig.params().size());
             Map<String, Ty> env = a.rowVar().isEmpty()
                     ? Map.of()
-                    : Map.of(a.rowVar().get(), Ty.entity(rowType));
+                    : Map.of(a.rowVar().get(), Ty.entity(actionSubject(a, rowTypes, actionWhere)));
             for (int i = 0; i < a.args().size(); i++) {
                 String argWhere = actionWhere + " argument " + (i + 1);
                 Ty expected = sig.params().get(i);
@@ -1100,6 +1103,25 @@ public final class TypeChecker {
         if (!svc.uses().contains("db")) {
             throw new CheckException(where + ": " + what + " needs the db effect on the service");
         }
+    }
+
+    /**
+     * The row type an action subject binds to. A page with one shows keeps the original
+     * behaviour — any subject word ("row", "the order") names its sole data source. With
+     * several shows the subject word must name one of the shown entities.
+     */
+    private String actionSubject(Ast.Action a, List<String> rowTypes, String where) {
+        if (rowTypes.size() == 1) {
+            return rowTypes.get(0);
+        }
+        String named = entityByWord(a.rowVar().orElseThrow());
+        for (String candidate : rowTypes) {
+            if (candidate.equals(named)) {
+                return candidate;
+            }
+        }
+        throw new CheckException(where + ": no shows presents '" + a.rowVar().get()
+                + "'; this page shows " + String.join(", ", rowTypes));
     }
 
     /** Match a phrase word like "product" or "products" to a declared entity, case-insensitively. */

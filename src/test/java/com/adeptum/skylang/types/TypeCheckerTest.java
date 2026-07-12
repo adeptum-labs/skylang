@@ -326,6 +326,81 @@ class TypeCheckerTest {
                 """)));
     }
 
+    private static String withTwoShows(String action) {
+        return """
+                module shop
+                entity Product { id Int  name Text  stock Int }
+                entity Order   { id Int  total Int }
+                service Catalog {
+                  all() -> [Product]  intent "all"
+                  orders() -> [Order]  intent "orders"
+                  restock(id Int, units Int) -> Product  intent "restock"
+                  cancel(total Int) -> Order  intent "cancel"
+                }
+                view Dashboard {
+                  shows Catalog.all() as a table of (name, stock)
+                  shows Catalog.orders() as a table of (total)
+                  %s
+                }
+                """.formatted(action);
+    }
+
+    @Test
+    void acceptsPageLevelActionCallingZeroArgMethod() {
+        assertDoesNotThrow(() -> check(withView("""
+                view V {
+                  shows  Catalog.all() as a table of (name, stock)
+                  action "Refresh" -> Catalog.all()
+                }
+                """)));
+    }
+
+    @Test
+    void acceptsPageLevelActionWithAskAndRouteParamArgs() {
+        assertDoesNotThrow(() -> check(withView("""
+                view V at "/products/{id}" {
+                  shows  Catalog.all() as a table of (name, stock)
+                  action "Restock" -> Catalog.restock(id, ask Int)
+                }
+                """)));
+    }
+
+    @Test
+    void rejectsPageLevelActionUsingARowExpression() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view V {
+                  shows  Catalog.all() as a table of (name, stock)
+                  action "Restock" -> Catalog.restock(row.id, ask Int)
+                }
+                """)));
+        assertTrue(e.getMessage().contains("row"), e.getMessage());
+    }
+
+    @Test
+    void resolvesNamedSubjectAgainstALaterShows() {
+        assertDoesNotThrow(() -> check(
+                withTwoShows("action \"Cancel\" on the order -> Catalog.cancel(order.total)")));
+    }
+
+    @Test
+    void rejectsUnmatchedNamedSubjectOnAMultiShowsPage() {
+        CheckException e = assertThrows(CheckException.class, () -> check(
+                withTwoShows("action \"Cancel\" on the invoice -> Catalog.cancel(invoice.total)")));
+        assertTrue(e.getMessage().contains("invoice"), e.getMessage());
+        assertTrue(e.getMessage().contains("Product") && e.getMessage().contains("Order"),
+                e.getMessage());
+    }
+
+    @Test
+    void singleShowsPagesBindAnySubjectWord() {
+        assertDoesNotThrow(() -> check(withView("""
+                view V {
+                  shows  Catalog.all() as a table of (name, stock)
+                  action "Restock" on the thing -> Catalog.restock(thing.id, ask Int)
+                }
+                """)));
+    }
+
     @Test
     void rejectsViewUnknownColumn() {
         CheckException e = assertThrows(CheckException.class, () -> check(withView("""

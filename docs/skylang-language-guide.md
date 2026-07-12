@@ -341,7 +341,10 @@ page ProductList at "/products" {
   A `titled "…"` suffix names the section; a page may `shows` several sections.
 - `action "Label" on a row | on the order -> Service.method(row.id, ask T | prompt T)` — wires a
   control to a service method. `ask`/`prompt` marks an input the UI must collect (with the right
-  converter for `Money`, `Instant`, refined types, …).
+  converter for `Money`, `Instant`, refined types, …). The `on <subject>` clause and the arguments
+  are both optional: `action "Sign out" -> Session.signOut()` is a page-level control bound to no
+  row. On a page with several `shows`, a named subject (`on the order`) picks the section showing
+  that entity.
 - `expect …` states what must be true of the rendered view — columns present, an action rendered as
   a button, an empty-state message shown — and is verified.
 - `appears …` states styling, placement, ordering, and state (`is disabled when status is Shipped`,

@@ -124,7 +124,8 @@ public final class UiPromptBuilder {
                 String args = a.args().stream()
                         .map(arg -> renderArg(arg, types))
                         .collect(Collectors.joining(", "));
-                sb.append("  \"").append(a.label()).append("\" on a row -> ")
+                sb.append("  \"").append(a.label())
+                        .append(a.rowVar().isPresent() ? "\" on a row -> " : "\" on the page -> ")
                         .append(a.service()).append('.').append(a.method())
                         .append('(').append(args).append(")\n");
             }

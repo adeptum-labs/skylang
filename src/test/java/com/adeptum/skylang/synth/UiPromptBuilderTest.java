@@ -92,6 +92,31 @@ class UiPromptBuilderTest {
     }
 
     @Test
+    void userPromptSaysOnThePageForSubjectlessActions() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Account { id Int @id  email Text }
+                service Session {
+                  current() -> [Account]  intent "Accounts."
+                  signOut() -> Account    intent "Sign out."
+                }
+                page Login at "/" {
+                  shows  Session.current() as a table of (email)
+                  action "Sign out" -> Session.signOut()
+                }
+                """, "shop.sky");
+        String user = prompts.user(m, m.views().get(0));
+        assertTrue(user.contains("\"Sign out\" on the page -> Session.signOut()"), user);
+    }
+
+    @Test
+    void userPromptKeepsOnARowForSubjectfulActions() {
+        Ast.Module m = Parsing.parse(SRC, "shop.sky");
+        String user = prompts.user(m, m.views().get(0));
+        assertTrue(user.contains("\"Restock\" on a row -> Catalog.restock("), user);
+    }
+
+    @Test
     void userPromptDescribesAppearance() {
         Ast.Module m = Parsing.parse(SRC, "shop.sky");
         Ast.View view = m.views().get(0);
