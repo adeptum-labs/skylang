@@ -363,7 +363,9 @@ page ProductList at "/products" {
 ```
 
 - `shows <Service.query()> as a [sortable] <table|summary|…> of (fields)` — the data and its shape.
-  A `titled "…"` suffix names the section; a page may `shows` several sections.
+  A `titled "…"` suffix names the section; a page may `shows` several sections. A `Bytes` field in
+  a summary renders as an image: the compiler verifies both the markup binding (an
+  `h:graphicImage` over the field's data-URI helper) and, at render, that the image element exists.
 - `action "Label" on a row | on the order -> Service.method(row.id, ask T | prompt T)` — wires a
   control to a service method. `ask`/`prompt` marks an input the UI must collect (with the right
   converter for `Money`, `Instant`, `Date`, `DateTime`, refined types, …). The `on <subject>`

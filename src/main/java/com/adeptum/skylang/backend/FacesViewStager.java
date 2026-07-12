@@ -160,6 +160,12 @@ public final class FacesViewStager {
                 methods.append("        assertTrue(html.contains(\"").append(escape(action.label()))
                         .append("\"), \"action \\\"").append(escape(action.label())).append("\\\" should render\");\n");
             }
+            for (String image : com.adeptum.skylang.verify.ViewVerifier.bytesColumns(module, view)) {
+                // The id-based handle is state-independent: an absent Maybe<Bytes> still renders the img.
+                methods.append("        assertFalse(doc.select(\"img[id$=").append(escape(image))
+                        .append("Image]\").isEmpty(), \"field ").append(escape(image))
+                        .append(" should render as an image\");\n");
+            }
             for (Ast.Appears a : view.appears()) {
                 if (a instanceof Ast.AppearsPlacement p) {
                     methods.append("        assertTrue(doc.select(\".").append(escape(p.region()))

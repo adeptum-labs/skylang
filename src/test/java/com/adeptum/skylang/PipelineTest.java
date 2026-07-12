@@ -1026,6 +1026,64 @@ class PipelineTest {
         assertEquals(2, code);
     }
 
+    private static final String BRANDING_MODULE = """
+            module shop
+            entity Tenant { id Int @id  name Text  tagline Text  logo Maybe<Bytes> }
+            service Tenants uses db {
+              current() -> Maybe<Tenant>  intent "The tenant for this request."
+            }
+            page Login at "/" {
+              shows  Tenants.current() as a summary of (name, tagline, logo)
+            }
+            """;
+
+    private static final String BRANDING_REPLY = """
+            ```xhtml
+            <h:panelGroup id="branding" styleClass="branding">
+              <h:graphicImage id="logoImage" value="#{bean.logoDataUri}" alt="logo"/>
+              <h:outputText id="name" value="#{bean.tenant.name}"/>
+              <h:outputText id="tagline" value="#{bean.tenant.tagline}"/>
+            </h:panelGroup>
+            ```
+            ```java
+            public class LoginBean {}
+            ```
+            """;
+
+    @Test
+    void bytesSummaryStagesAnImageBindingAndRenderAssertion(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse(BRANDING_MODULE, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub(BRANDING_REPLY), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String render = Files.readString(buildDir.resolve("src/test/java/shop/ViewsRenderTest.java"));
+        assertTrue(render.contains("img[id$=logoImage]"),
+                "the render test asserts the logo renders as an image:\n" + render);
+    }
+
+    @Test
+    void aViewMissingItsImageBindingIsDisposed(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(BRANDING_MODULE, "shop.sky");
+        new TypeChecker().check(module);
+
+        // The reply binds the logo as text, so the image expectation cannot hold.
+        int code = new Pipeline(routingStub("""
+                ```xhtml
+                <h:outputText id="logo" value="#{bean.logo}"/>
+                ```
+                ```java
+                public class LoginBean {}
+                ```
+                """), ALWAYS_PASS).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(2, code);
+    }
+
     @Test
     void previewModeInjectsTheSelectionScript(@TempDir Path root) throws Exception {
         Path buildDir = root.resolve("build/jvm-jakarta");
