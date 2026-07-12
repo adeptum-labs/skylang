@@ -164,7 +164,7 @@ public final class JpaStager {
         List<String> of = new ArrayList<>();
         List<String> to = new ArrayList<>();
         for (Ast.Field f : entity.fields()) {
-            mapField(f, module, types, decls, of, to);
+            mapField(f, entity, module, types, decls, of, to);
         }
         String jpa = entity.name() + "Jpa";
         StringBuilder sb = new StringBuilder();
@@ -173,7 +173,8 @@ public final class JpaStager {
                 .append("; converts to and from the domain record. */\n");
         if (root) {
             sb.append("@jakarta.persistence.Entity\n");
-            sb.append("@jakarta.persistence.Table(name = \"sky_").append(lower(entity.name())).append("\")\n");
+            sb.append("@jakarta.persistence.Table(name = \"sky_").append(lower(entity.name())).append('"')
+                    .append(uniqueConstraints(entity, module, types)).append(")\n");
         } else {
             sb.append("@jakarta.persistence.Embeddable\n");
         }
@@ -194,13 +195,46 @@ public final class JpaStager {
         return sb.toString();
     }
 
+    /**
+     * One composite constraint per scoped field: its column plus its scope's column. Every
+     * participant column is name-pinned in mapField, so the names here are authoritative.
+     */
+    private String uniqueConstraints(Ast.Entity entity, Ast.Module module, Map<String, Ast.TypeDecl> types) {
+        List<String> constraints = new ArrayList<>();
+        for (Ast.Field f : entity.fields()) {
+            f.uniqueScope().ifPresent(scope -> constraints.add(
+                    "@jakarta.persistence.UniqueConstraint(columnNames = {\"" + f.name() + "\", \""
+                            + scopeColumn(entity, scope, module, types) + "\"})"));
+        }
+        return constraints.isEmpty() ? ""
+                : ", uniqueConstraints = {" + String.join(", ", constraints) + "}";
+    }
+
+    /** A values-entity scope stores its carrier string in its own column; a relation stores a join column. */
+    private String scopeColumn(Ast.Entity entity, String scope, Ast.Module module,
+                               Map<String, Ast.TypeDecl> types) {
+        Ast.Field scopeField = entity.fields().stream()
+                .filter(f -> f.name().equals(scope))
+                .findFirst().orElseThrow();
+        return kindOf(baseName(scopeField.type(), types), module).equals("values") ? scope : scope + "_id";
+    }
+
+    /** True when the named field partitions some scoped-unique sibling. */
+    private static boolean isUniqueScope(Ast.Entity entity, String field) {
+        return entity.fields().stream()
+                .anyMatch(f -> f.uniqueScope().filter(field::equals).isPresent());
+    }
+
     /** Append the column(s), the record-to-row assignment, and the row-to-record argument. */
-    private void mapField(Ast.Field f, Ast.Module module, Map<String, Ast.TypeDecl> types,
+    private void mapField(Ast.Field f, Ast.Entity entity, Ast.Module module, Map<String, Ast.TypeDecl> types,
                           List<String> decls, List<String> of, List<String> to) {
         String n = f.name();
         String get = "value." + n + "()";
-        String id = (f.id() ? "    @jakarta.persistence.Id\n" : "")
-                + (f.unique() ? "    @jakarta.persistence.Column(unique = true)\n" : "");
+        // A scoped field only pins its column name; the tuple constraint lives on @Table.
+        String unique = !f.unique() ? ""
+                : f.uniqueScope().isEmpty() ? "    @jakarta.persistence.Column(unique = true)\n"
+                : "    @jakarta.persistence.Column(name = \"" + n + "\")\n";
+        String id = (f.id() ? "    @jakarta.persistence.Id\n" : "") + unique;
         Ast.Type type = f.type();
         if (type instanceof Ast.TypeRef ref && ref.list()) {
             type = new Ast.GenericType("List", List.of(new Ast.TypeRef(ref.name())));
@@ -262,12 +296,17 @@ public final class JpaStager {
                 to.add("Bytes.of(" + n + ")");
             }
             case "values" -> {
-                decls.add("    public String " + n + ";\n");
+                String column = isUniqueScope(entity, n)
+                        ? "    @jakarta.persistence.Column(name = \"" + n + "\")\n" : "";
+                decls.add(column + "    public String " + n + ";\n");
                 of.add("row." + n + " = " + get + "." + carrier(base, module) + "();");
                 to.add(restoreCall(base, module) + "(" + n + ")");
             }
             case "relation" -> {
-                decls.add("    @jakarta.persistence.ManyToOne(fetch = jakarta.persistence.FetchType.EAGER)\n"
+                String join = isUniqueScope(entity, n)
+                        ? "    @jakarta.persistence.JoinColumn(name = \"" + n + "_id\")\n" : "";
+                decls.add(join
+                        + "    @jakarta.persistence.ManyToOne(fetch = jakarta.persistence.FetchType.EAGER)\n"
                         + "    public " + base + "Jpa " + n + ";\n");
                 of.add("row." + n + " = " + base + "Jpa.of(" + get + ");");
                 to.add(n + ".toRecord()");

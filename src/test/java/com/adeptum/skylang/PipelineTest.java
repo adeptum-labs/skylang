@@ -540,6 +540,39 @@ class PipelineTest {
     }
 
     @Test
+    void scopedUniqueBecomesACompositeTableConstraint(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Provider { id Int @id  name Text }
+                entity UserAccount {
+                  id       Int @id
+                  provider Provider
+                  email    Email @unique(provider)
+                }
+                service Accounts uses db {
+                  all() -> [UserAccount]  intent "Every account."
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String jpa = Files.readString(buildDir.resolve("src/main/java/shop/UserAccountJpa.java"));
+        assertTrue(jpa.contains("uniqueConstraints = {@jakarta.persistence.UniqueConstraint("
+                        + "columnNames = {\"email\", \"provider_id\"})}"),
+                "a scoped @unique becomes a composite table constraint:\n" + jpa);
+        assertTrue(jpa.contains("@jakarta.persistence.JoinColumn(name = \"provider_id\")"),
+                "the scope's join column is pinned by name:\n" + jpa);
+        assertTrue(jpa.contains("@jakarta.persistence.Column(name = \"email\")"),
+                "the scoped column is pinned by name:\n" + jpa);
+        assertFalse(jpa.contains("unique = true"),
+                "no single-column constraint remains on a scoped field:\n" + jpa);
+    }
+
+    @Test
     void pinnedValuesLowerToFullConstructorsAndLookup(@TempDir Path root) throws IOException {
         Ast.Module module = Parsing.parse("""
                 module shop
