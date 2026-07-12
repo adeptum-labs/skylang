@@ -191,6 +191,20 @@ public final class JpaStager {
         sb.append("\n    public ").append(entity.name()).append(" toRecord() {\n");
         sb.append("        return new ").append(entity.name()).append("(\n                ")
                 .append(String.join(",\n                ", to)).append(");\n    }\n");
+        if (entity.fields().stream().anyMatch(f -> f.mappedBy().isPresent())) {
+            // Each field contributes exactly one toRecord argument, so positions line up.
+            List<String> shallow = new ArrayList<>();
+            for (int i = 0; i < entity.fields().size(); i++) {
+                Ast.Field f = entity.fields().get(i);
+                shallow.add(f.mappedBy().isEmpty() ? to.get(i)
+                        : f.type() instanceof Ast.GenericType g && g.name().equals("Set")
+                                ? "java.util.Set.of()" : "java.util.List.of()");
+            }
+            sb.append("\n    /** The record without its owned collections; breaks the child-parent cycle. */\n");
+            sb.append("    public ").append(entity.name()).append(" toRecordShallow() {\n");
+            sb.append("        return new ").append(entity.name()).append("(\n                ")
+                    .append(String.join(",\n                ", shallow)).append(");\n    }\n");
+        }
         sb.append("}\n");
         return sb.toString();
     }
@@ -253,7 +267,7 @@ public final class JpaStager {
                     }
                 }
                 case "Maybe" -> mapMaybe(n, get, g.args().get(0), module, types, decls, of, to);
-                default -> mapCollection(n, get, g, module, types, decls, of, to);
+                default -> mapCollection(f, n, get, g, module, types, decls, of, to);
             }
             return;
         }
@@ -315,7 +329,7 @@ public final class JpaStager {
                         + "    @jakarta.persistence.ManyToOne(fetch = jakarta.persistence.FetchType.EAGER)\n"
                         + "    public " + base + "Jpa " + n + ";\n");
                 of.add("row." + n + " = " + base + "Jpa.of(" + get + ");");
-                to.add(n + ".toRecord()");
+                to.add(n + "." + toRecordCall(base, module) + "()");
             }
             default -> {   // an embedded component
                 decls.add("    @jakarta.persistence.Embedded\n    public " + base + "Jpa " + n + ";\n");
@@ -365,7 +379,8 @@ public final class JpaStager {
                 decls.add("    @jakarta.persistence.ManyToOne(fetch = jakarta.persistence.FetchType.EAGER)\n"
                         + "    public " + base + "Jpa " + n + ";\n");
                 of.add("row." + n + " = " + get + ".isPresent() ? " + base + "Jpa.of(" + get + ".get()) : null;");
-                to.add("java.util.Optional.ofNullable(" + n + ").map(" + base + "Jpa::toRecord)");
+                to.add("java.util.Optional.ofNullable(" + n + ").map(" + base + "Jpa::"
+                        + toRecordCall(base, module) + ")");
             }
         }
     }
@@ -377,13 +392,23 @@ public final class JpaStager {
         to.add("java.util.Optional.ofNullable(" + n + ")");
     }
 
-    private void mapCollection(String n, String get, Ast.GenericType g, Ast.Module module,
+    private void mapCollection(Ast.Field f, String n, String get, Ast.GenericType g, Ast.Module module,
                                Map<String, Ast.TypeDecl> types, List<String> decls, List<String> of, List<String> to) {
         boolean list = g.name().equals("List");
         String container = list ? "java.util.List" : "java.util.Set";
         String copy = list ? "java.util.ArrayList" : "java.util.LinkedHashSet";
         String order = list ? "    @jakarta.persistence.OrderColumn\n" : "";
         String element = baseName(g.args().get(0), types);
+        if (f.mappedBy().isPresent()) {
+            // The inverse side of the children's @ManyToOne: query-derived, so of() writes no
+            // children — they own the foreign key and are saved individually.
+            decls.add("    @jakarta.persistence.OneToMany(mappedBy = \"" + f.mappedBy().get()
+                    + "\", fetch = jakarta.persistence.FetchType.EAGER)\n"
+                    + "    public " + container + "<" + element + "Jpa> " + n + ";\n");
+            of.add("row." + n + " = new " + copy + "<>();");
+            to.add(collect(n + ".stream().map(" + element + "Jpa::toRecord)", list));
+            return;
+        }
         String annotations = "    @jakarta.persistence.ElementCollection(fetch = jakarta.persistence.FetchType.EAGER)\n"
                 + order;
         switch (kindOf(element, module)) {
@@ -463,6 +488,13 @@ public final class JpaStager {
                 .filter(e -> e.name().equals(entityName))
                 .findFirst().orElseThrow()
                 .fields().get(0).name();
+    }
+
+    /** Entities with owned collections convert shallowly when reached through a reference. */
+    private static String toRecordCall(String entityName, Ast.Module module) {
+        boolean owned = module.entities().stream().anyMatch(e -> e.name().equals(entityName)
+                && e.fields().stream().anyMatch(f -> f.mappedBy().isPresent()));
+        return owned ? "toRecordShallow" : "toRecord";
     }
 
     /** How a stored carrier restores the record: the constructor, or the lookup once data fields exist. */

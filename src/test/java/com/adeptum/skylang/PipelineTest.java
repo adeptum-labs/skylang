@@ -540,6 +540,38 @@ class PipelineTest {
     }
 
     @Test
+    void mappedByCollectionsLowerToOneToMany(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module iam
+                entity Company { id Int @id  name Text  permissions [Permission] @mappedBy(owner) }
+                entity Permission { id Int @id  name Text  owner Company }
+                service Companies uses db {
+                  all() -> [Company]  intent "Every company."
+                }
+                """, "iam.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String company = Files.readString(buildDir.resolve("src/main/java/iam/CompanyJpa.java"));
+        assertTrue(company.contains(
+                "@jakarta.persistence.OneToMany(mappedBy = \"owner\", fetch = jakarta.persistence.FetchType.EAGER)"),
+                "an owned collection maps to the inverse side of the child's relation:\n" + company);
+        assertFalse(company.contains("ElementCollection"),
+                "an owned collection is not an embeddable element collection:\n" + company);
+        assertFalse(company.contains("PermissionJpa.of("),
+                "the inverse side is query-derived; of() writes no children:\n" + company);
+        assertTrue(company.contains("toRecordShallow"),
+                "the parent exposes a shallow conversion to break the cycle:\n" + company);
+        String permission = Files.readString(buildDir.resolve("src/main/java/iam/PermissionJpa.java"));
+        assertTrue(permission.contains("owner.toRecordShallow()"),
+                "the child's back-reference converts shallowly:\n" + permission);
+    }
+
+    @Test
     void proseResultStagesACallWithoutAssertions(@TempDir Path root) throws IOException {
         Ast.Module module = Parsing.parse("""
                 module shop
