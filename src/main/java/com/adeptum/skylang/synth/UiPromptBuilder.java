@@ -349,7 +349,23 @@ public final class UiPromptBuilder {
             case Ast.AppearsColumnOrder co -> "order the columns as " + String.join(", ", co.columns());
             case Ast.AppearsActionState st -> "the \"" + st.label() + "\" control is " + st.state()
                     + st.when().map(w -> " when " + w).orElse("");
+            case Ast.AppearsWhen w -> {
+                String param = firstName(w.when());
+                yield "render \"" + String.join(" ", w.subject()) + "\" inside <h:panelGroup styleClass=\""
+                        + param + "\" rendered=\"#{bean." + Lowering.skyText(w.when())
+                        + "}\"> so it appears only when " + Lowering.skyText(w.when());
+            }
             case Ast.AppearsProse p -> p.text();
+        };
+    }
+
+    /** The first bare name in a condition — the styleClass the conditional element must carry. */
+    private static String firstName(Ast.Expr e) {
+        return switch (e) {
+            case Ast.NameExpr n -> n.name();
+            case Ast.BinExpr b -> firstName(b.left());
+            case Ast.NotExpr n -> firstName(n.value());
+            default -> "conditional";
         };
     }
 }

@@ -366,6 +366,21 @@ public final class AstBuilder {
         }
     }
 
+    /** Every bare name an expression references — the vocabulary an appears-when may use. */
+    private static void exprNames(Ast.Expr e, java.util.Set<String> out) {
+        switch (e) {
+            case Ast.NameExpr n -> out.add(n.name());
+            case Ast.BinExpr b -> {
+                exprNames(b.left(), out);
+                exprNames(b.right(), out);
+            }
+            case Ast.NotExpr n -> exprNames(n.value(), out);
+            case Ast.MemberExpr m -> exprNames(m.target(), out);
+            default -> {
+            }
+        }
+    }
+
     private static String joinedWords(org.antlr.v4.runtime.ParserRuleContext ctx) {
         StringBuilder sb = new StringBuilder();
         appendWords(ctx, sb);
@@ -415,6 +430,19 @@ public final class AstBuilder {
                 ? Optional.empty()
                 : Optional.of(unquote(ctx.route().STRING().getText()));
 
+        // Params first, whatever their position: the appears degrade rule needs them.
+        List<Ast.Param> params = new ArrayList<>();
+        for (SkyLangParser.ViewClauseContext c : ctx.viewClause()) {
+            if (c instanceof SkyLangParser.ParamClauseContext pc) {
+                if (!pc.ID().getText().equals("param")) {
+                    throw new IllegalArgumentException("expected 'param', got '" + pc.ID().getText() + "'");
+                }
+                params.add(new Ast.Param(pc.param().ID().getText(), type(pc.param().type())));
+            }
+        }
+        java.util.Set<String> paramNames = new java.util.LinkedHashSet<>();
+        params.forEach(p -> paramNames.add(p.name()));
+
         Ast.Shows shows = null;
         List<Ast.Shows> moreShows = new ArrayList<>();
         List<Ast.Action> actions = new ArrayList<>();
@@ -433,10 +461,11 @@ public final class AstBuilder {
             } else if (c instanceof SkyLangParser.ExpectClauseContext ec) {
                 expects.add(expect(ec.expectPred()));
             } else if (c instanceof SkyLangParser.AppearsClauseContext apc) {
-                appears.add(appears(apc.appearsPred()));
+                appears.add(appears(apc.appearsPred(), paramNames));
             }
         }
-        return new Ast.View(ctx.ID().getText(), route, shows, actions, expects, appears, moreShows);
+        return new Ast.View(ctx.ID().getText(), route, shows, actions, expects, appears,
+                moreShows, params);
     }
 
     private Ast.Shows shows(SkyLangParser.ShowsClauseContext ctx) {
@@ -518,7 +547,23 @@ public final class AstBuilder {
         return new Ast.ExpectProse(joinedWords(pr.viewProse()));
     }
 
-    private Ast.Appears appears(SkyLangParser.AppearsPredContext ctx) {
+    private Ast.Appears appears(SkyLangParser.AppearsPredContext ctx, java.util.Set<String> params) {
+        if (ctx instanceof SkyLangParser.AppearsWhenContext w) {
+            // The condition is real only over declared params; anything else is ordinary prose.
+            java.util.Set<String> names = new java.util.LinkedHashSet<>();
+            exprNames(expr(w.expr()), names);
+            if (params.isEmpty() || !params.containsAll(names)) {
+                return new Ast.AppearsProse(joinedWords(w));
+            }
+            List<String> subject = new ArrayList<>();
+            for (int i = 0; i < w.getChildCount(); i++) {
+                if (w.getChild(i) == w.WHEN()) {
+                    break;
+                }
+                subject.add(w.getChild(i).getText());
+            }
+            return new Ast.AppearsWhen(subject, expr(w.expr()));
+        }
         if (ctx instanceof SkyLangParser.AppearsPlacementContext p) {
             // "in toolbar" or "in the row's toolbar": the region is the last word.
             String region = p.ID(p.ID().size() - 1).getText();

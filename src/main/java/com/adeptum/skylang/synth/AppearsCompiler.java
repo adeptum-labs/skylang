@@ -97,6 +97,8 @@ public final class AppearsCompiler {
             case Ast.AppearsColumnOrder co -> "appears columns (" + String.join(", ", co.columns()) + ")";
             case Ast.AppearsActionState st -> "appears action \"" + st.label() + "\" is " + st.state()
                     + st.when().map(w -> " when " + w).orElse("");
+            case Ast.AppearsWhen w -> "appears " + String.join(" ", w.subject()) + " when "
+                    + com.adeptum.skylang.backend.Lowering.skyText(w.when());
             case Ast.AppearsProse p -> "appears " + p.text();
         };
     }

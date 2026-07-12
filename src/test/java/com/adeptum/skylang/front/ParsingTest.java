@@ -444,6 +444,66 @@ class ParsingTest {
         assertEquals("Money", assertInstanceOf(Ast.TypeRef.class, ask.type()).name());
     }
 
+    private static Ast.View loginWith(String clauses) {
+        return Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session {
+                  current() -> Maybe<Account>  intent "x"
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                %s
+                }
+                """.formatted(clauses), "t.sky").views().get(0);
+    }
+
+    @Test
+    void parsesAViewParamClause() {
+        Ast.View view = loginWith("  param accessDenied Bool");
+        assertEquals(1, view.params().size());
+        assertEquals("accessDenied", view.params().get(0).name());
+        assertEquals("Bool", assertInstanceOf(Ast.TypeRef.class, view.params().get(0).type()).name());
+    }
+
+    @Test
+    void parsesAnAppearsWhenOverADeclaredParam() {
+        Ast.View view = loginWith("""
+                  param  accessDenied Bool
+                  appears the access-denied alert when accessDenied
+                """);
+        Ast.AppearsWhen when = assertInstanceOf(Ast.AppearsWhen.class, view.appears().get(0));
+        assertTrue(when.subject().contains("alert"), when.subject().toString());
+        assertEquals("accessDenied", assertInstanceOf(Ast.NameExpr.class, when.when()).name());
+    }
+
+    @Test
+    void degradesAppearsWhenToProseWithoutParams() {
+        Ast.View view = loginWith("  appears the badge when stock");
+        Ast.AppearsProse prose = assertInstanceOf(Ast.AppearsProse.class, view.appears().get(0));
+        assertEquals("the badge when stock", prose.text());
+    }
+
+    @Test
+    void keepsProseAppearsWithKeywordTails() {
+        Ast.View view = loginWith("  appears the Google sign - in button when nobody is signed in");
+        assertInstanceOf(Ast.AppearsProse.class, view.appears().get(0));
+    }
+
+    @Test
+    void rejectsAMisspelledParamKeyword() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> loginWith("  params accessDenied Bool"));
+        assertTrue(e.getMessage().contains("param"), e.getMessage());
+    }
+
+    @Test
+    void viewParamsToStringIsAppendOnly() {
+        assertTrue(loginWith("  param accessDenied Bool").toString().contains(", params=["));
+        assertFalse(loginWith("").toString().contains("params="),
+                "a param-less view keeps its original string form");
+    }
+
     private static Ast.Entity companyWith(String field) {
         return Parsing.parse("""
                 module t

@@ -948,6 +948,83 @@ class TypeCheckerTest {
         assertTrue(e.getMessage().contains("identified"), e.getMessage());
     }
 
+    private static String paged(String clauses) {
+        return """
+                module m
+                entity Account { id Int @id  email Text }
+                service Session uses db {
+                  current() -> Maybe<Account>  intent "x"
+                  find(email Text) -> Maybe<Account>  intent "find"
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                %s
+                }
+                """.formatted(clauses);
+    }
+
+    @Test
+    void acceptsATypedParamInShowsAndActionArgs() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Account { id Int @id  email Text }
+                service Session uses db {
+                  find(email Text) -> Maybe<Account>  intent "find"
+                  refresh(email Text) -> Account      intent "refresh"
+                }
+                page Login at "/" {
+                  param  who Text
+                  shows  Session.find(who) as a summary of (email)
+                  action "Refresh" -> Session.refresh(who)
+                }
+                """));
+    }
+
+    @Test
+    void rejectsAMismatchedParamArgument() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Account { id Int @id  email Text }
+                service Session uses db {
+                  find(email Text) -> Maybe<Account>  intent "find"
+                }
+                page Login at "/" {
+                  param  attempts Int
+                  shows  Session.find(attempts) as a summary of (email)
+                }
+                """));
+        assertTrue(e.getMessage().contains("argument"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAParamOfUnpromptableType() {
+        CheckException e = assertThrows(CheckException.class,
+                () -> check(paged("  param fee Money")));
+        assertTrue(e.getMessage().contains("fee"), e.getMessage());
+    }
+
+    @Test
+    void rejectsDuplicateParams() {
+        CheckException e = assertThrows(CheckException.class, () -> check(paged("""
+                  param accessDenied Bool
+                  param accessDenied Bool
+                """)));
+        assertTrue(e.getMessage().contains("twice"), e.getMessage());
+    }
+
+    @Test
+    void appearsWhenConditionsMustBeBool() {
+        assertDoesNotThrow(() -> check(paged("""
+                  param  accessDenied Bool
+                  appears the access-denied alert when accessDenied
+                """)));
+        CheckException e = assertThrows(CheckException.class, () -> check(paged("""
+                  param  attempts Int
+                  appears the alert when attempts
+                """)));
+        assertTrue(e.getMessage().contains("Bool"), e.getMessage());
+    }
+
     @Test
     void acceptsABytesFieldInASummaryProjection() {
         assertDoesNotThrow(() -> check("""

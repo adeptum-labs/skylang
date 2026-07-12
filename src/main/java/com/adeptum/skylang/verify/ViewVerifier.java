@@ -135,6 +135,10 @@ public final class ViewVerifier {
                 case Ast.AppearsActionState ignored -> {
                     // State-dependent looks need a data-driven render; prompt-guided for now.
                 }
+                case Ast.AppearsWhen ignored -> {
+                    // Structurally verified in the param-aware overload; render-verified by the
+                    // staged two-fetch test.
+                }
                 case Ast.AppearsProse ignored -> {
                 }
             }

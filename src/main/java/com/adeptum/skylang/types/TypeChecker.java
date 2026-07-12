@@ -723,15 +723,34 @@ public final class TypeChecker {
             throw new CheckException(where + " has no data source: add a 'shows' clause");
         }
 
+        // Declared request params are typed, so their uses are checked — unlike route params.
+        Map<String, Ty> paramEnv = new LinkedHashMap<>();
+        for (Ast.Param p : v.params()) {
+            Ty ty = resolveType(p.type(), where + " param '" + p.name() + "'");
+            Ty e = ty.erased();
+            if (!e.equals(Ty.BOOL) && !e.equals(Ty.INT) && !e.equals(Ty.TEXT)) {
+                throw new CheckException(where + " param '" + p.name()
+                        + "': request params arrive as URL text — use a Bool, Int, or Text-based"
+                        + " type, not " + ty);
+            }
+            if (paramEnv.put(p.name(), ty) != null) {
+                throw new CheckException(where + " declares param '" + p.name() + "' twice");
+            }
+            if (routeParams(v).contains(p.name())) {
+                throw new CheckException(where + " param '" + p.name()
+                        + "' clashes with a route parameter of the same name");
+            }
+        }
+
         // The query must resolve to a service method returning a list (a table's rows) or a
         // Maybe (a summary's subject) of an entity — the row type. Every shows contributes
         // a row type an action subject may bind to, in declaration order.
-        String rowType = checkShows(v, v.shows(), services, where);
+        String rowType = checkShows(v, v.shows(), services, where, paramEnv);
         LinkedHashMap<String, Ty> rowFields = entities.get(rowType);
         List<String> rowTypes = new ArrayList<>();
         rowTypes.add(rowType);
         for (Ast.Shows extra : v.moreShows()) {
-            rowTypes.add(checkShows(v, extra, services, where));
+            rowTypes.add(checkShows(v, extra, services, where, paramEnv));
         }
 
         // Each action must call a declared method with row-typed / prompted arguments of matching type.
@@ -747,6 +766,10 @@ public final class TypeChecker {
                 Ty expected = sig.params().get(i);
                 switch (a.args().get(i)) {
                     case Ast.ExprArg ea -> {
+                        if (ea.value() instanceof Ast.NameExpr n && paramEnv.containsKey(n.name())) {
+                            fits(argWhere, ea.value(), paramEnv.get(n.name()), expected);
+                            break;
+                        }
                         if (ea.value() instanceof Ast.NameExpr n && routeParams(v).contains(n.name())) {
                             break;   // a route parameter binds to whatever the action expects
                         }
@@ -803,6 +826,13 @@ public final class TypeChecker {
                         throw new CheckException(where + " appears: no action labelled \"" + st.label() + "\"");
                     }
                 }
+                case Ast.AppearsWhen w -> {
+                    Ty t = infer(w.when(), paramEnv, where + " appears when");
+                    if (!t.equals(Ty.BOOL)) {
+                        throw new CheckException(where
+                                + " appears: the when-condition must be Bool, got " + t);
+                    }
+                }
                 case Ast.AppearsProse ignored -> {
                 }
             }
@@ -811,7 +841,7 @@ public final class TypeChecker {
 
     /** Validate one data source and return its row entity name. */
     private String checkShows(Ast.View v, Ast.Shows shows, Map<String, Map<String, MethodSig>> services,
-                              String where) {
+                              String where, Map<String, Ty> paramEnv) {
         Ast.QualifiedCall q = shows.query();
         MethodSig querySig = lookup(services, q.service(), q.method(), where + " shows");
         checkArgCount(where + " shows", q.service() + "." + q.method(), q.args().size(), querySig.params().size());
@@ -819,6 +849,10 @@ public final class TypeChecker {
         for (int i = 0; i < q.args().size(); i++) {
             String argWhere = where + " shows argument " + (i + 1);
             Ast.Expr arg = q.args().get(i);
+            if (arg instanceof Ast.NameExpr n && paramEnv.containsKey(n.name())) {
+                fits(argWhere, arg, paramEnv.get(n.name()), querySig.params().get(i));
+                continue;
+            }
             if (arg instanceof Ast.NameExpr n && routeParams.contains(n.name())) {
                 continue;   // a route parameter binds to whatever the query expects
             }

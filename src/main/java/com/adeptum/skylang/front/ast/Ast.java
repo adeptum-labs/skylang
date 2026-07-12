@@ -456,23 +456,30 @@ public final class Ast {
     // ----- views -------------------------------------------------------------
 
     /**
-     * A page ({@code page}/{@code view}): what it shows, its actions, and its contracts.
-     * View spec hashes cover this record's string form, so {@code toString} is pinned:
-     * byte-identical to the original single-shows shape unless extra shows exist.
+     * A page ({@code page}/{@code view}): what it shows, its request params, its actions, and
+     * its contracts. View spec hashes cover this record's string form, so {@code toString} is
+     * pinned: byte-identical to the original single-shows shape unless newer attributes are set.
      */
     public record View(String name, Optional<String> route, Shows shows,
                        List<Action> actions, List<Expect> expects, List<Appears> appears,
-                       List<Shows> moreShows) {
+                       List<Shows> moreShows, List<Param> params) {
         public View(String name, Optional<String> route, Shows shows,
                     List<Action> actions, List<Expect> expects, List<Appears> appears) {
-            this(name, route, shows, actions, expects, appears, List.of());
+            this(name, route, shows, actions, expects, appears, List.of(), List.of());
+        }
+
+        public View(String name, Optional<String> route, Shows shows,
+                    List<Action> actions, List<Expect> expects, List<Appears> appears,
+                    List<Shows> moreShows) {
+            this(name, route, shows, actions, expects, appears, moreShows, List.of());
         }
 
         @Override
         public String toString() {
             return "View[name=" + name + ", route=" + route + ", shows=" + shows
                     + ", actions=" + actions + ", expects=" + expects + ", appears=" + appears
-                    + (moreShows.isEmpty() ? "" : ", moreShows=" + moreShows) + "]";
+                    + (moreShows.isEmpty() ? "" : ", moreShows=" + moreShows)
+                    + (params.isEmpty() ? "" : ", params=" + params) + "]";
         }
     }
 
@@ -553,7 +560,15 @@ public final class Ast {
     }
 
     public sealed interface Appears
-            permits AppearsPlacement, AppearsStyle, AppearsColumnOrder, AppearsActionState, AppearsProse {
+            permits AppearsPlacement, AppearsStyle, AppearsColumnOrder, AppearsActionState, AppearsProse,
+                    AppearsWhen {
+    }
+
+    /**
+     * {@code appears the access-denied alert when accessDenied} — the subject renders only when
+     * the condition over the page's declared params holds; verified with a data-driven render.
+     */
+    public record AppearsWhen(List<String> subject, Expr when) implements Appears {
     }
 
     /** {@code appears action "Restock" in toolbar} — the control renders inside a named region. */

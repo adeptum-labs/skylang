@@ -176,6 +176,7 @@ viewClause
     | ACTION STRING (ON ID ID?)? ARROW actionTarget      # actionClause   // on row | on the order | page-level
     | EXPECT expectPred                                  # expectClause
     | APPEARS appearsPred                                # appearsClause
+    | ID param                                           # paramClause    // param accessDenied Bool
     ;
 
 viewQuery    : ID DOT ID LPAREN args? RPAREN ;                        // Catalog.all()
@@ -194,6 +195,7 @@ appearsPred
     | ACTION STRING IS ID (WHEN viewProse)?        # appearsActionState  // is disabled when status is Shipped
     | ID IS ID                                     # appearsStyle        // rows is compact
     | COLUMNS (IN ID)? LPAREN ID (COMMA ID)* RPAREN # appearsColumnOrder // columns [in order] (name, stock)
+    | (ID | MINUS)+ WHEN expr                      # appearsWhen         // the alert when accessDenied
     | viewProse                                    # appearsProse        // sections in a two-column grid
     ;
 
