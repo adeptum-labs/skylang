@@ -784,6 +784,11 @@ public final class TypeChecker {
         for (Ast.Expect e : v.expects()) {
             switch (e) {
                 case Ast.ExpectColumns ec -> {
+                    if (!hasTableProjection(v)) {
+                        throw new CheckException(where + " expect: 'has columns' describes a table, but"
+                                + " this page shows a " + projectionKind(v) + ", which renders no columns"
+                                + " — use 'as a table of (...)' or drop this clause");
+                    }
                     for (String col : ec.columns()) {
                         requireRenderableField(where + " expect", rowType, rowFields, col);
                     }
@@ -814,8 +819,17 @@ public final class TypeChecker {
                         throw new CheckException(where + " appears: unknown style subject '" + s.subject()
                                 + "' (expected 'rows' or 'table')");
                     }
+                    if (!hasTableProjection(v)) {
+                        throw new CheckException(where + " appears: styling '" + s.subject() + "' needs a"
+                                + " table projection, but this page shows a " + projectionKind(v));
+                    }
                 }
                 case Ast.AppearsColumnOrder co -> {
+                    if (!hasTableProjection(v)) {
+                        throw new CheckException(where + " appears: 'columns' orders a table's columns, but"
+                                + " this page shows a " + projectionKind(v) + ", which has none"
+                                + " — use 'as a table of (...)' or drop this clause");
+                    }
                     for (String col : co.columns()) {
                         requireRenderableField(where + " appears", rowType, rowFields, col);
                     }
@@ -837,6 +851,28 @@ public final class TypeChecker {
                 }
             }
         }
+    }
+
+    /** True when any of a view's data sources renders a table — only a table has columns. */
+    private static boolean hasTableProjection(Ast.View v) {
+        if (isTableShows(v.shows())) {
+            return true;
+        }
+        for (Ast.Shows extra : v.moreShows()) {
+            if (isTableShows(extra)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isTableShows(Ast.Shows shows) {
+        return shows.projection().map(Ast.Projection::kind).filter("table"::equals).isPresent();
+    }
+
+    /** The primary data source's projection kind, for error messages ("summary", "form", …). */
+    private static String projectionKind(Ast.View v) {
+        return v.shows().projection().map(Ast.Projection::kind).orElse("plain list");
     }
 
     /** Validate one data source and return its row entity name. */

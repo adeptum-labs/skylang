@@ -508,6 +508,48 @@ class TypeCheckerTest {
     }
 
     @Test
+    void rejectsColumnOrderOnASummaryProjection() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module shop
+                entity Product { id Int @id  name Text  stock Int }
+                service Catalog uses db { current() -> Maybe<Product>  intent "one" }
+                page P at "/" {
+                  shows Catalog.current() as a summary of (name, stock)
+                  appears columns (stock, name)
+                }
+                """));
+        assertTrue(e.getMessage().contains("table"), e.getMessage());
+    }
+
+    @Test
+    void rejectsExpectColumnsWithoutATableProjection() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module shop
+                entity Product { id Int @id  name Text  stock Int }
+                service Catalog uses db { current() -> Maybe<Product>  intent "one" }
+                page P at "/" {
+                  shows Catalog.current() as a summary of (name, stock)
+                  expect table has columns (name, stock)
+                }
+                """));
+        assertTrue(e.getMessage().contains("table"), e.getMessage());
+    }
+
+    @Test
+    void rejectsRowStyleWithoutATableProjection() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module shop
+                entity Product { id Int @id  name Text  stock Int }
+                service Catalog uses db { current() -> Maybe<Product>  intent "one" }
+                page P at "/" {
+                  shows Catalog.current() as a summary of (name, stock)
+                  appears rows is compact
+                }
+                """));
+        assertTrue(e.getMessage().contains("table"), e.getMessage());
+    }
+
+    @Test
     void rejectsAppearsUnknownStyleSubject() {
         CheckException e = assertThrows(CheckException.class, () -> check(withView("""
                 view V {
