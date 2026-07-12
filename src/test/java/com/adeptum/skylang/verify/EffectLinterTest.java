@@ -58,6 +58,17 @@ class EffectLinterTest {
     }
 
     @Test
+    void flagsRawSecurityApisWithoutTheAuthBudget() {
+        List<String> violations = EffectLinter.violations(
+                "var p = jakarta.security.enterprise.SecurityContext.class;", List.of("db"));
+        assertTrue(violations.stream().anyMatch(v -> v.contains("auth")), violations.toString());
+        List<String> hinted = EffectLinter.violations(
+                "request.getUserPrincipal();", List.of("auth"));
+        assertTrue(hinted.stream().anyMatch(v -> v.contains("auth.currentPrincipal()")),
+                hinted.toString());
+    }
+
+    @Test
     void flagsRawPersistenceAndMailApis() {
         assertTrue(!EffectLinter.violations("java.sql.DriverManager.getConnection(u);", List.of("db")).isEmpty());
         assertTrue(!EffectLinter.violations("jakarta.mail.Transport.send(m);", List.of()).isEmpty());
