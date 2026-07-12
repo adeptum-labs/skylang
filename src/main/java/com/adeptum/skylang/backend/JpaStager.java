@@ -292,6 +292,22 @@ public final class JpaStager {
                 of.add("row." + n + "Millis = " + get + ".isPresent() ? " + get + ".get().toEpochMilli() : null;");
                 to.add("java.util.Optional.ofNullable(" + n + "Millis).map(java.time.Instant::ofEpochMilli)");
             }
+            case "Money" -> {
+                // Explicit scale: schema generation would otherwise default to scale 0 and round.
+                decls.add("    @jakarta.persistence.Column(precision = 38, scale = 4)\n"
+                        + "    public java.math.BigDecimal " + n + "Amount;\n");
+                decls.add("    public String " + n + "Currency;\n");
+                of.add("row." + n + "Amount = " + get + ".isPresent() ? " + get + ".get().amount() : null;");
+                of.add("row." + n + "Currency = " + get + ".isPresent() ? "
+                        + get + ".get().currency().getCurrencyCode() : null;");
+                to.add("java.util.Optional.ofNullable(" + n + "Amount).map(a -> Money.of(a.toPlainString(), "
+                        + n + "Currency))");
+            }
+            case "Bytes" -> {
+                decls.add("    public byte[] " + n + ";\n");
+                of.add("row." + n + " = " + get + ".isPresent() ? " + get + ".get().toByteArray() : null;");
+                to.add("java.util.Optional.ofNullable(" + n + ").map(Bytes::of)");
+            }
             case "values" -> {
                 decls.add("    public String " + n + ";\n");
                 of.add("row." + n + " = " + get + ".isPresent() ? " + get + ".get()."

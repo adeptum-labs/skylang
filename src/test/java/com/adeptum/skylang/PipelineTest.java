@@ -510,6 +510,35 @@ class PipelineTest {
                 "whose placedAt is set asserts presence:\n" + tests);
     }
 
+    @Test
+    void maybeMoneyAndBytesStageNullableColumns(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Provider { id Int @id  name Text  logo Maybe<Bytes>  fee Maybe<Money> }
+                service Providers uses db {
+                  all() -> [Provider]  intent "Every provider."
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String jpa = Files.readString(buildDir.resolve("src/main/java/shop/ProviderJpa.java"));
+        assertTrue(jpa.contains("public byte[] logo;"),
+                "Maybe<Bytes> persists as a nullable blob column:\n" + jpa);
+        assertTrue(jpa.contains("java.util.Optional.ofNullable(logo).map(Bytes::of)"),
+                "an absent blob reads back as an empty Maybe:\n" + jpa);
+        assertTrue(jpa.contains("public java.math.BigDecimal feeAmount;")
+                        && jpa.contains("public String feeCurrency;"),
+                "Maybe<Money> persists as nullable amount plus currency:\n" + jpa);
+        assertTrue(jpa.contains(
+                "java.util.Optional.ofNullable(feeAmount).map(a -> Money.of(a.toPlainString(), feeCurrency))"),
+                "an absent amount reads back as an empty Maybe:\n" + jpa);
+    }
+
     private static final String INTERFACE_MODULE = """
             module shop
             entity Product { id Int @id  name Text  stock Int @min(0) }

@@ -867,6 +867,8 @@ class TypeCheckerTest {
                   tags     [Text]
                   placed   Instant
                   total    Money
+                  tip      Maybe<Money>
+                  receipt  Maybe<Bytes>
                 }
                 service Orders uses db {
                   all() -> [Order]  intent "all"
@@ -897,6 +899,12 @@ class TypeCheckerTest {
                 service S uses db { f() -> Int  intent "x" }
                 """));
         assertTrue(nested.getMessage().contains("Part"), nested.getMessage());
+        CheckException maybeList = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { id Int @id  scores Maybe<[Int]> }
+                service S uses db { f() -> Int  intent "x" }
+                """));
+        assertTrue(maybeList.getMessage().contains("not persistable yet"), maybeList.getMessage());
     }
 
     @Test

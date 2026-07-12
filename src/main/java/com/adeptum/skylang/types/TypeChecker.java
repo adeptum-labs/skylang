@@ -373,7 +373,8 @@ public final class TypeChecker {
 
     private boolean maybePersistable(Ty arg) {
         Ty e = arg.erased();
-        if (e.equals(Ty.INT) || e.equals(Ty.TEXT) || e.equals(Ty.BOOL) || e.equals(Ty.INSTANT)) {
+        if (e.equals(Ty.INT) || e.equals(Ty.TEXT) || e.equals(Ty.BOOL) || e.equals(Ty.INSTANT)
+                || e.equals(Ty.MONEY) || e.equals(Ty.BYTES)) {
             return true;
         }
         return arg instanceof Ty.EntityTy et
