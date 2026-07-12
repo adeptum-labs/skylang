@@ -87,6 +87,36 @@ class ViewFeasibilityTest {
     }
 
     @Test
+    void authBackedOptionalShowsIsNotFlagged() {
+        Ast.Module module = Parsing.parse("""
+                module identity
+                entity UserAccount { id Int @id  displayName Text  email Email }
+                service Session uses auth, db {
+                  current() -> Maybe<UserAccount>
+                    intent "The account for the signed-in principal, if any."
+                  signOut(account UserAccount) -> UserAccount
+                    intent "End the session."
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (displayName, email)
+                  action "Sign out" on the account -> Session.signOut(account)
+                  expect action "Sign out" is a button
+                }
+                """, "identity.sky");
+
+        assertTrue(ViewFeasibility.contradictions(module).isEmpty(),
+                "a uses-auth query is seedable during verification: the pinned principal supplies"
+                        + " the present state, so the signed-in half is verifiable");
+    }
+
+    @Test
+    void theLiftRequiresTheAuthEffect() {
+        Ast.Module module = Parsing.parse(LOGIN, "identity.sky");
+        assertEquals(1, ViewFeasibility.contradictions(module).size(),
+                "without the auth effect nothing supplies the value; the page stays flagged");
+    }
+
+    @Test
     void theCheckerRejectsTheContradictionBeforeAnySynthesis() {
         Ast.Module module = Parsing.parse(LOGIN, "identity.sky");
 

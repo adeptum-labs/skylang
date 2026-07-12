@@ -62,6 +62,15 @@ public final class ViewFeasibility {
         if (!query.args().isEmpty()) {
             return Optional.empty();
         }
+
+        // A uses-auth service IS seedable: verification pins a present principal (the generated
+        // tests through TestEffects, the render lane through the sky.auth.principal seed).
+        boolean authBacked = module.services().stream()
+                .filter(s -> s.name().equals(query.service()))
+                .anyMatch(s -> s.uses().contains("auth"));
+        if (authBacked) {
+            return Optional.empty();
+        }
         Optional<Ast.Method> shown = method(module, query.service(), query.method());
         boolean optional = shown
                 .map(m -> m.returnType() instanceof Ast.GenericType g && g.name().equals("Maybe"))

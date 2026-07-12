@@ -556,6 +556,13 @@ flow Checkout {
 - `service` → CDI bean.
 - `page` → a Faces/Facelets view plus its backing bean.
 - `flow` → a guarded navigation flow with typed steps.
+- `auth` → an injected `Auth` handle whose one capability is
+  `currentPrincipal() -> Maybe<Principal>` (subject, email, display name). Verification pins a
+  **present** principal — generated tests through `TestEffects.auth()`, the render lane through
+  a system-property seed — so a page whose controls depend on the signed-in state is verifiable.
+  The production binding (e.g. OpenID Connect) replaces only the effect's producer and is not
+  yet shipped; one limitation of the present-by-default test principal: a pure-auth method with
+  a `-> nothing` example cannot pass, since nothing makes the principal absent per-example.
 
 The same two-layer rule holds: you declare the shape and the guarantees; the generator fills
 the wiring; the contracts verify it.

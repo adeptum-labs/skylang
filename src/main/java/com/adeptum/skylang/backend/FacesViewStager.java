@@ -141,6 +141,13 @@ public final class FacesViewStager {
      */
     private static String renderTest(String pkg, Ast.Module module) {
         StringBuilder methods = new StringBuilder();
+        if (showsAuthBackedQuery(module)) {
+            // Seeded before any container boot: the property crosses the webapp classloader,
+            // so the deployed SkyAuth sees a present principal and the signed-in state renders.
+            methods.append("\n    static {\n")
+                    .append("        System.setProperty(\"sky.auth.principal\",")
+                    .append(" \"sky-test-subject|test@example.sky|Test User\");\n    }\n");
+        }
         for (Ast.View view : module.views()) {
             String lower = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1);
             methods.append("\n    @Test\n    void ").append(lower).append("Renders() throws Exception {\n");
@@ -198,6 +205,16 @@ public final class FacesViewStager {
 
     private static String escape(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /** True when any view's data source is declared by a service using the auth effect. */
+    private static boolean showsAuthBackedQuery(Ast.Module module) {
+        return module.views().stream()
+                .flatMap(v -> java.util.stream.Stream.concat(
+                        java.util.stream.Stream.of(v.shows()), v.moreShows().stream()))
+                .anyMatch(s -> module.services().stream()
+                        .filter(svc -> svc.name().equals(s.query().service()))
+                        .anyMatch(svc -> svc.uses().contains("auth")));
     }
 
     /** Which prompted input types need a staged Faces converter: Money and/or Instant. */

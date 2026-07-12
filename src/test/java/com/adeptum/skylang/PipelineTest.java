@@ -1116,6 +1116,36 @@ class PipelineTest {
                 "generated tests get a present pinned principal:\n" + testEffects);
     }
 
+    @Test
+    void authBackedViewsSeedThePrincipalInTheRenderLane(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module id
+                entity Account { id Int @id  email Text }
+                service Session uses auth, db {
+                  current() -> Maybe<Account>  intent "The signed-in account."
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                }
+                """, "id.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub("""
+                ```xhtml
+                <h:outputText id="email" value="#{bean.email}"/>
+                ```
+                ```java
+                public class LoginBean {}
+                ```
+                """), ALWAYS_PASS).build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String render = Files.readString(buildDir.resolve("src/test/java/id/ViewsRenderTest.java"));
+        assertTrue(render.contains("System.setProperty(\"sky.auth.principal\""),
+                "the render lane must seed a present principal before the container boots:\n" + render);
+    }
+
     private static final String PARAM_MODULE = """
             module shop
             entity Account { id Int @id  email Text }
