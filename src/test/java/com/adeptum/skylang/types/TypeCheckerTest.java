@@ -1061,8 +1061,20 @@ class TypeCheckerTest {
     void acceptsTheFullEffectsBudget() {
         assertDoesNotThrow(() -> check("""
                 module m
-                service S uses db, http, clock, mail {
+                service S uses db, http, clock, mail, auth {
                   f() -> Int  intent "x"
+                }
+                """));
+    }
+
+    @Test
+    void acceptsAServiceUsingAuth() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Account { id Int @id  email Text }
+                service Session uses auth, db {
+                  current() -> Maybe<Account>
+                    intent "The account of the signed-in principal, if any."
                 }
                 """));
     }

@@ -34,8 +34,8 @@ import java.util.Optional;
  */
 public final class Builtins {
 
-    /** The effects a service may declare with {@code uses}; all four bound by the JVM profile. */
-    public static final List<String> EFFECTS = List.of("db", "http", "clock", "mail");
+    /** The effects a service may declare with {@code uses}; all five bound by the JVM profile. */
+    public static final List<String> EFFECTS = List.of("db", "http", "clock", "mail", "auth");
 
     /** The shape {@code Email} enforces at construction; pragmatic rather than full RFC 5322. */
     public static final String EMAIL_REGEX = "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$";
