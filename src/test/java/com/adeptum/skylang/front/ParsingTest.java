@@ -374,8 +374,61 @@ class ParsingTest {
                 }
                 """, "t.sky");
         Ast.Entity role = m.entities().get(0);
-        assertEquals(List.of("Member", "Admin"), role.values());
+        assertEquals(List.of("Member", "Admin"), role.valueNames());
+        assertTrue(role.values().stream().allMatch(v -> v.pins().isEmpty()));
         assertEquals(1, role.fields().size());
+    }
+
+    @Test
+    void parsesPinnedValues() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Tier {
+                  name  Text @id
+                  label Text
+                  price Money
+                  values Free with label "Free" and price 0eur, Pro with label "Pro" and price 399sek, Hidden
+                }
+                """, "t.sky");
+        Ast.Entity tier = m.entities().get(0);
+        assertEquals(List.of("Free", "Pro", "Hidden"), tier.valueNames());
+        Ast.ValueDef free = tier.values().get(0);
+        assertEquals("label", free.pins().get(0).field());
+        assertEquals("Free", assertInstanceOf(Ast.StrLit.class, free.pins().get(0).expected()).value());
+        assertEquals("price", free.pins().get(1).field());
+        Ast.MoneyLit price = assertInstanceOf(Ast.MoneyLit.class, free.pins().get(1).expected());
+        assertEquals("EUR", price.currency());
+        assertEquals(2, tier.values().get(1).pins().size());
+        assertTrue(tier.values().get(2).pins().isEmpty());
+    }
+
+    @Test
+    void pinnedValuesAcceptConstantReferences() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Tier {
+                  name Text @id
+                  role Role
+                  values Free with role Role.Member
+                }
+                """, "t.sky");
+        Ast.FieldExpect pin = m.entities().get(0).values().get(0).pins().get(0);
+        Ast.MemberExpr ref = assertInstanceOf(Ast.MemberExpr.class, pin.expected());
+        assertEquals("Role", assertInstanceOf(Ast.NameExpr.class, ref.target()).name());
+        assertEquals("Member", ref.field());
+    }
+
+    @Test
+    void valuePinsRequireTheWithKeyword() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> Parsing.parse("""
+                module t
+                entity Tier {
+                  name  Text @id
+                  label Text
+                  values Free having label "Free"
+                }
+                """, "t.sky"));
+        assertTrue(e.getMessage().contains("with"), e.getMessage());
     }
 
     @Test
@@ -398,6 +451,29 @@ class ParsingTest {
                 new Ast.Entity("E", List.of()).toString());
         assertEquals("Service[name=S, methods=[]]",
                 new Ast.Service("S", List.of()).toString());
+        Ast.Entity role = Parsing.parse("""
+                module t
+                entity Role { name Text @id  values Member, Admin }
+                """, "t.sky").entities().get(0);
+        assertTrue(role.toString().endsWith(", values=[Member, Admin]]"),
+                "pin-less values keep the original bare-name rendering: " + role);
+    }
+
+    @Test
+    void pinnedValuesToStringIsAppendOnly() {
+        Ast.Entity tier = Parsing.parse("""
+                module t
+                entity Tier {
+                  name  Text @id
+                  label Text
+                  values Free with label "Free", Hidden
+                }
+                """, "t.sky").entities().get(0);
+        String values = tier.toString().substring(tier.toString().indexOf("values="));
+        assertTrue(values.contains("Free with "),
+                "a pinned value appends its pins after the name: " + values);
+        assertTrue(values.contains("Hidden") && !values.contains("Hidden with"),
+                "a pin-less value stays a bare name: " + values);
     }
 
     // ----- the chapter-5 surface: raises, old, not, aggregates -----------------

@@ -136,15 +136,34 @@ public final class Ast {
      * instance set. The freeze hash covers this record's string form, so {@code toString}
      * is pinned: byte-identical to the original record format unless {@code values} is set.
      */
-    public record Entity(String name, List<Field> fields, List<String> values) {
+    public record Entity(String name, List<Field> fields, List<ValueDef> values) {
         public Entity(String name, List<Field> fields) {
             this(name, fields, List.of());
+        }
+
+        /** The declared value names, in declaration order. */
+        public List<String> valueNames() {
+            return values.stream().map(ValueDef::name).toList();
         }
 
         @Override
         public String toString() {
             return "Entity[name=" + name + ", fields=" + fields
                     + (values.isEmpty() ? "" : ", values=" + values) + "]";
+        }
+    }
+
+    /**
+     * One declared value of a closed set, optionally pinning the entity's data fields
+     * ({@code Free with label "Free" and price 0eur}). The freeze hash covers the owning
+     * entity's string form, so {@code toString} is pinned: a pin-less value renders as the
+     * bare name it always was, and pins are only appended when declared.
+     */
+    public record ValueDef(String name, List<FieldExpect> pins) {
+
+        @Override
+        public String toString() {
+            return pins.isEmpty() ? name : name + " with " + pins;
         }
     }
 

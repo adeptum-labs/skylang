@@ -138,7 +138,7 @@ public final class PromptBuilder {
                     .collect(Collectors.joining(", "));
             sb.append("record ").append(e.name()).append("(").append(components).append(")");
             if (!e.values().isEmpty()) {
-                sb.append("  // closed set, constants: ").append(e.values().stream()
+                sb.append("  // closed set, constants: ").append(e.valueNames().stream()
                         .map(v -> e.name() + "." + v).collect(Collectors.joining(", ")));
             }
             sb.append('\n');

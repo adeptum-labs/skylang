@@ -161,13 +161,49 @@ public final class AstBuilder {
         for (SkyLangParser.FieldContext f : ctx.field()) {
             fields.add(field(f));
         }
-        List<String> values = new ArrayList<>();
+        List<Ast.ValueDef> values = new ArrayList<>();
         if (ctx.valuesClause() != null) {
-            for (var v : ctx.valuesClause().ID()) {
-                values.add(v.getText());
+            for (var v : ctx.valuesClause().valueDef()) {
+                values.add(valueDef(v));
             }
         }
         return new Ast.Entity(ctx.ID().getText(), fields, values);
+    }
+
+    private Ast.ValueDef valueDef(SkyLangParser.ValueDefContext ctx) {
+        List<Ast.FieldExpect> pins = new ArrayList<>();
+        if (ctx.valuePins() != null) {
+            String keyword = ctx.valuePins().ID().getText();
+            if (!keyword.equals("with")) {
+                throw new IllegalArgumentException("a value pins its fields with 'with', not '" + keyword + "'");
+            }
+            for (SkyLangParser.FieldPinContext p : ctx.valuePins().fieldPin()) {
+                pins.add(new Ast.FieldExpect(p.ID().getText(), pinValue(p.pinValue())));
+            }
+        }
+        return new Ast.ValueDef(ctx.ID().getText(), pins);
+    }
+
+    /** A pin value is a constant: a literal, or a (possibly qualified) declared-value name. */
+    private static Ast.Expr pinValue(SkyLangParser.PinValueContext ctx) {
+        if (ctx.MONEY() != null) {
+            return moneyLit(ctx.MONEY().getText());
+        }
+        if (ctx.INT() != null) {
+            return new Ast.IntLit(Long.parseLong(ctx.INT().getText()));
+        }
+        if (ctx.STRING() != null) {
+            return new Ast.StrLit(unquote(ctx.STRING().getText()));
+        }
+        if (ctx.TRUE() != null) {
+            return new Ast.BoolLit(true);
+        }
+        if (ctx.FALSE() != null) {
+            return new Ast.BoolLit(false);
+        }
+        return ctx.ID().size() == 1
+                ? new Ast.NameExpr(ctx.ID(0).getText())
+                : new Ast.MemberExpr(new Ast.NameExpr(ctx.ID(0).getText()), ctx.ID(1).getText());
     }
 
     private Ast.Field field(SkyLangParser.FieldContext ctx) {

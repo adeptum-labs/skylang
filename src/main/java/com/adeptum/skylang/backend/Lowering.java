@@ -509,7 +509,7 @@ public final class Lowering {
                 continue;
             }
             if (!e.values().isEmpty()) {
-                return name + "." + e.values().get(0);
+                return name + "." + e.values().get(0).name();
             }
             // The omitting constructor covers the trailing defaulted fields.
             List<String> args = new java.util.ArrayList<>();

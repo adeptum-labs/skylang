@@ -67,8 +67,15 @@ range : lo=INT? DOTDOT hi=INT? ;
 
 entity : ENTITY ID LBRACE field* valuesClause? RBRACE ;
 
-// values Member, Admin — seeds and closes an enum-like entity's instance set
-valuesClause : VALUES ID (COMMA ID)* ;
+// values Member, Admin — seeds and closes an enum-like entity's instance set;
+// a value may pin its data fields: values Free with label "Free" and price 0eur, Pro ...
+// The leading valuePins ID is the soft keyword 'with'; pin values are constants only,
+// so a pin can never swallow the next value or read as a boolean expression.
+valuesClause : VALUES valueDef (COMMA valueDef)* ;
+valueDef     : ID valuePins? ;
+valuePins    : ID fieldPin (AND fieldPin)* ;
+fieldPin     : ID pinValue ;
+pinValue     : MONEY | INT | STRING | TRUE | FALSE | ID (DOT ID)? ;
 
 field : ID type annotation* (ASSIGN expr)? ;
 

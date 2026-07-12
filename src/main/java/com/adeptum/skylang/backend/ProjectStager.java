@@ -176,9 +176,9 @@ public final class ProjectStager {
     /** {@code values Member, Admin} lowers to one constant per value; the checker closes the set. */
     private static String valueConstants(Ast.Entity entity) {
         StringBuilder sb = new StringBuilder(entity.values().isEmpty() ? "" : "\n");
-        for (String v : entity.values()) {
-            sb.append("    public static final ").append(entity.name()).append(' ').append(v)
-                    .append(" = new ").append(entity.name()).append("(\"").append(v).append("\");\n");
+        for (Ast.ValueDef v : entity.values()) {
+            sb.append("    public static final ").append(entity.name()).append(' ').append(v.name())
+                    .append(" = new ").append(entity.name()).append("(\"").append(v.name()).append("\");\n");
         }
         return sb.toString();
     }

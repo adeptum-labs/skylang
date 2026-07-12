@@ -409,10 +409,11 @@ public final class TypeChecker {
             throw new CheckException("entity '" + e.name() + "': the values carrier field must be Text, not "
                     + carrier);
         }
-        if (e.values().size() != e.values().stream().distinct().count()) {
+        List<String> names = e.valueNames();
+        if (names.size() != names.stream().distinct().count()) {
             throw new CheckException("entity '" + e.name() + "' declares a duplicate value");
         }
-        valueSets.put(e.name(), e.values());
+        valueSets.put(e.name(), names);
     }
 
     /**
