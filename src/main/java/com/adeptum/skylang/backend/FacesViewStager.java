@@ -167,6 +167,18 @@ public final class FacesViewStager {
                         .append(" should render as an image\");\n");
             }
             for (Ast.Appears a : view.appears()) {
+                // A bare Bool param condition gets the data-driven pair: driven renders, undriven not.
+                if (a instanceof Ast.AppearsWhen w && w.when() instanceof Ast.NameExpr n) {
+                    methods.append("        assertFalse(Jsoup.parse(render(\"").append(view.name())
+                            .append(".xhtml?").append(n.name()).append("=true\")).select(\".")
+                            .append(n.name()).append("\").isEmpty(), \"the ").append(n.name())
+                            .append(" element should render when driven\");\n");
+                    methods.append("        assertTrue(doc.select(\".").append(n.name())
+                            .append("\").isEmpty(), \"the ").append(n.name())
+                            .append(" element should not render undriven\");\n");
+                }
+            }
+            for (Ast.Appears a : view.appears()) {
                 if (a instanceof Ast.AppearsPlacement p) {
                     methods.append("        assertTrue(doc.select(\".").append(escape(p.region()))
                             .append("\").stream().anyMatch(e -> e.html().contains(\"").append(escape(p.label()))
@@ -711,12 +723,29 @@ public final class FacesViewStager {
                 <html xmlns="http://www.w3.org/1999/xhtml"
                       xmlns:h="jakarta.faces.html"
                       xmlns:f="jakarta.faces.core">
-                <h:head><title>%s</title></h:head>
+                %s<h:head><title>%s</title></h:head>
                 <h:body>
                 %s%s
                 </h:body>
                 </html>
-                """.formatted(view.name(), markup.strip(), selection);
+                """.formatted(viewParams(view), view.name(), markup.strip(), selection);
+    }
+
+    /**
+     * The stager owns the view-param metadata: deterministic markup at view-root level,
+     * outside the synthesized (and frozen) fragment.
+     */
+    private static String viewParams(Ast.View view) {
+        if (view.params().isEmpty()) {
+            return "";
+        }
+        String bean = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1) + "Bean";
+        StringBuilder sb = new StringBuilder("<f:metadata>\n");
+        for (Ast.Param p : view.params()) {
+            sb.append("  <f:viewParam name=\"").append(p.name()).append("\" value=\"#{")
+                    .append(bean).append('.').append(p.name()).append("}\"/>\n");
+        }
+        return sb.append("</f:metadata>\n").toString();
     }
 
     /**

@@ -373,6 +373,11 @@ page ProductList at "/products" {
   are both optional: `action "Sign out" -> Session.signOut()` is a page-level control bound to no
   row. On a page with several `shows`, a named subject (`on the order`) picks the section showing
   that entity.
+- `param <name> <Type>` declares a request parameter (Bool-, Int-, or Text-based, e.g. a `Slug`
+  for the tenant) the page receives in its URL. Params type-check as `shows`/action arguments,
+  and `appears <subject> when <condition>` renders a subject conditionally on them — verified by
+  requesting the page with and without the parameter and asserting the element appears only when
+  driven.
 - `expect …` states what must be true of the rendered view — columns present, an action rendered as
   a button, an empty-state message shown — and is verified.
 - `appears …` states styling, placement, ordering, and state (`is disabled when status is Shipped`,

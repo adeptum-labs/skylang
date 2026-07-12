@@ -1084,6 +1084,70 @@ class PipelineTest {
         assertEquals(2, code);
     }
 
+    private static final String PARAM_MODULE = """
+            module shop
+            entity Account { id Int @id  email Text }
+            service Session uses db {
+              current() -> Maybe<Account>  intent "The signed-in account."
+            }
+            page Login at "/" {
+              param   accessDenied Bool
+              shows   Session.current() as a summary of (email)
+              appears the access-denied alert when accessDenied
+            }
+            """;
+
+    private static final String PARAM_REPLY = """
+            ```xhtml
+            <h:panelGroup id="alert" styleClass="accessDenied" rendered="#{bean.accessDenied}">
+              <h:outputText value="Access denied."/>
+            </h:panelGroup>
+            <h:outputText id="email" value="#{bean.email}"/>
+            ```
+            ```java
+            public class LoginBean {}
+            ```
+            """;
+
+    @Test
+    void viewParamsStageMetadataAndADataDrivenRenderTest(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse(PARAM_MODULE, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub(PARAM_REPLY), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String page = Files.readString(buildDir.resolve("src/main/webapp/Login.xhtml"));
+        assertTrue(page.contains("<f:viewParam name=\"accessDenied\" value=\"#{loginBean.accessDenied}\"/>"),
+                "the stager owns the view-param metadata:\n" + page);
+        String render = Files.readString(buildDir.resolve("src/test/java/shop/ViewsRenderTest.java"));
+        assertTrue(render.contains("Login.xhtml?accessDenied=true"),
+                "the render test drives the param:\n" + render);
+        assertTrue(render.contains(".accessDenied"),
+                "the render test asserts the conditional element:\n" + render);
+    }
+
+    @Test
+    void aViewMissingItsConditionalIsDisposed(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(PARAM_MODULE, "shop.sky");
+        new TypeChecker().check(module);
+
+        // The reply renders the alert unconditionally, so the appears-when contract cannot hold.
+        int code = new Pipeline(routingStub("""
+                ```xhtml
+                <h:outputText id="alert" value="Access denied."/>
+                ```
+                ```java
+                public class LoginBean {}
+                ```
+                """), ALWAYS_PASS).build(module, root.resolve("sky.lock"),
+                root.resolve("build/jvm-jakarta"), quiet(), quiet());
+
+        assertEquals(2, code);
+    }
+
     @Test
     void previewModeInjectsTheSelectionScript(@TempDir Path root) throws Exception {
         Path buildDir = root.resolve("build/jvm-jakarta");
