@@ -166,7 +166,7 @@ public final class ProjectStager {
                 + entityJavadoc(entity)
                 + "public record " + entity.name() + "(" + components + ") {\n"
                 + compact
-                + valueConstants(entity)
+                + valueConstants(entity, values)
                 + identityEquality(entity, types)
                 + defaultsConstructor(entity, types, values)
                 + getters
@@ -174,13 +174,37 @@ public final class ProjectStager {
     }
 
     /** {@code values Member, Admin} lowers to one constant per value; the checker closes the set. */
-    private static String valueConstants(Ast.Entity entity) {
+    private static String valueConstants(Ast.Entity entity, java.util.Set<String> values) {
         StringBuilder sb = new StringBuilder(entity.values().isEmpty() ? "" : "\n");
         for (Ast.ValueDef v : entity.values()) {
+            StringBuilder args = new StringBuilder("\"").append(v.name()).append('"');
+            for (Ast.Field f : entity.fields().subList(1, entity.fields().size())) {
+                Ast.Expr pin = v.pins().stream().filter(p -> p.field().equals(f.name()))
+                        .findFirst().orElseThrow().expected();
+                args.append(", ").append(Lowering.javaValue(pin, values));
+            }
             sb.append("    public static final ").append(entity.name()).append(' ').append(v.name())
-                    .append(" = new ").append(entity.name()).append("(\"").append(v.name()).append("\");\n");
+                    .append(" = new ").append(entity.name()).append('(').append(args).append(");\n");
         }
+        sb.append(carrierLookup(entity));
         return sb.toString();
+    }
+
+    /** With data fields pinned, a stored carrier string restores its declared constant. */
+    private static String carrierLookup(Ast.Entity entity) {
+        if (entity.values().isEmpty() || entity.fields().size() == 1) {
+            return "";
+        }
+        String carrier = entity.fields().get(0).name();
+        StringBuilder sb = new StringBuilder("\n    public static ").append(entity.name())
+                .append(" of(String ").append(carrier).append(") {\n")
+                .append("        return switch (").append(carrier).append(") {\n");
+        for (Ast.ValueDef v : entity.values()) {
+            sb.append("            case \"").append(v.name()).append("\" -> ").append(v.name()).append(";\n");
+        }
+        return sb.append("            default -> throw new IllegalArgumentException(\"no ")
+                .append(entity.name()).append(" value named \" + ").append(carrier).append(");\n")
+                .append("        };\n    }\n").toString();
     }
 
     /** An @id entity compares by its identity; a value entity keeps record content equality. */

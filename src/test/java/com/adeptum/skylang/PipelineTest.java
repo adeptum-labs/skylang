@@ -539,6 +539,44 @@ class PipelineTest {
                 "an absent amount reads back as an empty Maybe:\n" + jpa);
     }
 
+    @Test
+    void pinnedValuesLowerToFullConstructorsAndLookup(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Tier {
+                  name  Text @id
+                  label Text
+                  price Money
+                  values Free with label "Free" and price 0eur, Pro with label "Pro" and price 399sek
+                }
+                entity Account { id Int @id  tier Tier  fallback Maybe<Tier>  history [Tier] }
+                service Accounts uses db {
+                  all() -> [Account]  intent "Every account."
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String tier = Files.readString(buildDir.resolve("src/main/java/shop/Tier.java"));
+        assertTrue(tier.contains("new Tier(\"Free\", \"Free\", Money.of(\"0\", \"EUR\"))"),
+                "a pinned value lowers to its full constructor:\n" + tier);
+        assertTrue(tier.contains("new Tier(\"Pro\", \"Pro\", Money.of(\"399\", \"SEK\"))"),
+                "every pin lowers in component order:\n" + tier);
+        assertTrue(tier.contains("public static Tier of(String name)"),
+                "a pinned value set exposes a carrier lookup:\n" + tier);
+        String jpa = Files.readString(buildDir.resolve("src/main/java/shop/AccountJpa.java"));
+        assertTrue(jpa.contains("Tier.of(tier)"),
+                "a stored carrier restores the declared constant:\n" + jpa);
+        assertTrue(jpa.contains("map(Tier::of)"),
+                "Maybe and collection columns restore through the lookup:\n" + jpa);
+        assertFalse(jpa.contains("new Tier("),
+                "no carrier-only construction remains:\n" + jpa);
+    }
+
     private static final String INTERFACE_MODULE = """
             module shop
             entity Product { id Int @id  name Text  stock Int @min(0) }

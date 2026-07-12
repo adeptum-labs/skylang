@@ -264,7 +264,7 @@ public final class JpaStager {
             case "values" -> {
                 decls.add("    public String " + n + ";\n");
                 of.add("row." + n + " = " + get + "." + carrier(base, module) + "();");
-                to.add("new " + base + "(" + n + ")");
+                to.add(restoreCall(base, module) + "(" + n + ")");
             }
             case "relation" -> {
                 decls.add("    @jakarta.persistence.ManyToOne(fetch = jakarta.persistence.FetchType.EAGER)\n"
@@ -312,7 +312,7 @@ public final class JpaStager {
                 decls.add("    public String " + n + ";\n");
                 of.add("row." + n + " = " + get + ".isPresent() ? " + get + ".get()."
                         + carrier(base, module) + "() : null;");
-                to.add("java.util.Optional.ofNullable(" + n + ").map(" + base + "::new)");
+                to.add("java.util.Optional.ofNullable(" + n + ").map(" + restoreRef(base, module) + ")");
             }
             default -> {   // a nullable relation
                 decls.add("    @jakarta.persistence.ManyToOne(fetch = jakarta.persistence.FetchType.EAGER)\n"
@@ -347,7 +347,7 @@ public final class JpaStager {
                 decls.add(annotations + "    public " + container + "<String> " + n + ";\n");
                 of.add("row." + n + " = " + get + ".stream().map(x -> x." + carrier(element, module)
                         + "()).collect(java.util.stream.Collectors.toCollection(" + copy + "::new));");
-                to.add(collect(n + ".stream().map(" + element + "::new)", list));
+                to.add(collect(n + ".stream().map(" + restoreRef(element, module) + ")", list));
             }
             default -> {   // a collection of components
                 decls.add(annotations + "    public " + container + "<" + element + "Jpa> " + n + ";\n");
@@ -416,6 +416,20 @@ public final class JpaStager {
                 .filter(e -> e.name().equals(entityName))
                 .findFirst().orElseThrow()
                 .fields().get(0).name();
+    }
+
+    /** How a stored carrier restores the record: the constructor, or the lookup once data fields exist. */
+    private static String restoreCall(String entityName, Ast.Module module) {
+        return hasDataFields(entityName, module) ? entityName + ".of" : "new " + entityName;
+    }
+
+    private static String restoreRef(String entityName, Ast.Module module) {
+        return entityName + (hasDataFields(entityName, module) ? "::of" : "::new");
+    }
+
+    private static boolean hasDataFields(String entityName, Ast.Module module) {
+        return module.entities().stream()
+                .anyMatch(e -> e.name().equals(entityName) && e.fields().size() > 1);
     }
 
     private static String idJavaType(Ast.Entity e, Map<String, Ast.TypeDecl> types) {
