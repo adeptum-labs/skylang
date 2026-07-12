@@ -511,7 +511,9 @@ public final class Pipeline {
         try (Ticker ticker = Ticker.start(out, "synthesizing page " + u.view.name())) {
             u.artifact = synthesizeView(module, u.view);
         }
-        List<String> unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup());
+        java.util.Set<String> imageColumns =
+                com.adeptum.skylang.verify.ViewVerifier.bytesColumns(module, u.view);
+        List<String> unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup(), imageColumns);
         int attempts = 0;
         while (!unmet.isEmpty() && attempts < maxRegenerations) {
             attempts++;
@@ -519,7 +521,7 @@ public final class Pipeline {
             try (Ticker ticker = Ticker.start(out, "regenerating page " + u.view.name())) {
                 u.artifact = synthesizeView(module, u.view);
             }
-            unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup());
+            unmet = viewVerifier.unmetExpectations(u.view, u.artifact.markup(), imageColumns);
         }
         return unmet.isEmpty();
     }

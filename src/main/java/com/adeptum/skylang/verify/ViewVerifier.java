@@ -35,15 +35,73 @@ public final class ViewVerifier {
 
     private final SemanticTreeExtractor extractor = new SemanticTreeExtractor();
 
+    /**
+     * The view's projected non-table columns whose field erases to Bytes (or Maybe of it) —
+     * the columns that must render as images.
+     */
+    public static java.util.Set<String> bytesColumns(Ast.Module module, Ast.View view) {
+        java.util.Set<String> columns = new java.util.LinkedHashSet<>();
+        collectBytesColumns(module, view.shows(), columns);
+        for (Ast.Shows extra : view.moreShows()) {
+            collectBytesColumns(module, extra, columns);
+        }
+        return columns;
+    }
+
+    private static void collectBytesColumns(Ast.Module module, Ast.Shows shows, java.util.Set<String> out) {
+        if (shows.projection().isEmpty() || shows.projection().get().kind().equals("table")) {
+            return;   // table rows keep their text rendering; images are a summary/form concern
+        }
+        module.services().stream()
+                .filter(s -> s.name().equals(shows.query().service()))
+                .flatMap(s -> s.methods().stream())
+                .filter(m -> m.name().equals(shows.query().method()))
+                .findFirst()
+                .map(m -> m.returnType() instanceof Ast.GenericType g && !g.args().isEmpty()
+                        && g.args().get(0) instanceof Ast.TypeRef ref ? ref.name() : null)
+                .flatMap(entity -> module.entities().stream()
+                        .filter(e -> e.name().equals(entity)).findFirst())
+                .ifPresent(e -> {
+                    for (String column : shows.projection().get().columns()) {
+                        e.fields().stream()
+                                .filter(f -> f.name().equals(column) && isBytes(f.type()))
+                                .forEach(f -> out.add(column));
+                    }
+                });
+    }
+
+    private static boolean isBytes(Ast.Type type) {
+        if (type instanceof Ast.GenericType g && g.name().equals("Maybe")) {
+            return isBytes(g.args().get(0));
+        }
+        return type instanceof Ast.TypeRef ref && !ref.list() && ref.name().equals("Bytes");
+    }
+
     /** @return a description of each unmet expectation; empty means the markup satisfies the view. */
     public List<String> unmetExpectations(Ast.View view, String markup) {
+        return unmetExpectations(view, markup, java.util.Set.of());
+    }
+
+    /**
+     * As above, additionally requiring each named Bytes column to render as an image —
+     * an {@code h:graphicImage} bound to the field's {@code DataUri} bean helper.
+     */
+    public List<String> unmetExpectations(Ast.View view, String markup, java.util.Set<String> imageColumns) {
         SemanticTree tree = extractor.extract(markup);
         List<String> unmet = new ArrayList<>();
+        for (String field : imageColumns) {
+            if (!tree.hasImage(field)) {
+                unmet.add("expected field '" + field + "' to render as an image"
+                        + " (h:graphicImage bound to " + field + "DataUri)");
+            }
+        }
         for (Ast.Expect e : view.expects()) {
             switch (e) {
                 case Ast.ExpectColumns c -> {
-                    if (!tree.hasColumns(c.columns())) {
-                        unmet.add("expected columns " + c.columns() + " but the view binds " + tree.columnFields());
+                    List<String> bound = new ArrayList<>(tree.columnFields());
+                    bound.addAll(tree.imageFields());
+                    if (!bound.containsAll(c.columns())) {
+                        unmet.add("expected columns " + c.columns() + " but the view binds " + bound);
                     }
                 }
                 case Ast.ExpectActionKind a -> {

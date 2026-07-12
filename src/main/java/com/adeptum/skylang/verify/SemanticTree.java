@@ -30,7 +30,12 @@ import java.util.Set;
  * {@code expect} and {@code appears} clauses are checked against this structure, so the same
  * assertions hold regardless of the component library that produced the markup.
  */
-public record SemanticTree(List<Column> columns, List<Control> controls, Set<String> tableClasses) {
+public record SemanticTree(List<Column> columns, List<Control> controls, Set<String> tableClasses,
+                           List<String> imageFields) {
+
+    public SemanticTree(List<Column> columns, List<Control> controls, Set<String> tableClasses) {
+        this(columns, controls, tableClasses, List.of());
+    }
 
     /** A data-table column: the row field it binds and its header text. */
     public record Column(String field, String header) {
@@ -60,5 +65,10 @@ public record SemanticTree(List<Column> columns, List<Control> controls, Set<Str
     /** True if the data table carries the style class {@code style}. */
     public boolean tableHasStyle(String style) {
         return tableClasses.contains(style);
+    }
+
+    /** True if the named field renders as an image (an {@code h:graphicImage} data-URI binding). */
+    public boolean hasImage(String field) {
+        return imageFields.contains(field);
     }
 }

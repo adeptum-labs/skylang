@@ -43,6 +43,9 @@ public final class SemanticTreeExtractor {
     /** A value binding such as {@code #{row.stock}} — group 1 is the var, group 2 the field. */
     private static final Pattern BINDING = Pattern.compile("#\\{\\s*(\\w+)\\.(\\w+)\\s*}");
 
+    /** An image binding such as {@code #{bean.logoDataUri}} — group 1 is the field. */
+    private static final Pattern IMAGE_BINDING = Pattern.compile("#\\{\\s*\\w+\\.(\\w+)DataUri\\s*}");
+
     public SemanticTree extract(String markup) {
         Document doc = Jsoup.parse(markup, "", Parser.xmlParser());
 
@@ -70,7 +73,15 @@ public final class SemanticTreeExtractor {
             controls.add(new SemanticTree.Control("textbox", label(input), regionsOf(input)));
         }
 
-        return new SemanticTree(columns, controls, tableClasses);
+        List<String> imageFields = new ArrayList<>();
+        for (Element image : doc.getElementsByTag("h:graphicImage")) {
+            Matcher m = IMAGE_BINDING.matcher(image.attr("value"));
+            if (m.find()) {
+                imageFields.add(m.group(1));
+            }
+        }
+
+        return new SemanticTree(columns, controls, tableClasses, imageFields);
     }
 
     /** The style-class tokens directly on an element — both {@code class} and Faces {@code styleClass}. */

@@ -91,4 +91,26 @@ class ViewVerifierTest {
         Ast.View view = viewWith("  appears columns (stock, name)");
         assertFalse(verifier.unmetExpectations(view, MARKUP).isEmpty());
     }
+
+    private static final String BRANDING = """
+            <h:panelGroup styleClass="branding">
+              <h:graphicImage id="logoImage" value="#{bean.logoDataUri}" alt="logo"/>
+              <h:outputText value="#{bean.name}"/>
+            </h:panelGroup>
+            """;
+
+    @Test
+    void acceptsABoundImageField() {
+        Ast.View view = viewWith("");
+        assertTrue(verifier.unmetExpectations(view, BRANDING, java.util.Set.of("logo")).isEmpty());
+    }
+
+    @Test
+    void reportsAMissingImageBinding() {
+        Ast.View view = viewWith("");
+        List<String> unmet = verifier.unmetExpectations(view,
+                "<h:outputText value=\"#{bean.logo}\"/>", java.util.Set.of("logo"));
+        assertEquals(1, unmet.size());
+        assertTrue(unmet.get(0).contains("logo") && unmet.get(0).contains("image"), unmet.get(0));
+    }
 }

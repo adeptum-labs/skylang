@@ -54,6 +54,18 @@ class SemanticTreeExtractorTest {
     private final SemanticTreeExtractor extractor = new SemanticTreeExtractor();
 
     @Test
+    void extractsGraphicImageBindings() {
+        SemanticTree tree = extractor.extract("""
+                <h:panelGroup styleClass="branding">
+                  <h:graphicImage id="logoImage" value="#{bean.logoDataUri}" alt="logo"/>
+                  <h:outputText value="#{bean.name}"/>
+                </h:panelGroup>
+                """);
+        assertTrue(tree.hasImage("logo"));
+        assertFalse(tree.hasImage("name"));
+    }
+
+    @Test
     void extractsBoundColumnFields() {
         SemanticTree tree = extractor.extract(TABLE);
         assertEquals(List.of("name", "stock"), tree.columnFields());
