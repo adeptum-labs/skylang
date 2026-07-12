@@ -70,7 +70,8 @@ public final class UiPromptBuilder {
             - Use only the components listed under "Component vocabulary".
             - Each prompted input names its converter or validator under "Actions": nest exactly
               that tag inside the h:inputText (e.g. <f:converter converterId="sky.money"/> for a
-              Money input, <f:converter converterId="sky.instant"/> for an Instant input).
+              Money input, <f:converter converterId="sky.instant"/> for an Instant input,
+              <f:converter converterId="sky.date"/> for a Date input).
             - To place a control in a region, wrap it in <h:panelGroup styleClass="REGION">.
             - To give a table a style (e.g. a density), set styleClass="STYLE" on the h:dataTable.
             - Render the table columns in the order requested under "Appearance".
@@ -281,6 +282,8 @@ public final class UiPromptBuilder {
                 yield switch (ref.name()) {
                     case "Money" -> "<f:converter converterId=\"sky.money\"/>";
                     case "Instant" -> "<f:converter converterId=\"sky.instant\"/>";
+                    case "Date" -> "<f:converter converterId=\"sky.date\"/>";
+                    case "DateTime" -> "<f:converter converterId=\"sky.datetime\"/>";
                     case "Email" -> "<f:validateRegex pattern=\""
                             + com.adeptum.skylang.types.Builtins.EMAIL_REGEX + "\"/>";
                     case "Currency" -> "<f:validateRegex pattern=\""

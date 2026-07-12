@@ -92,6 +92,27 @@ class UiPromptBuilderTest {
     }
 
     @Test
+    void dateAndDateTimeAsksNameTheirConverters() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Course { id Int  name Text }
+                service Courses {
+                  all() -> [Course]  intent "all"
+                  schedule(id Int, starts Date, opensAt DateTime) -> Course  intent "schedule"
+                }
+                view Schedule at "/schedule" {
+                  shows  Courses.all() as a table of (id)
+                  action "Schedule" on row -> Courses.schedule(row.id, ask Date, ask DateTime)
+                }
+                """, "shop.sky");
+        String user = prompts.user(m, m.views().get(0));
+        assertTrue(user.contains("<f:converter converterId=\"sky.date\"/>"),
+                "an ask Date input names its converter:\n" + user);
+        assertTrue(user.contains("<f:converter converterId=\"sky.datetime\"/>"),
+                "an ask DateTime input names its converter:\n" + user);
+    }
+
+    @Test
     void userPromptSaysOnThePageForSubjectlessActions() {
         Ast.Module m = Parsing.parse("""
                 module shop

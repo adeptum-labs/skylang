@@ -1118,6 +1118,38 @@ class PipelineTest {
     }
 
     @Test
+    void promptedDateAndDateTimeInputsStageTheirConverters(@TempDir Path root) throws Exception {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Course { id Int  name Text }
+                service Courses {
+                  all() -> [Course]  intent "all"
+                  schedule(id Int, starts Date, opensAt DateTime) -> Course  intent "schedule"
+                }
+                view Schedule at "/schedule" {
+                  shows  Courses.all() as a table of (id)
+                  action "Schedule" on row -> Courses.schedule(row.id, ask Date, ask DateTime)
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertTrue(Files.readString(buildDir.resolve("src/main/java/shop/DateConverter.java"))
+                .contains("sky.date"), "the Date converter must register under sky.date");
+        assertTrue(Files.readString(buildDir.resolve("src/main/java/shop/DateTimeConverter.java"))
+                .contains("sky.datetime"), "the DateTime converter must register under sky.datetime");
+        String interaction = Files.readString(buildDir.resolve("src/test/java/shop/ViewsInteractionTest.java"));
+        assertTrue(interaction.contains("2026-01-01\""),
+                "the interaction lane needs a valid Date sample");
+        assertTrue(interaction.contains("2026-01-01T00:00:00\""),
+                "the interaction lane needs a valid DateTime sample");
+    }
+
+    @Test
     void viewsWithoutConvertedInputsStageNoConverters(@TempDir Path root) {
         Path buildDir = root.resolve("build/jvm-jakarta");
 

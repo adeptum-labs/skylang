@@ -113,7 +113,12 @@ public final class FacesViewStager {
             }
 
             for (String converter : convertersNeeded(module)) {
-                String source = converter.equals("Money") ? MONEY_CONVERTER : INSTANT_CONVERTER;
+                String source = switch (converter) {
+                    case "Money" -> MONEY_CONVERTER;
+                    case "Date" -> DATE_CONVERTER;
+                    case "DateTime" -> DATETIME_CONVERTER;
+                    default -> INSTANT_CONVERTER;
+                };
                 Files.writeString(java.resolve(converter + "Converter.java"), source.formatted(pkg));
             }
 
@@ -186,7 +191,8 @@ public final class FacesViewStager {
                 for (Ast.ActionArg arg : a.args()) {
                     if (arg instanceof Ast.AskArg ask) {
                         String erased = erasedName(ask.type(), types);
-                        if (erased.equals("Money") || erased.equals("Instant")) {
+                        if (erased.equals("Money") || erased.equals("Instant")
+                                || erased.equals("Date") || erased.equals("DateTime")) {
                             needed.add(erased);
                         }
                     }
@@ -221,6 +227,8 @@ public final class FacesViewStager {
         return switch (erasedName(type, types)) {
             case "Money" -> "9.99 EUR";
             case "Instant" -> "2026-01-01T00:00:00Z";
+            case "Date" -> "2026-01-01";
+            case "DateTime" -> "2026-01-01T00:00:00";
             case "Email" -> "a@example.com";
             case "Currency" -> "EUR";
             case "Text" -> "sample";
@@ -613,6 +621,76 @@ public final class FacesViewStager {
 
                 @Override
                 public String getAsString(FacesContext context, UIComponent component, Instant value) {
+                    return value == null ? "" : value.toString();
+                }
+            }
+            """;
+
+    private static final String DATE_CONVERTER = """
+            package %s;
+
+            import jakarta.faces.component.UIComponent;
+            import jakarta.faces.context.FacesContext;
+            import jakarta.faces.convert.Converter;
+            import jakarta.faces.convert.ConverterException;
+            import jakarta.faces.convert.FacesConverter;
+
+            import java.time.LocalDate;
+            import java.time.format.DateTimeParseException;
+
+            /** Converts between ISO form input (2026-01-01) and java.time.LocalDate. */
+            @FacesConverter("sky.date")
+            public class DateConverter implements Converter<LocalDate> {
+
+                @Override
+                public LocalDate getAsObject(FacesContext context, UIComponent component, String value) {
+                    if (value == null || value.isBlank()) {
+                        return null;
+                    }
+                    try {
+                        return LocalDate.parse(value.strip());
+                    } catch (DateTimeParseException e) {
+                        throw new ConverterException("expected an ISO date, e.g. 2026-01-01", e);
+                    }
+                }
+
+                @Override
+                public String getAsString(FacesContext context, UIComponent component, LocalDate value) {
+                    return value == null ? "" : value.toString();
+                }
+            }
+            """;
+
+    private static final String DATETIME_CONVERTER = """
+            package %s;
+
+            import jakarta.faces.component.UIComponent;
+            import jakarta.faces.context.FacesContext;
+            import jakarta.faces.convert.Converter;
+            import jakarta.faces.convert.ConverterException;
+            import jakarta.faces.convert.FacesConverter;
+
+            import java.time.LocalDateTime;
+            import java.time.format.DateTimeParseException;
+
+            /** Converts between ISO form input (2026-01-01T00:00:00) and java.time.LocalDateTime. */
+            @FacesConverter("sky.datetime")
+            public class DateTimeConverter implements Converter<LocalDateTime> {
+
+                @Override
+                public LocalDateTime getAsObject(FacesContext context, UIComponent component, String value) {
+                    if (value == null || value.isBlank()) {
+                        return null;
+                    }
+                    try {
+                        return LocalDateTime.parse(value.strip());
+                    } catch (DateTimeParseException e) {
+                        throw new ConverterException("expected an ISO date-time, e.g. 2026-01-01T00:00:00", e);
+                    }
+                }
+
+                @Override
+                public String getAsString(FacesContext context, UIComponent component, LocalDateTime value) {
                     return value == null ? "" : value.toString();
                 }
             }
