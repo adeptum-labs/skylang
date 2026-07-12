@@ -87,6 +87,21 @@ class ProfilesTest {
     }
 
     @Test
+    void proseExampleResultsAreNotYetSupportedByTheTsProfile() {
+        var module = com.adeptum.skylang.front.Parsing.parse("""
+                module t
+                entity Provider { id Int @id  name Text }
+                service S { upgrade(id Int) -> Provider
+                  intent "x"
+                  example upgrade(1) -> a Provider on the Free tier }
+                """, "t.sky");
+        var e = assertThrows(com.adeptum.skylang.types.CheckException.class,
+                () -> Profiles.byId("ts-node").validate(module));
+        assertTrue(e.getMessage().contains("not yet supported by the ts-node profile"),
+                e.getMessage());
+    }
+
+    @Test
     void aDesignedButUnshippedProfileSaysSo() {
         ConfigException e = assertThrows(ConfigException.class, () -> Profiles.byId("python"));
         assertTrue(e.getMessage().contains("not shipped"), e.getMessage());

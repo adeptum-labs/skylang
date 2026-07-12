@@ -1224,6 +1224,9 @@ public final class TypeChecker {
             case Ast.RaisesResult rr -> {
                 // Declared-ness is validated in the pre-pass; nothing further to type here.
             }
+            case Ast.ProseResult ignored -> {
+                // Prose steers the model; there is nothing to type.
+            }
             case Ast.FieldsResult fr -> {
                 if (!(returnType instanceof Ty.EntityTy et)) {
                     throw new CheckException(where + " example expects result fields but the method"

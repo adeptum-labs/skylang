@@ -74,6 +74,8 @@ public final class SupportClasses {
                         }
                         case Ast.NothingResult ignored -> {
                         }
+                        case Ast.ProseResult ignored -> {
+                        }
                     }
                 }
                 for (Ast.Spec spec : m.specs()) {

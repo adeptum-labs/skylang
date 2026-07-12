@@ -133,6 +133,7 @@ exampleResult
     | RAISES ID                                       # raisesResult   // -> raises BadInput
     | fieldExpect ((ID | AND | COMMA) fieldExpect)*   # fieldsResult   // -> stock 8
     | expr                                            # exprResult     // e.g. -> 5 | -> nothing
+    | proseWord+                                      # proseResult    // free prose: steers the model, verifies nothing
     ;
 
 whosePart : ID ID IS NOT? expr ;   // "whose" field is [not] value; the value "set" means present

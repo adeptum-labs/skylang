@@ -787,6 +787,9 @@ public final class ProjectStager {
             case Ast.EntityResult ent -> appendFieldAsserts(sb, ent.fields(), values);
             case Ast.FieldsResult fr -> appendFieldAsserts(sb, fr.fields(), values);
             case Ast.WhoseResult wr -> appendWhoseAsserts(sb, wr, module, values);
+            case Ast.ProseResult ignored -> {
+                // Prose steers the model; the call completing without raising is the pin.
+            }
         }
 
         sb.append("    }\n");

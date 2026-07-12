@@ -919,6 +919,7 @@ public final class Pipeline {
                         case IS_SET -> " is set";
                     })
                     .collect(java.util.stream.Collectors.joining(" and whose "));
+            case Ast.ProseResult pr -> pr.text();
         };
     }
 

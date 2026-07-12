@@ -57,6 +57,22 @@ class PromptBuilderTest {
     }
 
     @Test
+    void proseResultRendersItsTextInExamples() {
+        Ast.Module m = Parsing.parse("""
+                module bank
+                entity Provider { id Int @id  name Text }
+                service Providers uses db {
+                  upgrade(id Int) -> Provider
+                    intent  "Upgrade the provider."
+                    example upgrade(1) -> a Provider on the Free tier
+                }
+                """, "bank.sky");
+        String user = prompts.user(m, m.services().get(0), m.services().get(0).methods().get(0));
+        assertTrue(user.contains("-> a Provider on the Free tier"),
+                "the prose result steers the model verbatim:\n" + user);
+    }
+
+    @Test
     void userPromptStatesTheUniquenessScope() {
         Ast.Module m = Parsing.parse("""
                 module bank

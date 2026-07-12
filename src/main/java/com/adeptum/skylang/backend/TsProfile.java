@@ -115,7 +115,8 @@ public final class TsProfile implements Profile {
                         throw notYet("example seeding, on a ... (" + where + ")");
                     }
                     if (ex.result() instanceof Ast.NothingResult
-                            || ex.result() instanceof Ast.WhoseResult) {
+                            || ex.result() instanceof Ast.WhoseResult
+                            || ex.result() instanceof Ast.ProseResult) {
                         throw notYet("this example result form (" + where + ")");
                     }
                     ex.call().args().forEach(a -> requireExpr(a, where + " example"));

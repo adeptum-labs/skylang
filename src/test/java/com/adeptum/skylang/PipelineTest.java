@@ -540,6 +540,31 @@ class PipelineTest {
     }
 
     @Test
+    void proseResultStagesACallWithoutAssertions(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Provider { id Int @id  name Text }
+                service Providers uses db {
+                  upgrade(id Int) -> Provider
+                    intent  "Upgrade the provider."
+                    example upgrade(1) -> a Provider on the Free tier
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String tests = Files.readString(buildDir.resolve("src/test/java/shop/ProvidersTest.java"));
+        assertTrue(tests.contains("var result = svc.upgrade(id)"),
+                "a prose example still calls the method — the call completing is the pin:\n" + tests);
+        assertFalse(tests.contains("assertEquals") || tests.contains("assertTrue"),
+                "a prose result asserts nothing:\n" + tests);
+    }
+
+    @Test
     void scopedUniqueBecomesACompositeTableConstraint(@TempDir Path root) throws IOException {
         Ast.Module module = Parsing.parse("""
                 module shop

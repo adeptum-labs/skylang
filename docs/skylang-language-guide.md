@@ -263,6 +263,10 @@ service Catalog uses db {
 SkyLang generates `restock` until all three examples hold, freezes it, and you never wrote a
 loop or a null check. The red → generate → green loop is native (`sky tdd`, §13).
 
+An example result may also be free prose — `example decline(1) -> the payment is declined`.
+Prose steers generation like an `intent`, but it verifies nothing beyond the call completing
+without an error; prefer the `whose`/`with` forms, which become real assertions.
+
 ### Richer cases: the `spec` block
 
 One-line `example`s are the lightweight form. When a behavior needs setup and several

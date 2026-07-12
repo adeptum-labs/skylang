@@ -115,6 +115,19 @@ class TypeCheckerTest {
     }
 
     @Test
+    void proseExampleResultsAreAcceptedUnchecked() {
+        assertDoesNotThrow(() -> check("""
+                module shop
+                entity Provider { id Int @id  name Text }
+                service Providers uses db {
+                  upgrade(id Int) -> Provider
+                    intent  "Upgrade the provider."
+                    example upgrade(1) -> a Provider on the Free tier
+                }
+                """));
+    }
+
+    @Test
     void nothingNeedsAMaybeReturn() {
         CheckException e = assertThrows(CheckException.class, () -> check(service("""
                   f(x Int) -> Int

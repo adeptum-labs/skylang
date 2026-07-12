@@ -402,7 +402,15 @@ public final class Ast {
     // ----- example results ---------------------------------------------------
 
     public sealed interface Result
-            permits ExprResult, EntityResult, RaisesResult, FieldsResult, NothingResult, WhoseResult {
+            permits ExprResult, EntityResult, RaisesResult, FieldsResult, NothingResult, WhoseResult,
+                    ProseResult {
+    }
+
+    /**
+     * {@code -> a Provider on the Free tier} — free prose: steers the model and pins only
+     * that the call completes; prefer the verified {@code whose}/{@code with} forms.
+     */
+    public record ProseResult(String text) implements Result {
     }
 
     /** {@code -> raises BadInput} — the call must raise the named error. */

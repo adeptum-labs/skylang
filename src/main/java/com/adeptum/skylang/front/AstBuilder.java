@@ -359,11 +359,20 @@ public final class AstBuilder {
 
     private static String joinedWords(org.antlr.v4.runtime.ParserRuleContext ctx) {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < ctx.getChildCount(); i++) {
-            String word = ctx.getChild(i).getText();
-            sb.append(sb.isEmpty() || word.equals("'s") ? "" : " ").append(word);
-        }
+        appendWords(ctx, sb);
         return sb.toString();
+    }
+
+    /** Flatten to leaf tokens so subrule children (whosePart, withClause) keep their spacing. */
+    private static void appendWords(org.antlr.v4.runtime.tree.ParseTree node, StringBuilder sb) {
+        if (node instanceof org.antlr.v4.runtime.ParserRuleContext rule) {
+            for (int i = 0; i < rule.getChildCount(); i++) {
+                appendWords(rule.getChild(i), sb);
+            }
+            return;
+        }
+        String word = node.getText();
+        sb.append(sb.isEmpty() || word.equals("'s") ? "" : " ").append(word);
     }
 
     private Ast.Type type(SkyLangParser.TypeContext ctx) {
@@ -623,15 +632,20 @@ public final class AstBuilder {
                 }
                 yield new Ast.FieldsResult(fields);
             }
-            case SkyLangParser.EntityResultContext en ->
-                    new Ast.EntityResult(en.ID(1).getText(), fieldExpects(en.withClause()));
+            case SkyLangParser.EntityResultContext en -> {
+                // A near-miss of the with-introducer is ordinary prose, not a bogus entity result.
+                if (en.withClause() != null && !en.withClause().ID(0).getText().equals("with")) {
+                    yield new Ast.ProseResult(joinedWords(en));
+                }
+                yield new Ast.EntityResult(en.ID(1).getText(), fieldExpects(en.withClause()));
+            }
             case SkyLangParser.WhoseResultContext wr -> {
+                // A near-miss of the whose shape is ordinary prose, not an error.
+                if (wr.whosePart().stream().anyMatch(p -> !p.ID(0).getText().equals("whose"))) {
+                    yield new Ast.ProseResult(joinedWords(wr));
+                }
                 List<Ast.WhoseExpect> expects = new ArrayList<>();
                 for (SkyLangParser.WhosePartContext part : wr.whosePart()) {
-                    if (!part.ID(0).getText().equals("whose")) {
-                        throw new IllegalArgumentException("expected 'whose', got '"
-                                + part.ID(0).getText() + "'");
-                    }
                     String field = part.ID(1).getText();
                     Ast.Expr value = expr(part.expr());
                     if (part.NOT() != null) {
@@ -645,6 +659,7 @@ public final class AstBuilder {
                 }
                 yield new Ast.WhoseResult(wr.ID(1).getText(), expects);
             }
+            case SkyLangParser.ProseResultContext pr -> new Ast.ProseResult(joinedWords(pr));
             default -> throw new IllegalStateException("unhandled example result: " + ctx.getClass());
         };
     }

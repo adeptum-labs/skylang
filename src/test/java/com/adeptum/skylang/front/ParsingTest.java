@@ -93,6 +93,63 @@ class ParsingTest {
         assertThrows(SkyParseException.class, () -> Parsing.parse("module 123 entity", "bad.sky"));
     }
 
+    private static Ast.Result exampleResult(String result) {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Provider { id Int @id  name Text }
+                service S {
+                  upgrade(id Int) -> Provider
+                    intent  "Upgrade."
+                    example upgrade(1) -> %s
+                }
+                """.formatted(result), "t.sky");
+        return m.services().get(0).methods().get(0).examples().get(0).result();
+    }
+
+    @Test
+    void parsesExampleProseResult() {
+        Ast.ProseResult prose = assertInstanceOf(Ast.ProseResult.class,
+                exampleResult("a Provider on the Free tier"));
+        assertEquals("a Provider on the Free tier", prose.text());
+        Ast.ProseResult keyworded = assertInstanceOf(Ast.ProseResult.class,
+                exampleResult("the provider's tier is upgraded"));
+        assertEquals("the provider's tier is upgraded", keyworded.text());
+    }
+
+    @Test
+    void entityResultStillWinsOverProse() {
+        Ast.EntityResult entity = assertInstanceOf(Ast.EntityResult.class,
+                exampleResult("a Provider with name \"x\""));
+        assertEquals("Provider", entity.typeName());
+    }
+
+    @Test
+    void whoseNearMissFallsBackToProse() {
+        Ast.ProseResult prose = assertInstanceOf(Ast.ProseResult.class,
+                exampleResult("a provider payment method is declined"));
+        assertEquals("a provider payment method is declined", prose.text());
+    }
+
+    @Test
+    void entityIntroducerNearMissFallsBackToProse() {
+        Ast.ProseResult prose = assertInstanceOf(Ast.ProseResult.class,
+                exampleResult("a provider payment method declined"));
+        assertEquals("a provider payment method declined", prose.text());
+    }
+
+    @Test
+    void entityDeadEndFallsBackToProse() {
+        Ast.ProseResult prose = assertInstanceOf(Ast.ProseResult.class,
+                exampleResult("a Post owned by that user"));
+        assertEquals("a Post owned by that user", prose.text());
+    }
+
+    @Test
+    void whoseResultsKeepTheirLaxArticle() {
+        assertInstanceOf(Ast.WhoseResult.class,
+                exampleResult("an Provider whose name is \"x\""));
+    }
+
     private static final String SHOP_VIEW = """
             module shop
 

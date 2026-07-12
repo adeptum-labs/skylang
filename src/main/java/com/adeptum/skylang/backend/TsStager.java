@@ -296,6 +296,8 @@ public final class TsStager {
                     "Maybe results are not yet supported by the ts-node profile");
             case Ast.WhoseResult ignored -> throw new CheckException(
                     "whose-results are not yet supported by the ts-node profile");
+            case Ast.ProseResult ignored -> throw new CheckException(
+                    "prose example results are not yet supported by the ts-node profile");
         }
         sb.append("});\n");
         return sb.toString();

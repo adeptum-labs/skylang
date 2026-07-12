@@ -246,6 +246,7 @@ public final class PromptBuilder {
                         case IS_SET -> " is set";
                     })
                     .collect(Collectors.joining(" and whose "));
+            case Ast.ProseResult pr -> pr.text();
         };
     }
 
