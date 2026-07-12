@@ -117,6 +117,32 @@ class ViewFeasibilityTest {
     }
 
     @Test
+    void controlsBindToTheirOwnShowsOnAMultiSectionPage() {
+        Ast.Module module = Parsing.parse("""
+                module identity
+                entity Tenant { id Int @id  name Text }
+                entity UserAccount { id Int @id  displayName Text  email Email }
+                service Tenants uses db {
+                  current() -> Maybe<Tenant>  intent "The tenant for this request."
+                }
+                service Session uses auth, db {
+                  current() -> Maybe<UserAccount>  intent "The signed-in account."
+                  signOut(account UserAccount) -> UserAccount  intent "End the session."
+                }
+                page Login at "/" {
+                  shows  Tenants.current() as a summary of (name)
+                  shows  Session.current() as a summary of (displayName, email)
+                  action "Sign out" on the useraccount -> Session.signOut(useraccount)
+                  expect action "Sign out" is a button
+                }
+                """, "identity.sky");
+
+        assertTrue(ViewFeasibility.contradictions(module).isEmpty(),
+                "the sign-out control binds to the auth-backed session section, not the branding"
+                        + " section, so the unseedable tenant summary must not flag it");
+    }
+
+    @Test
     void theCheckerRejectsTheContradictionBeforeAnySynthesis() {
         Ast.Module module = Parsing.parse(LOGIN, "identity.sky");
 

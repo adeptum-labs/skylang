@@ -80,9 +80,16 @@ public final class ViewFeasibility {
         }
 
         // Controls bound to the shown record ("on the account") cannot exist when it is absent;
-        // a page-level action has no subject and renders regardless.
+        // a page-level action has no subject and renders regardless. On a multi-section page a
+        // subject binds to the section showing its entity, so only those controls count here.
+        String rowEntity = shown
+                .map(m -> m.returnType() instanceof Ast.GenericType g && !g.args().isEmpty()
+                        && g.args().get(0) instanceof Ast.TypeRef ref ? ref.name() : null)
+                .orElse(null);
         Set<String> boundToRecord = view.actions().stream()
                 .filter(a -> a.rowVar().isPresent())
+                .filter(a -> view.moreShows().isEmpty()
+                        || subjectNames(a.rowVar().get(), rowEntity))
                 .map(Ast.Action::label)
                 .collect(Collectors.toSet());
 
@@ -127,6 +134,17 @@ public final class ViewFeasibility {
                 .findFirst()
                 .map(v -> "`" + v + "`")
                 .orElse("value");
+    }
+
+    /** The subject-word-to-entity rule the checker's action resolution uses, in miniature. */
+    private static boolean subjectNames(String word, String entity) {
+        if (entity == null) {
+            return true;
+        }
+        String bare = word.toLowerCase(java.util.Locale.ROOT);
+        String singular = bare.endsWith("s") ? bare.substring(0, bare.length() - 1) : bare;
+        String lower = entity.toLowerCase(java.util.Locale.ROOT);
+        return lower.equals(bare) || lower.equals(singular);
     }
 
     private static Optional<Ast.Method> method(Ast.Module module, String service, String name) {
