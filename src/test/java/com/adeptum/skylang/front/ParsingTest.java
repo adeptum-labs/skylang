@@ -394,6 +394,46 @@ class ParsingTest {
                 legacy.toString());
     }
 
+    @Test
+    void parsesScopedUniqueAnnotation() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Provider { id Int @id  name Text }
+                entity UserAccount {
+                  id       Int @id
+                  provider Provider
+                  email    Email @unique(provider)
+                }
+                """, "t.sky");
+        Ast.Field email = m.entities().get(1).fields().get(2);
+        assertTrue(email.unique());
+        assertEquals("provider", email.uniqueScope().orElseThrow());
+    }
+
+    @Test
+    void scopedUniqueToStringIsAppendOnly() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity E {
+                  scoped Text @unique(owner)
+                  bare   Text @unique
+                  owner  Text
+                }
+                """, "t.sky");
+        assertTrue(m.entities().get(0).fields().get(0).toString()
+                .endsWith(", unique=true, uniqueScope=owner]"));
+        assertTrue(m.entities().get(0).fields().get(1).toString().endsWith(", unique=true]"));
+    }
+
+    @Test
+    void uniqueRejectsAnIntegerArgument() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> Parsing.parse("""
+                module t
+                entity E { email Email @unique(3) }
+                """, "t.sky"));
+        assertTrue(e.getMessage().contains("field name"), e.getMessage());
+    }
+
     // ----- the chapter-4 surface: effects and values ---------------------------
 
     @Test

@@ -79,7 +79,7 @@ pinValue     : MONEY | INT | STRING | TRUE | FALSE | ID (DOT ID)? ;
 
 field : ID type annotation* (ASSIGN expr)? ;
 
-annotation : AT ID (LPAREN INT RPAREN)? ;   // @id  |  @unique  |  @min(0)
+annotation : AT name=ID (LPAREN (INT | scope=ID) RPAREN)? ;   // @id | @unique | @min(0) | @unique(provider)
 
 // ----- services & methods ---------------------------------------------------
 

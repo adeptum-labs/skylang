@@ -169,15 +169,21 @@ public final class Ast {
 
     /**
      * A field of an entity. {@code id}/{@code unique}/{@code min} reflect the annotations;
+     * {@code uniqueScope} narrows {@code @unique(provider)} to one partition per scope value;
      * {@code defaultValue} reflects {@code = expr}. The freeze hash of every method and view
      * covers this record's string form, so {@code toString} is pinned: it must stay byte-identical
      * to the original record format for fields that use none of the newer attributes, and only
      * append them when set.
      */
     public record Field(String name, Type type, boolean id, OptionalLong min,
-                        boolean unique, Optional<Expr> defaultValue) {
+                        boolean unique, Optional<String> uniqueScope, Optional<Expr> defaultValue) {
         public Field(String name, Type type, boolean id, OptionalLong min) {
-            this(name, type, id, min, false, Optional.empty());
+            this(name, type, id, min, false, Optional.empty(), Optional.empty());
+        }
+
+        public Field(String name, Type type, boolean id, OptionalLong min,
+                     boolean unique, Optional<Expr> defaultValue) {
+            this(name, type, id, min, unique, Optional.empty(), defaultValue);
         }
 
         @Override
@@ -186,6 +192,7 @@ public final class Ast {
                     .append(", id=").append(id).append(", min=").append(min);
             if (unique) {
                 sb.append(", unique=true");
+                uniqueScope.ifPresent(s -> sb.append(", uniqueScope=").append(s));
             }
             defaultValue.ifPresent(d -> sb.append(", default=").append(d));
             return sb.append(']').toString();

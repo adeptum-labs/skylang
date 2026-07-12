@@ -209,12 +209,20 @@ public final class AstBuilder {
     private Ast.Field field(SkyLangParser.FieldContext ctx) {
         boolean id = false;
         boolean unique = false;
+        Optional<String> uniqueScope = Optional.empty();
         OptionalLong min = OptionalLong.empty();
         for (SkyLangParser.AnnotationContext a : ctx.annotation()) {
-            String name = a.ID().getText();
+            String name = a.name.getText();
             switch (name) {
                 case "id" -> id = true;
-                case "unique" -> unique = true;
+                case "unique" -> {
+                    if (a.INT() != null) {
+                        throw new IllegalArgumentException(
+                                "@unique takes a field name, e.g. @unique(provider)");
+                    }
+                    unique = true;
+                    uniqueScope = a.scope == null ? Optional.empty() : Optional.of(a.scope.getText());
+                }
                 case "min" -> {
                     if (a.INT() == null) {
                         throw new IllegalArgumentException("@min requires an integer argument, e.g. @min(0)");
@@ -225,7 +233,7 @@ public final class AstBuilder {
             }
         }
         Optional<Ast.Expr> defaultValue = ctx.expr() == null ? Optional.empty() : Optional.of(expr(ctx.expr()));
-        return new Ast.Field(ctx.ID().getText(), type(ctx.type()), id, min, unique, defaultValue);
+        return new Ast.Field(ctx.ID().getText(), type(ctx.type()), id, min, unique, uniqueScope, defaultValue);
     }
 
     // ----- services & methods ------------------------------------------------
