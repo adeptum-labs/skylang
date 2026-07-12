@@ -903,6 +903,95 @@ class TypeCheckerTest {
         assertTrue(base.getMessage().contains("Text"), base.getMessage());
     }
 
+    private static String scoped(String fields) {
+        return """
+                module m
+                entity Provider { id Int @id  name Text }
+                entity Region { name Text @id  values North, South }
+                entity UserAccount {
+                  id       Int @id
+                  %s
+                }
+                service S uses db { f() -> Int  intent "x" }
+                """.formatted(fields);
+    }
+
+    @Test
+    void acceptsScopedUniquePerRelation() {
+        assertDoesNotThrow(() -> check(scoped("""
+                provider Provider
+                  email    Email @unique(provider)
+                """)));
+    }
+
+    @Test
+    void acceptsScopedUniquePerValuesEntity() {
+        assertDoesNotThrow(() -> check(scoped("""
+                region Region
+                  slug   Text @unique(region)
+                """)));
+    }
+
+    @Test
+    void rejectsScopedUniqueUnknownScopeField() {
+        CheckException e = assertThrows(CheckException.class, () -> check(scoped(
+                "email Email @unique(tenant)")));
+        assertTrue(e.getMessage().contains("tenant"), e.getMessage());
+    }
+
+    @Test
+    void rejectsScopedUniqueSelfScope() {
+        CheckException e = assertThrows(CheckException.class, () -> check(scoped(
+                "email Email @unique(email)")));
+        assertTrue(e.getMessage().contains("own"), e.getMessage());
+    }
+
+    @Test
+    void rejectsScopedUniqueScalarScope() {
+        CheckException e = assertThrows(CheckException.class, () -> check(scoped("""
+                age   Int
+                  email Email @unique(age)
+                """)));
+        assertTrue(e.getMessage().contains("age"), e.getMessage());
+    }
+
+    @Test
+    void rejectsScopedUniqueMaybeScope() {
+        CheckException e = assertThrows(CheckException.class, () -> check(scoped("""
+                provider Maybe<Provider>
+                  email    Email @unique(provider)
+                """)));
+        assertTrue(e.getMessage().contains("provider"), e.getMessage());
+    }
+
+    @Test
+    void rejectsScopedUniqueOnMultiColumnField() {
+        CheckException e = assertThrows(CheckException.class, () -> check(scoped("""
+                provider Provider
+                  price    Money @unique(provider)
+                """)));
+        assertTrue(e.getMessage().contains("price"), e.getMessage());
+    }
+
+    @Test
+    void alreadyRegisteredResolvesForScopedUniqueField() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Provider { id Int @id  name Text }
+                entity UserAccount {
+                  id       Int @id
+                  provider Provider
+                  email    Email @unique(provider)
+                }
+                entity EmailTaken { }
+                service Accounts uses db {
+                  register(email Email) -> UserAccount
+                    intent "Create an account."
+                    raises EmailTaken when email already registered
+                }
+                """));
+    }
+
     @Test
     void pinnedValuesTypeCheck() {
         assertDoesNotThrow(() -> check("""

@@ -296,6 +296,35 @@ public final class TypeChecker {
                 checkValuePins(e);
             }
         }
+        // Uniqueness scopes wait too: the scope may reference an entity declared later.
+        for (Ast.Entity e : module.entities()) {
+            for (Ast.Field f : e.fields()) {
+                f.uniqueScope().ifPresent(scope -> checkUniqueScope(e, f, scope));
+            }
+        }
+    }
+
+    /** {@code @unique(provider)}: the scope is a sibling single-reference field partitioning the column. */
+    private void checkUniqueScope(Ast.Entity e, Ast.Field f, String scope) {
+        String where = "field '" + e.name() + "." + f.name() + "'";
+        Ty erased = entities.get(e.name()).get(f.name()).erased();
+        if (!erased.equals(Ty.INT) && !erased.equals(Ty.TEXT)) {
+            throw new CheckException(where + ": a scoped @unique needs a single-column field"
+                    + " (Int- or Text-based)");
+        }
+        if (scope.equals(f.name())) {
+            throw new CheckException(where + " cannot be its own uniqueness scope");
+        }
+        Ty scopeTy = entities.get(e.name()).get(scope);
+        if (scopeTy == null) {
+            throw new CheckException(where + ": the uniqueness scope '" + scope
+                    + "' is not a field of " + e.name());
+        }
+        if (!(scopeTy instanceof Ty.EntityTy et)
+                || !(identified.contains(et.name()) || valueSets.containsKey(et.name()))) {
+            throw new CheckException(where + ": the uniqueness scope '" + scope
+                    + "' must reference an identified entity or a values entity, not " + scopeTy);
+        }
     }
 
     /**
