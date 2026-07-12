@@ -189,6 +189,9 @@ public final class AstBuilder {
         if (ctx.MONEY() != null) {
             return moneyLit(ctx.MONEY().getText());
         }
+        if (ctx.DURATION() != null) {
+            return durationLit(ctx.DURATION().getText());
+        }
         if (ctx.INT() != null) {
             return new Ast.IntLit(Long.parseLong(ctx.INT().getText()));
         }
@@ -746,6 +749,7 @@ public final class AstBuilder {
             case SkyLangParser.IntLitContext c -> new Ast.IntLit(Long.parseLong(c.INT().getText()));
             case SkyLangParser.StrLitContext c -> new Ast.StrLit(unquote(c.STRING().getText()));
             case SkyLangParser.MoneyLitContext c -> moneyLit(c.MONEY().getText());
+            case SkyLangParser.DurationLitContext c -> durationLit(c.DURATION().getText());
             case SkyLangParser.TrueLitContext ignored -> new Ast.BoolLit(true);
             case SkyLangParser.FalseLitContext ignored -> new Ast.BoolLit(false);
             case SkyLangParser.NotExprContext c -> new Ast.NotExpr(expr(c.expr()));
@@ -799,6 +803,12 @@ public final class AstBuilder {
         String amount = raw.substring(0, raw.length() - 3);
         String currency = raw.substring(raw.length() - 3).toUpperCase(java.util.Locale.ROOT);
         return new Ast.MoneyLit(new java.math.BigDecimal(amount), currency);
+    }
+
+    /** Split a DURATION token like {@code 30d} into its whole amount and single-letter unit. */
+    private static Ast.DurationLit durationLit(String raw) {
+        long amount = Long.parseLong(raw.substring(0, raw.length() - 1));
+        return new Ast.DurationLit(amount, raw.substring(raw.length() - 1));
     }
 
     /** Strip the surrounding double quotes from a STRING token and resolve simple escapes. */

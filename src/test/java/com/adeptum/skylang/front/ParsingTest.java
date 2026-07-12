@@ -381,6 +381,43 @@ class ParsingTest {
     }
 
     @Test
+    void parsesDurationLiterals() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Plan {
+                  retention Duration = 30d
+                  grace     Duration = 2h
+                  slot      Duration = 15m
+                  timeout   Duration = 45s
+                }
+                """, "t.sky");
+
+        List<Ast.Field> fields = m.entities().get(0).fields();
+        Ast.DurationLit retention =
+                assertInstanceOf(Ast.DurationLit.class, fields.get(0).defaultValue().orElseThrow());
+        assertEquals(30, retention.amount());
+        assertEquals("d", retention.unit());
+        assertEquals("h", assertInstanceOf(Ast.DurationLit.class,
+                fields.get(1).defaultValue().orElseThrow()).unit());
+        assertEquals("m", assertInstanceOf(Ast.DurationLit.class,
+                fields.get(2).defaultValue().orElseThrow()).unit());
+        assertEquals("s", assertInstanceOf(Ast.DurationLit.class,
+                fields.get(3).defaultValue().orElseThrow()).unit());
+    }
+
+    @Test
+    void moneySuffixOutmatchesADurationSuffix() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Account { fee Money = 30sek }
+                """, "t.sky");
+        Ast.MoneyLit fee = assertInstanceOf(Ast.MoneyLit.class,
+                m.entities().get(0).fields().get(0).defaultValue().orElseThrow());
+        assertEquals("SEK", fee.currency());
+        assertEquals("30", fee.amount().toPlainString());
+    }
+
+    @Test
     void parsesGeneralizedListShorthand() {
         Ast.Module m = Parsing.parse("""
                 module t

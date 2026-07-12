@@ -313,6 +313,7 @@ public final class PromptBuilder {
             case Ast.StrLit s -> "\"" + s.value() + "\"";
             case Ast.BoolLit b -> Boolean.toString(b.value());
             case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
+            case Ast.DurationLit d -> d.amount() + d.unit();
             case Ast.NameExpr n -> n.name();
             case Ast.MemberExpr m -> sky(m.target()) + "." + m.field();
             case Ast.CallExpr c -> c.callee() + "("

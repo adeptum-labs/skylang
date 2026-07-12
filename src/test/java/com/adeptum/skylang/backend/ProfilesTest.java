@@ -115,6 +115,19 @@ class ProfilesTest {
     }
 
     @Test
+    void durationIsNotYetLoweredOnTsNode() {
+        var module = com.adeptum.skylang.front.Parsing.parse("""
+                module t
+                entity Plan { id Int  retention Duration }
+                service S { retention(p Plan) -> Duration  intent "x" }
+                """, "t.sky");
+        var e = assertThrows(com.adeptum.skylang.types.CheckException.class,
+                () -> Profiles.byId("ts-node").validate(module));
+        assertTrue(e.getMessage().contains("not yet supported by the ts-node profile"),
+                e.getMessage());
+    }
+
+    @Test
     void aDesignedButUnshippedProfileSaysSo() {
         ConfigException e = assertThrows(ConfigException.class, () -> Profiles.byId("python"));
         assertTrue(e.getMessage().contains("not shipped"), e.getMessage());

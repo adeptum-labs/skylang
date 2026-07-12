@@ -1560,6 +1560,33 @@ class PipelineTest {
     }
 
     @Test
+    void durationsPersistAsSecondsColumns(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module plan
+                entity Plan { id Int @id  retention Duration  grace Maybe<Duration> }
+                service Plans uses db {
+                  all() -> [Plan]  intent "Every plan."
+                }
+                """, "plan.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String jpa = Files.readString(buildDir.resolve("src/main/java/plan/PlanJpa.java"));
+        assertTrue(jpa.contains("public long retentionSeconds;"),
+                "a Duration persists as a whole-seconds column:\n" + jpa);
+        assertTrue(jpa.contains("java.time.Duration.ofSeconds(retentionSeconds)"),
+                "the seconds column reconstructs a Duration:\n" + jpa);
+        assertTrue(jpa.contains("public Long graceSeconds;"),
+                "a Maybe<Duration> persists as a nullable seconds column:\n" + jpa);
+        assertTrue(jpa.contains("java.util.Optional.ofNullable(graceSeconds)"),
+                "an absent duration reads back as an empty Maybe:\n" + jpa);
+    }
+
+    @Test
     void todayDefaultStagesThePinnableClock(@TempDir Path root) throws IOException {
         Ast.Module module = Parsing.parse("""
                 module plan

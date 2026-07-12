@@ -87,6 +87,7 @@ public final class Lowering {
             case "Instant" -> "java.time.Instant";
             case "Date" -> "java.time.LocalDate";
             case "DateTime" -> "java.time.LocalDateTime";
+            case "Duration" -> "java.time.Duration";
             default -> name;   // Money, Bytes, and entities map to their staged class
         };
     }
@@ -144,6 +145,7 @@ public final class Lowering {
             case Ast.StrLit s -> javaString(s.value());
             case Ast.BoolLit b -> String.valueOf(b.value());
             case Ast.MoneyLit m -> "Money.of(\"" + m.amount().toPlainString() + "\", \"" + m.currency() + "\")";
+            case Ast.DurationLit d -> "java.time.Duration.of" + durationUnit(d.unit()) + "(" + d.amount() + ")";
             case Ast.NameExpr n -> env.getOrDefault(n.name(), n.name());
             case Ast.MemberExpr m -> {
                 if (m.target() instanceof Ast.NameExpr n && !env.containsKey(n.name())
@@ -288,6 +290,7 @@ public final class Lowering {
                     || base.equals("Currency");
             case Ast.BoolLit ignored -> base.equals("Bool");
             case Ast.MoneyLit ignored -> base.equals("Money");
+            case Ast.DurationLit ignored -> base.equals("Duration");
             default -> false;
         };
     }
@@ -503,6 +506,7 @@ public final class Lowering {
             case "Instant" -> "java.time.Instant.parse(\"2026-01-01T00:00:00Z\")";
             case "Date" -> "java.time.LocalDate.parse(\"2026-01-01\")";
             case "DateTime" -> "java.time.LocalDateTime.parse(\"2026-01-01T00:00:00\")";
+            case "Duration" -> "java.time.Duration.ofHours(1)";
             case "Bytes" -> "Bytes.ofUtf8(\"x\")";
             default -> defaultEntityValue(ref.name(), types, module);
         };
@@ -538,6 +542,16 @@ public final class Lowering {
         return required;
     }
 
+    /** The {@code java.time.Duration.of…} factory suffix for a duration unit ({@code d h m s}). */
+    private static String durationUnit(String unit) {
+        return switch (unit) {
+            case "d" -> "Days";
+            case "h" -> "Hours";
+            case "m" -> "Minutes";
+            default -> "Seconds";   // "s"
+        };
+    }
+
     /** The expression as written in SkyLang, for guard and assertion messages. */
     public static String skyText(Ast.Expr expr) {
         return switch (expr) {
@@ -545,6 +559,7 @@ public final class Lowering {
             case Ast.StrLit s -> "\"" + s.value() + "\"";
             case Ast.BoolLit b -> Boolean.toString(b.value());
             case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
+            case Ast.DurationLit d -> d.amount() + d.unit();
             case Ast.NameExpr n -> n.name();
             case Ast.MemberExpr m -> skyText(m.target()) + "." + m.field();
             case Ast.CallExpr c -> c.callee() + "("

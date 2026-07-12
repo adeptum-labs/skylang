@@ -75,7 +75,7 @@ valuesClause : VALUES valueDef (COMMA valueDef)* ;
 valueDef     : ID valuePins? ;
 valuePins    : ID fieldPin (AND fieldPin)* ;
 fieldPin     : ID pinValue ;
-pinValue     : MONEY | INT | STRING | TRUE | FALSE | ID (DOT ID)? ;
+pinValue     : MONEY | DURATION | INT | STRING | TRUE | FALSE | ID (DOT ID)? ;
 
 field : ID type annotation* (ASSIGN expr)? ;
 
@@ -165,7 +165,7 @@ componentClause
     ;
 
 // Prose inside the interface layer: free words up to the next clause keyword.
-viewProse : (ID | STRING | INT | MONEY | COMMA | POSS | DOT | LPAREN | RPAREN
+viewProse : (ID | STRING | INT | MONEY | DURATION | COMMA | POSS | DOT | LPAREN | RPAREN
             | IS | IN | ON | OF | HAS | NOT | OR | AND | WHEN | COLUMNS
             | LT | LE | GT | GE | EQ | MINUS | FOR | ACTION | STEP | PAGE | SHOWS | TITLED)+ ;
 
@@ -215,6 +215,7 @@ expr
     | expr op=(AND | OR) expr                    # logicExpr
     | EVERY ID IN expr HAS expr                  # forallExpr    // every product in result has f == v
     | MONEY                                      # moneyLit
+    | DURATION                                   # durationLit
     | INT                                        # intLit
     | STRING                                     # strLit
     | TRUE                                       # trueLit

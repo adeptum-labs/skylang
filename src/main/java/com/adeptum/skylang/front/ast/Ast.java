@@ -595,7 +595,7 @@ public final class Ast {
     // ----- expressions -------------------------------------------------------
 
     public sealed interface Expr
-            permits IntLit, StrLit, BoolLit, MoneyLit, NameExpr, MemberExpr, CallExpr, BinExpr,
+            permits IntLit, StrLit, BoolLit, MoneyLit, DurationLit, NameExpr, MemberExpr, CallExpr, BinExpr,
             NotExpr, OldExpr, EmptyCheck, AggExpr, ForallExpr, BcryptHash {
     }
 
@@ -650,6 +650,10 @@ public final class Ast {
 
     /** {@code 9.99eur} — an exact decimal amount plus an upper-cased ISO currency code. */
     public record MoneyLit(BigDecimal amount, String currency) implements Expr {
+    }
+
+    /** {@code 30d} — a whole-unit elapsed time; {@code unit} is one of {@code d h m s}. */
+    public record DurationLit(long amount, String unit) implements Expr {
     }
 
     public record NameExpr(String name) implements Expr {

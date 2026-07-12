@@ -62,8 +62,28 @@ class LoweringTest {
         assertEquals("java.time.Instant", Lowering.javaType(type("Instant"), none));
         assertEquals("java.time.LocalDate", Lowering.javaType(type("Date"), none));
         assertEquals("java.time.LocalDateTime", Lowering.javaType(type("DateTime"), none));
+        assertEquals("java.time.Duration", Lowering.javaType(type("Duration"), none));
         assertEquals("Bytes", Lowering.javaType(type("Bytes"), none));
         assertEquals("String", Lowering.javaType(type("Email"), none));
+    }
+
+    @Test
+    void lowersDurationLiteralsByUnit() {
+        assertEquals("java.time.Duration.ofDays(30)",
+                Lowering.javaValue(new Ast.DurationLit(30, "d")));
+        assertEquals("java.time.Duration.ofHours(2)",
+                Lowering.javaValue(new Ast.DurationLit(2, "h")));
+        assertEquals("java.time.Duration.ofMinutes(15)",
+                Lowering.javaValue(new Ast.DurationLit(15, "m")));
+        assertEquals("java.time.Duration.ofSeconds(45)",
+                Lowering.javaValue(new Ast.DurationLit(45, "s")));
+    }
+
+    @Test
+    void durationWitnessIsAFixedValue() {
+        Ast.Module empty = Parsing.parse("module t", "t.sky");
+        assertEquals("java.time.Duration.ofHours(1)",
+                Lowering.defaultJavaValue(new Ast.TypeRef("Duration"), Map.of(), empty));
     }
 
     @Test

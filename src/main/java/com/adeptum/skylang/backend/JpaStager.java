@@ -310,6 +310,13 @@ public final class JpaStager {
                 of.add("row." + n + " = " + get + ";");
                 to.add(n);
             }
+            case "Duration" -> {
+                // Stored as whole seconds: JPA has no portable Duration type, and the
+                // d/h/m/s literal units are lossless at second precision.
+                decls.add("    public long " + n + "Seconds;\n");
+                of.add("row." + n + "Seconds = " + get + ".toSeconds();");
+                to.add("java.time.Duration.ofSeconds(" + n + "Seconds)");
+            }
             case "Bytes" -> {
                 decls.add("    public byte[] " + n + ";\n");
                 of.add("row." + n + " = " + get + ".toByteArray();");
@@ -353,6 +360,11 @@ public final class JpaStager {
             }
             case "Date" -> nullableColumn(n, get, "java.time.LocalDate", "", decls, of, to);
             case "DateTime" -> nullableColumn(n, get, "java.time.LocalDateTime", "", decls, of, to);
+            case "Duration" -> {
+                decls.add("    public Long " + n + "Seconds;\n");
+                of.add("row." + n + "Seconds = " + get + ".isPresent() ? " + get + ".get().toSeconds() : null;");
+                to.add("java.util.Optional.ofNullable(" + n + "Seconds).map(java.time.Duration::ofSeconds)");
+            }
             case "Money" -> {
                 // Explicit scale: schema generation would otherwise default to scale 0 and round.
                 decls.add("    @jakarta.persistence.Column(precision = 38, scale = 4)\n"
@@ -459,7 +471,7 @@ public final class JpaStager {
     /** Classify a base name: a primitive kind, "values", "relation", or component (default). */
     private static String kindOf(String base, Ast.Module module) {
         switch (base) {
-            case "Bool", "Money", "Instant", "Bytes", "Date", "DateTime" -> {
+            case "Bool", "Money", "Instant", "Bytes", "Date", "DateTime", "Duration" -> {
                 return base;
             }
             case "Int", "Percentage" -> {

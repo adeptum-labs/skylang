@@ -896,6 +896,22 @@ class TypeCheckerTest {
                 """));
     }
 
+    @Test
+    void ordersDurationsAndPersistsThem() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Plan { id Int @id  retention Duration  grace Maybe<Duration> }
+                service S {
+                  longer(a Duration, b Duration) -> Duration
+                    intent  "The longer of the two."
+                    ensures result == max(a, b)
+                  expired(age Duration) -> Bool
+                    intent  "Past the 30 day window?"
+                    ensures result == (age > 30d)
+                }
+                """));
+    }
+
     private static String owned(String parentField, String child) {
         return """
                 module m

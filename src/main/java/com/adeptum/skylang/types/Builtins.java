@@ -55,7 +55,7 @@ public final class Builtins {
     private static final Map<String, Ty.Prim> PRIMS = Map.of(
             "Int", Ty.INT, "Text", Ty.TEXT, "Bool", Ty.BOOL,
             "Money", Ty.MONEY, "Instant", Ty.INSTANT, "Bytes", Ty.BYTES,
-            "Date", Ty.DATE, "DateTime", Ty.DATETIME);
+            "Date", Ty.DATE, "DateTime", Ty.DATETIME, "Duration", Ty.DURATION);
 
     private static final Map<String, Integer> GENERIC_ARITY = Map.of(
             "List", 1, "Set", 1, "Maybe", 1, "Secret", 1, "Map", 2);

@@ -126,7 +126,7 @@ public final class TsProfile implements Profile {
     }
 
     private static final java.util.Set<String> UNLOWERED =
-            java.util.Set.of("Money", "Instant", "Date", "DateTime", "Bytes",
+            java.util.Set.of("Money", "Instant", "Date", "DateTime", "Duration", "Bytes",
                     "Email", "Currency", "Percentage");
 
     private static void requireType(Ast.Type type, String where) {

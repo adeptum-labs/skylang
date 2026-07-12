@@ -118,6 +118,10 @@ fragment BRACE_BLOCK : '{' ( ~[{}] | BRACE_BLOCK )* '}' ;
 // A money literal carries a three-letter currency suffix, so '1..10' still
 // lexes as INT DOTDOT INT (no letters follow the digits).
 MONEY  : [0-9]+ ('.' [0-9]+)? [a-zA-Z] [a-zA-Z] [a-zA-Z] ;
+// A duration literal is whole units with a single-letter suffix (30d, 2h, 15m,
+// 45s). Money's three-letter suffix always out-matches this, so '30sek' stays
+// MONEY while '30s' is a Duration; a bare number still lexes as INT.
+DURATION : [0-9]+ [dhms] ;
 INT    : [0-9]+ ;
 STRING : '"' ( ~["\\] | '\\' . )* '"' ;
 ID     : [a-zA-Z_] [a-zA-Z0-9_]* ;

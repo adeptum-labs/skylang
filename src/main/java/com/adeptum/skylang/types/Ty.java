@@ -42,6 +42,7 @@ public sealed interface Ty permits Ty.Prim, Ty.EntityTy, Ty.NamedTy, Ty.AnonRefi
     Prim INSTANT = new Prim("Instant");
     Prim DATE = new Prim("Date");
     Prim DATETIME = new Prim("DateTime");
+    Prim DURATION = new Prim("Duration");
     Prim BYTES = new Prim("Bytes");
 
     record Prim(String name) implements Ty {

@@ -330,6 +330,7 @@ public final class UiPromptBuilder {
             case Ast.StrLit s -> "\"" + s.value() + "\"";
             case Ast.BoolLit b -> Boolean.toString(b.value());
             case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
+            case Ast.DurationLit d -> d.amount() + d.unit();
             case Ast.CallExpr c -> c.callee() + "(...)";
             case Ast.BinExpr b -> exprText(b.left()) + " " + b.op() + " " + exprText(b.right());
             case Ast.NotExpr n -> "not " + exprText(n.value());

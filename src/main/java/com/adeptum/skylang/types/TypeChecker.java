@@ -492,7 +492,7 @@ public final class TypeChecker {
         Ty e = arg.erased();
         if (e.equals(Ty.INT) || e.equals(Ty.TEXT) || e.equals(Ty.BOOL) || e.equals(Ty.INSTANT)
                 || e.equals(Ty.MONEY) || e.equals(Ty.BYTES)
-                || e.equals(Ty.DATE) || e.equals(Ty.DATETIME)) {
+                || e.equals(Ty.DATE) || e.equals(Ty.DATETIME) || e.equals(Ty.DURATION)) {
             return true;
         }
         return arg instanceof Ty.EntityTy et
@@ -1434,6 +1434,7 @@ public final class TypeChecker {
             case Ast.StrLit ignored -> Ty.TEXT;
             case Ast.BoolLit ignored -> Ty.BOOL;
             case Ast.MoneyLit ignored -> Ty.MONEY;
+            case Ast.DurationLit ignored -> Ty.DURATION;
             case Ast.NameExpr n -> {
                 Ty t = env.get(n.name());
                 if (t == null) {
@@ -1625,7 +1626,7 @@ public final class TypeChecker {
         Ty l = infer(ce.args().get(0), env, where).erased();
         Ty r = infer(ce.args().get(1), env, where).erased();
         boolean ordered = l.equals(r) && (l.equals(Ty.INT) || l.equals(Ty.MONEY) || l.equals(Ty.INSTANT)
-                || l.equals(Ty.DATE) || l.equals(Ty.DATETIME));
+                || l.equals(Ty.DATE) || l.equals(Ty.DATETIME) || l.equals(Ty.DURATION));
         if (!ordered) {
             throw new CheckException(where + ": " + ce.callee() + " needs two values of the same ordered"
                     + " type, got " + l + " and " + r);
@@ -1754,7 +1755,7 @@ public final class TypeChecker {
             case "<", "<=", ">", ">=" -> {
                 boolean ordered = le.equals(re)
                         && (le.equals(Ty.INT) || le.equals(Ty.MONEY) || le.equals(Ty.INSTANT)
-                                || le.equals(Ty.DATE) || le.equals(Ty.DATETIME));
+                                || le.equals(Ty.DATE) || le.equals(Ty.DATETIME) || le.equals(Ty.DURATION));
                 if (!ordered) {
                     throw new CheckException(where + ": operator '" + be.op()
                             + "' cannot compare " + l + " and " + r);
@@ -1868,7 +1869,8 @@ public final class TypeChecker {
 
     private static boolean isLiteral(Ast.Expr e) {
         return e instanceof Ast.IntLit || e instanceof Ast.StrLit
-                || e instanceof Ast.BoolLit || e instanceof Ast.MoneyLit;
+                || e instanceof Ast.BoolLit || e instanceof Ast.MoneyLit
+                || e instanceof Ast.DurationLit;
     }
 
     /** A human-readable form of a refined type including its predicate, for error messages. */
@@ -1952,6 +1954,7 @@ public final class TypeChecker {
             case Ast.StrLit s -> "\"" + s.value() + "\"";
             case Ast.BoolLit b -> Boolean.toString(b.value());
             case Ast.MoneyLit m -> m.amount().toPlainString() + m.currency().toLowerCase(java.util.Locale.ROOT);
+            case Ast.DurationLit d -> d.amount() + d.unit();
             default -> value.toString();
         };
     }
