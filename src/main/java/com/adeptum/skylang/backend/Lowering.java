@@ -304,7 +304,8 @@ public final class Lowering {
                 args.add(f.type() instanceof Ast.TypeRef ref && ref.name().equals("Text")
                         ? "\"w" + id + "\"" : id + "L");
             } else if (f.unique()) {
-                // Distinct witnesses must not collide on a unique column.
+                // Distinct witnesses must not collide on a unique column. A scoped column keeps
+                // this per-column distinctness too: column-distinct implies tuple-distinct.
                 String javaType = javaType(f.type(), types);
                 args.add(switch (javaType) {
                     case "long" -> (1000 + id) + "L";

@@ -573,6 +573,41 @@ class PipelineTest {
     }
 
     @Test
+    void scopedUniquenessRaiseSeedsASameScopeDuplicate(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                entity Provider { id Int @id  name Text }
+                entity UserAccount {
+                  id       Int @id
+                  provider Provider
+                  email    Email @unique(provider)
+                }
+                entity EmailTaken { }
+                service Accounts uses db {
+                  register(email Email) -> UserAccount
+                    intent "Create an account."
+                    raises EmailTaken when email already registered
+                }
+                """, "shop.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String tests = Files.readString(buildDir.resolve("src/test/java/shop/AccountsTest.java"));
+        assertTrue(tests.contains("db.save(new UserAccount(1L, new Provider(1L, \"x\"), \"a@example.com\"))"),
+                "the seed derives from the same defaults as the witness call, so it is a"
+                        + " same-scope duplicate:\n" + tests);
+        assertTrue(tests.contains("assertThrows(EmailTaken.class, () -> svc.register(\"a@example.com\")"),
+                "the witness call registers the seeded email:\n" + tests);
+        String account = Files.readString(buildDir.resolve("src/main/java/shop/UserAccount.java"));
+        assertTrue(account.contains("email (per provider)"),
+                "the advisory javadoc names the uniqueness scope:\n" + account);
+    }
+
+    @Test
     void pinnedValuesLowerToFullConstructorsAndLookup(@TempDir Path root) throws IOException {
         Ast.Module module = Parsing.parse("""
                 module shop

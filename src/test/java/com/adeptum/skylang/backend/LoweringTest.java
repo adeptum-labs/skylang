@@ -126,6 +126,24 @@ class LoweringTest {
     }
 
     @Test
+    void scopedUniqueWitnessColumnsStayDistinctPerWitness() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Provider { id Int @id  name Text }
+                entity UserAccount {
+                  id       Int @id
+                  provider Provider
+                  email    Email @unique(provider)
+                }
+                """, "t.sky");
+        String w1 = Lowering.entityWitness("UserAccount", Map.of(), 1, m, Map.of(), java.util.Set.of());
+        String w2 = Lowering.entityWitness("UserAccount", Map.of(), 2, m, Map.of(), java.util.Set.of());
+        assertTrue(w1.contains("\"w1@example.com\"") && w2.contains("\"w2@example.com\""),
+                "a scoped column keeps per-witness distinct values; column-distinct implies"
+                        + " tuple-distinct: " + w1 + " / " + w2);
+    }
+
+    @Test
     void lowersLengthThroughTheDispatchingHelper() {
         Ast.Module m = Parsing.parse("""
                 module t

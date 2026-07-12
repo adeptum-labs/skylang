@@ -140,6 +140,12 @@ entity User {
 }
 ```
 
+`@unique` may take a scope — `email Email @unique(provider)` keeps the email unique **per
+value of the sibling `provider` field** instead of globally, so the same address may exist
+under different providers. The scope must be a single reference: a field holding an
+identified entity or a values entity. A persistence-backed profile enforces the pair as a
+composite constraint on the stored table.
+
 ### Closed value sets
 
 An entity whose body ends in a `values` clause is enum-like: the clause seeds and closes its

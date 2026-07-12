@@ -141,6 +141,14 @@ public final class PromptBuilder {
                 sb.append("  // closed set, constants: ").append(e.valueNames().stream()
                         .map(v -> e.name() + "." + v).collect(Collectors.joining(", ")));
             }
+            // A scoped uniqueness must reach the model, or it synthesizes a global duplicate check.
+            String scoped = e.fields().stream()
+                    .filter(f -> f.uniqueScope().isPresent())
+                    .map(f -> "unique per " + f.uniqueScope().get() + ": " + f.name())
+                    .collect(Collectors.joining(", "));
+            if (!scoped.isEmpty()) {
+                sb.append("  // ").append(scoped);
+            }
             sb.append('\n');
         }
 

@@ -57,6 +57,25 @@ class PromptBuilderTest {
     }
 
     @Test
+    void userPromptStatesTheUniquenessScope() {
+        Ast.Module m = Parsing.parse("""
+                module bank
+                entity Provider { id Int @id  name Text }
+                entity UserAccount {
+                  id       Int @id
+                  provider Provider
+                  email    Email @unique(provider)
+                }
+                service Accounts uses db {
+                  register(email Email) -> UserAccount  intent "Register."
+                }
+                """, "bank.sky");
+        String user = prompts.user(m, m.services().get(0), m.services().get(0).methods().get(0));
+        assertTrue(user.contains("unique per provider: email"),
+                "the model must know the duplicate check is per-scope, not global:\n" + user);
+    }
+
+    @Test
     void systemPromptTeachesTheLoweringVocabulary() {
         String system = prompts.system();
         assertTrue(system.contains("Money"), "Money must be introduced");

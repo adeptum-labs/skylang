@@ -301,7 +301,7 @@ public final class ProjectStager {
     private static String entityJavadoc(Ast.Entity entity) {
         String unique = entity.fields().stream()
                 .filter(Ast.Field::unique)
-                .map(Ast.Field::name)
+                .map(f -> f.name() + f.uniqueScope().map(s -> " (per " + s + ")").orElse(""))
                 .collect(Collectors.joining(", "));
         return unique.isEmpty() ? "" :
                 "/** @unique (advisory until a persistence layer enforces it): " + unique + ". */\n";
