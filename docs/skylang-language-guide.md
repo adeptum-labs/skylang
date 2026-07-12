@@ -140,6 +140,40 @@ entity User {
 }
 ```
 
+### Closed value sets
+
+An entity whose body ends in a `values` clause is enum-like: the clause seeds and closes its
+instance set. The first field is the sole `@id` **carrier** — a `Text` field the value's own
+name fills. Each value becomes a constant (`Role.Member`), and constructing further instances
+is rejected.
+
+```sky
+entity Role {
+  name Text @id
+  values Member, Admin
+}
+```
+
+Data fields may follow the carrier; every value then **pins** each of them, exactly once,
+with a constant — a literal or another declared value. The result is a total constant table
+the checker verifies like any other typed expression:
+
+```sky
+entity Tier {
+  name  Text @id
+  label Text
+  price Money
+  values Free with label "Free" and price 0eur,
+         Pro  with label "Pro"  and price 399sek
+}
+```
+
+Pinned fields read like ordinary fields (`tier.price`). Because the set is closed and every
+pin is a constant, data fields take no `= default`, and a field needs a constant surface
+form to be pinnable: `Int`, `Text`, `Bool`, `Money`, or another values entity. Behaviour
+stays in services — a rule that *derives* something from a value belongs in a service method
+taking the value as an argument, not on the entity.
+
 **`service`** — behavior. Holds no mutable state of its own; declares the **effects** it is
 allowed to use (`uses db, http, clock, …`). Generated code may only touch declared effects —
 a service `uses db` that tries to make an HTTP call will not compile.
