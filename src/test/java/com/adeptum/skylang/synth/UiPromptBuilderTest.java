@@ -91,6 +91,33 @@ class UiPromptBuilderTest {
         assertTrue(user.contains("Restock"));
     }
 
+    private static final String BRANDING_SRC = """
+            module shop
+            entity Tenant { id Int @id  name Text  tagline Text  logo Maybe<Bytes> }
+            service Tenants {
+              current() -> Maybe<Tenant>  intent "The tenant for this request."
+            }
+            page Login at "/" {
+              shows  Tenants.current() as a summary of (name, tagline, logo)
+            }
+            """;
+
+    @Test
+    void systemPromptStatesTheImageContract() {
+        String system = prompts.system(UiPromptBuilder.STANDARD);
+        assertTrue(system.contains("h:graphicImage"), system);
+        assertTrue(system.contains("DataUri"), system);
+    }
+
+    @Test
+    void userPromptFlagsBytesColumnsAsImages() {
+        Ast.Module m = Parsing.parse(BRANDING_SRC, "shop.sky");
+        String user = prompts.user(m, m.views().get(0));
+        assertTrue(user.contains("logo") && user.contains("h:graphicImage")
+                        && user.contains("logoDataUri"),
+                "a Bytes column must be flagged as an image with its bean helper:\n" + user);
+    }
+
     @Test
     void dateAndDateTimeAsksNameTheirConverters() {
         Ast.Module m = Parsing.parse("""

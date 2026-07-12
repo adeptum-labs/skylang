@@ -43,7 +43,7 @@ public final class UiPromptBuilder {
     /** The always-available standard-component vocabulary; profiles may widen it (PrimeFaces, OmniFaces). */
     public static final List<String> STANDARD = List.of(
             "h:form", "h:dataTable", "h:column", "h:outputText", "h:outputLabel",
-            "h:inputText", "h:commandButton", "f:facet",
+            "h:inputText", "h:commandButton", "h:graphicImage", "f:facet",
             "f:converter", "f:validateLongRange", "f:validateLength", "f:validateRegex");
 
     private static final String SYSTEM_BASE = """
@@ -75,6 +75,10 @@ public final class UiPromptBuilder {
             - To place a control in a region, wrap it in <h:panelGroup styleClass="REGION">.
             - To give a table a style (e.g. a density), set styleClass="STYLE" on the h:dataTable.
             - Render the table columns in the order requested under "Appearance".
+            - A Bytes field flagged as an image renders as
+              <h:graphicImage id="FIELDImage" value="#{bean.FIELDDataUri}" alt="FIELD"/>; the bean
+              exposes String getFIELDDataUri() returning "data:image/png;base64," plus the
+              Base64-encoded bytes, or "" when the value (or its record) is absent.
             """;
 
     public String system(List<String> vocabulary) {
@@ -106,6 +110,13 @@ public final class UiPromptBuilder {
                 .append(shows.query().method()).append("() — bind ").append(shape).append(".\n");
         shows.projection().ifPresent(p ->
                 sb.append("Columns: ").append(String.join(", ", p.columns())).append('\n'));
+        for (String image : com.adeptum.skylang.verify.ViewVerifier.bytesColumns(module, view)) {
+            sb.append("Column '").append(image).append("' is Bytes — render it with <h:graphicImage id=\"")
+                    .append(image).append("Image\" value=\"#{bean.").append(image)
+                    .append("DataUri}\"/> and expose String get")
+                    .append(Character.toUpperCase(image.charAt(0))).append(image.substring(1))
+                    .append("DataUri() on the bean (\"\" when absent).\n");
+        }
 
         // The exact service methods this view calls: the bean must inject these and match these
         // signatures — never invent a method or guess a return type.

@@ -949,6 +949,20 @@ class TypeCheckerTest {
     }
 
     @Test
+    void acceptsABytesFieldInASummaryProjection() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Tenant { id Int @id  name Text  tagline Text  logo Maybe<Bytes> }
+                service Tenants uses db {
+                  current() -> Maybe<Tenant>  intent "The tenant for this request."
+                }
+                page Login at "/" {
+                  shows  Tenants.current() as a summary of (name, tagline, logo)
+                }
+                """));
+    }
+
+    @Test
     void datesArePromptableInViews() {
         assertDoesNotThrow(() -> check("""
                 module m
