@@ -70,9 +70,10 @@ public final class ViewFeasibility {
             return Optional.empty();
         }
 
-        // Controls bound to the shown record ("on the account") cannot exist when it is absent.
+        // Controls bound to the shown record ("on the account") cannot exist when it is absent;
+        // a page-level action has no subject and renders regardless.
         Set<String> boundToRecord = view.actions().stream()
-                .filter(a -> a.rowVar() != null && !a.rowVar().isBlank())
+                .filter(a -> a.rowVar().isPresent())
                 .map(Ast.Action::label)
                 .collect(Collectors.toSet());
 
@@ -113,7 +114,7 @@ public final class ViewFeasibility {
     private static String elementName(Ast.View view) {
         return view.actions().stream()
                 .map(Ast.Action::rowVar)
-                .filter(v -> v != null && !v.isBlank())
+                .flatMap(Optional::stream)
                 .findFirst()
                 .map(v -> "`" + v + "`")
                 .orElse("value");

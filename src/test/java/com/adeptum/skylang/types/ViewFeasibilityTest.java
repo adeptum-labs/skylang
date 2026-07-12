@@ -65,6 +65,28 @@ class ViewFeasibilityTest {
     }
 
     @Test
+    void pageLevelActionsAreNotBoundToTheOptionalRecord() {
+        Ast.Module module = Parsing.parse("""
+                module identity
+                entity UserAccount { id Int @id  displayName Text  email Email }
+                service Session uses db {
+                  current() -> Maybe<UserAccount>
+                    intent "The account for the current session, if any."
+                  signIn() -> UserAccount
+                    intent "Start the sign-in flow."
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (displayName, email)
+                  action "Sign in" -> Session.signIn()
+                  expect action "Sign in" is a button
+                }
+                """, "identity.sky");
+
+        assertTrue(ViewFeasibility.contradictions(module).isEmpty(),
+                "a page-level control renders whether or not the optional value is present");
+    }
+
+    @Test
     void theCheckerRejectsTheContradictionBeforeAnySynthesis() {
         Ast.Module module = Parsing.parse(LOGIN, "identity.sky");
 

@@ -138,7 +138,7 @@ class ParsingTest {
         assertEquals(1, view.actions().size());
         Ast.Action action = view.actions().get(0);
         assertEquals("Restock", action.label());
-        assertEquals("row", action.rowVar());
+        assertEquals("row", action.rowVar().orElseThrow());
         assertEquals("Catalog", action.service());
         assertEquals("restock", action.method());
         assertEquals(2, action.args().size());
@@ -151,6 +151,53 @@ class ParsingTest {
         Ast.ExpectColumns cols = assertInstanceOf(Ast.ExpectColumns.class, view.expects().get(0));
         assertEquals("table", cols.subject());
         assertEquals(List.of("name", "stock"), cols.columns());
+    }
+
+    @Test
+    void parsesPageLevelActionWithoutSubject() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session {
+                  signIn(email Text) -> Account  intent "Sign in."
+                }
+                page Login at "/" {
+                  shows  Session.signIn("x") as a table of (email)
+                  action "Sign in" -> Session.signIn(ask Text)
+                }
+                """, "t.sky");
+        Ast.Action action = m.views().get(0).actions().get(0);
+        assertTrue(action.rowVar().isEmpty());
+        assertEquals("Session", action.service());
+        assertEquals("signIn", action.method());
+    }
+
+    @Test
+    void parsesZeroArgumentActionTarget() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session {
+                  signOut() -> Account  intent "Sign out."
+                }
+                page Login at "/" {
+                  shows  Session.signOut() as a table of (email)
+                  action "Sign out" -> Session.signOut()
+                }
+                """, "t.sky");
+        Ast.Action action = m.views().get(0).actions().get(0);
+        assertTrue(action.rowVar().isEmpty());
+        assertTrue(action.args().isEmpty());
+    }
+
+    @Test
+    void actionToStringPinsThePresentSubjectForm() {
+        assertEquals("Action[label=Restock, rowVar=row, service=Catalog, method=restock, args=[]]",
+                new Ast.Action("Restock", java.util.Optional.of("row"), "Catalog", "restock",
+                        List.of()).toString());
+        assertEquals("Action[label=Sign out, service=Session, method=signOut, args=[]]",
+                new Ast.Action("Sign out", java.util.Optional.empty(), "Session", "signOut",
+                        List.of()).toString());
     }
 
     @Test

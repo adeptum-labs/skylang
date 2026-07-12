@@ -672,7 +672,9 @@ public final class TypeChecker {
             String actionWhere = where + " action \"" + a.label() + "\"";
             MethodSig sig = lookup(services, a.service(), a.method(), actionWhere);
             checkArgCount(actionWhere, a.service() + "." + a.method(), a.args().size(), sig.params().size());
-            Map<String, Ty> env = Map.of(a.rowVar(), Ty.entity(rowType));
+            Map<String, Ty> env = a.rowVar().isEmpty()
+                    ? Map.of()
+                    : Map.of(a.rowVar().get(), Ty.entity(rowType));
             for (int i = 0; i < a.args().size(); i++) {
                 String argWhere = actionWhere + " argument " + (i + 1);
                 Ty expected = sig.params().get(i);
