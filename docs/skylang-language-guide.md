@@ -152,6 +152,15 @@ Temporal defaults read the pinnable clock: `= now` fills an `Instant` (or a `Dat
 at construction, and `= today` fills a `Date`. Neither keyword may appear in contracts —
 they would break determinism; read the clock inside the body instead.
 
+A parent may declare an **owned collection** of identified entities by naming the child's
+back-reference: `permissions [Permission] @mappedBy(owner)`, where `Permission.owner` is a
+plain reference to the parent. The children own the relationship — they are saved
+individually and the parent's list is read back from the store, never written through it.
+A child's back-reference reached *through* that list carries the parent with its own
+collections empty (records are immutable, so a truly cyclic object graph cannot exist).
+For many-to-many, an explicit join entity and service queries over `all …` remain the
+idiomatic shape.
+
 ### Closed value sets
 
 An entity whose body ends in a `values` clause is enum-like: the clause seeds and closes its
