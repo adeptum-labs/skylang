@@ -152,6 +152,63 @@ class ViewStagedVerifyE2ETest {
             ```
             """;
 
+    // A single-record summary page — the shape of Fikus's Login landing. It carries
+    // no table, so it must freeze without any column contract sneaking back in.
+    private static final String SUMMARY_VIEW = """
+            module acct
+            entity Account { id Int @id  email Text  displayName Text }
+            service Accounts {
+              current() -> Maybe<Account>  intent "The signed-in account, if any."
+            }
+            page Profile at "/" {
+              shows Accounts.current() as a summary of (displayName, email)
+            }
+            """;
+
+    private static final String SUMMARY_REPLY = """
+            ```xhtml
+            <h:form id="f">
+              <h:panelGrid id="branding" columns="1">
+                <h:outputText value="#{profileBean.displayName}"/>
+                <h:outputText value="#{profileBean.email}"/>
+              </h:panelGrid>
+            </h:form>
+            ```
+            ```java
+            @jakarta.inject.Named
+            @jakarta.faces.view.ViewScoped
+            public class ProfileBean implements java.io.Serializable {
+                @jakarta.inject.Inject
+                Accounts accounts;
+
+                public String getDisplayName() {
+                    return accounts.current().map(Account::displayName).orElse("");
+                }
+
+                public String getEmail() {
+                    return accounts.current().map(Account::email).orElse("");
+                }
+            }
+            ```
+            """;
+
+    @Test
+    void summaryPageRendersInContainer(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(SUMMARY_VIEW, "acct.sky");
+        new TypeChecker().check(module);
+
+        StubLlm stub = new StubLlm((system, user) -> system.contains("UI-synthesis")
+                ? SUMMARY_REPLY
+                : "return java.util.Optional.of(new Account(1L, \"a@x.se\", \"Ada\"));");
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(stub, new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "summary render verification failed:\n"
+                + out.toString(StandardCharsets.UTF_8));
+    }
+
     @Test
     void dbBackedViewRendersInContainer(@TempDir Path root) {
         Ast.Module module = Parsing.parse(STORE_VIEW, "store.sky");

@@ -23,12 +23,16 @@ package com.adeptum.skylang.verify;
 
 import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.ast.Ast;
+import com.adeptum.skylang.types.CheckException;
+import com.adeptum.skylang.types.TypeChecker;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ViewVerifierTest {
@@ -120,6 +124,57 @@ class ViewVerifierTest {
                 "<h:outputText value=\"Access denied.\"/>");
         assertEquals(1, unmet.size());
         assertTrue(unmet.get(0).contains("accessDenied"), unmet.get(0));
+    }
+
+    // The exact shape that sent `sky freeze` into an endless regenerate loop: a
+    // single-record summary that also declared a table-only column order.
+    private static final String SUMMARY_PAGE_WITH_COLUMNS = """
+            module identity
+            entity UserAccount { id Int @id  email Text  displayName Text }
+            service Session uses db { current() -> Maybe<UserAccount>  intent "x" }
+            page Login at "/" {
+              shows   Session.current() as a summary of (displayName, email)
+              appears columns (email, displayName)
+            }
+            """;
+
+    private static final String SUMMARY_MARKUP = """
+            <h:panelGrid id="branding">
+              <h:outputText value="#{loginBean.displayName}"/>
+              <h:outputText value="#{loginBean.email}"/>
+            </h:panelGrid>
+            """;
+
+    @Test
+    void reproducesTheColumnOrderLoopThenTheGuardStopsIt() {
+        Ast.Module module = Parsing.parse(SUMMARY_PAGE_WITH_COLUMNS, "identity.sky");
+
+        // A rendered summary has no table columns, so this is the unmet the freeze
+        // loop kept reporting — byte-for-byte the message the user saw.
+        List<String> unmet = verifier.unmetExpectations(module.views().get(0), SUMMARY_MARKUP);
+        assertTrue(unmet.contains("expected column order [email, displayName] but got []"),
+                unmet.toString());
+
+        // The fix: check now rejects the contract, so it can never reach freeze.
+        CheckException rejected = assertThrows(CheckException.class,
+                () -> new TypeChecker().check(module));
+        assertTrue(rejected.getMessage().contains("table"), rejected.getMessage());
+    }
+
+    @Test
+    void theCorrectedSummaryPageChecksAndVerifiesClean() {
+        Ast.Module module = Parsing.parse("""
+                module identity
+                entity UserAccount { id Int @id  email Text  displayName Text }
+                service Session uses db { current() -> Maybe<UserAccount>  intent "x" }
+                page Login at "/" {
+                  shows   Session.current() as a summary of (displayName, email)
+                }
+                """, "identity.sky");
+
+        assertDoesNotThrow(() -> new TypeChecker().check(module));
+        assertTrue(verifier.unmetExpectations(module.views().get(0), SUMMARY_MARKUP).isEmpty(),
+                "the corrected summary page leaves nothing for the freeze verifier to reject");
     }
 
     private static final String BRANDING = """
