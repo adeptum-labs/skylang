@@ -1283,6 +1283,35 @@ class PipelineTest {
     }
 
     @Test
+    void dateAndDateTimePersistAsNativeColumns(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module plan
+                entity Course { id Int @id  starts Date  opensAt DateTime  ends Maybe<Date> }
+                service Courses uses db {
+                  all() -> [Course]  intent "Every course."
+                }
+                """, "plan.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String jpa = Files.readString(buildDir.resolve("src/main/java/plan/CourseJpa.java"));
+        assertTrue(jpa.contains("public java.time.LocalDate starts;"),
+                "a Date persists as a native LocalDate column:\n" + jpa);
+        assertTrue(jpa.contains("public java.time.LocalDateTime opensAt;"),
+                "a DateTime persists as a native LocalDateTime column:\n" + jpa);
+        assertTrue(jpa.contains("public java.time.LocalDate ends;"),
+                "a Maybe<Date> persists as a nullable LocalDate column:\n" + jpa);
+        assertTrue(jpa.contains("java.util.Optional.ofNullable(ends)"),
+                "an absent date reads back as an empty Maybe:\n" + jpa);
+        assertFalse(jpa.contains("startsMillis"),
+                "no epoch conversion for zoneless temporals:\n" + jpa);
+    }
+
+    @Test
     void todayDefaultStagesThePinnableClock(@TempDir Path root) throws IOException {
         Ast.Module module = Parsing.parse("""
                 module plan

@@ -290,6 +290,12 @@ public final class JpaStager {
                 of.add("row." + n + "Millis = " + get + ".toEpochMilli();");
                 to.add("java.time.Instant.ofEpochMilli(" + n + "Millis)");
             }
+            case "Date", "DateTime" -> {
+                // Zoneless temporals store natively; JPA maps java.time directly.
+                decls.add("    public " + Lowering.javaType(type, types) + " " + n + ";\n");
+                of.add("row." + n + " = " + get + ";");
+                to.add(n);
+            }
             case "Bytes" -> {
                 decls.add("    public byte[] " + n + ";\n");
                 of.add("row." + n + " = " + get + ".toByteArray();");
@@ -331,6 +337,8 @@ public final class JpaStager {
                 of.add("row." + n + "Millis = " + get + ".isPresent() ? " + get + ".get().toEpochMilli() : null;");
                 to.add("java.util.Optional.ofNullable(" + n + "Millis).map(java.time.Instant::ofEpochMilli)");
             }
+            case "Date" -> nullableColumn(n, get, "java.time.LocalDate", "", decls, of, to);
+            case "DateTime" -> nullableColumn(n, get, "java.time.LocalDateTime", "", decls, of, to);
             case "Money" -> {
                 // Explicit scale: schema generation would otherwise default to scale 0 and round.
                 decls.add("    @jakarta.persistence.Column(precision = 38, scale = 4)\n"
@@ -426,7 +434,7 @@ public final class JpaStager {
     /** Classify a base name: a primitive kind, "values", "relation", or component (default). */
     private static String kindOf(String base, Ast.Module module) {
         switch (base) {
-            case "Bool", "Money", "Instant", "Bytes" -> {
+            case "Bool", "Money", "Instant", "Bytes", "Date", "DateTime" -> {
                 return base;
             }
             case "Int", "Percentage" -> {
