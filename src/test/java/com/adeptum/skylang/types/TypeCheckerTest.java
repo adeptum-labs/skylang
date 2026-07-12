@@ -827,6 +827,91 @@ class TypeCheckerTest {
         assertTrue(e.getMessage().contains("deterministic"), e.getMessage());
     }
 
+    @Test
+    void acceptsNowDefaultOnDateTimeFields() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity E { bookedAt DateTime = now }
+                service S { f() -> Int  intent "x" }
+                """));
+    }
+
+    @Test
+    void rejectsNowDefaultOnDateFields() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { day Date = now }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("Instant or DateTime"), e.getMessage());
+    }
+
+    @Test
+    void acceptsTodayDefaultOnDateFields() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity E { day Date = today }
+                service S { f() -> Int  intent "x" }
+                """));
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity E { name Text = today }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("Date"), e.getMessage());
+    }
+
+    @Test
+    void rejectsTodayInContracts() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(a Date) -> Bool  intent "x"  requires a < today
+                }
+                """));
+        assertTrue(e.getMessage().contains("deterministic"), e.getMessage());
+    }
+
+    @Test
+    void ordersDatesForComparisonAndExtremes() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                service S {
+                  earlier(a Date, b Date) -> Bool
+                    intent  "Is a before b?"
+                    ensures result == (a < b)
+                  later(a DateTime, b DateTime) -> DateTime
+                    intent  "The later of the two."
+                    ensures result == max(a, b)
+                }
+                """));
+    }
+
+    @Test
+    void maybeDateFieldsArePersistable() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Course { id Int @id  starts Date  ends Maybe<Date>  opensAt Maybe<DateTime> }
+                service S uses db { f() -> Int  intent "x" }
+                """));
+    }
+
+    @Test
+    void datesArePromptableInViews() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Course { id Int @id  name Text  starts Date }
+                service Courses uses db {
+                  all() -> [Course]  intent "all"
+                  schedule(starts Date) -> Course  intent "schedule"
+                }
+                view CourseList {
+                  shows  Courses.all() as a table of (name)
+                  action "Schedule" -> Courses.schedule(ask Date)
+                }
+                """));
+    }
+
     // ----- the chapter-4 surface: effects and values ---------------------------
 
     @Test

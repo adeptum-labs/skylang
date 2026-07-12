@@ -445,6 +445,17 @@ class ParsingTest {
     }
 
     @Test
+    void parsesTodayDefaultAsName() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Course { day Date = today }
+                """, "t.sky");
+        Ast.NameExpr def = assertInstanceOf(Ast.NameExpr.class,
+                m.entities().get(0).fields().get(0).defaultValue().orElseThrow());
+        assertEquals("today", def.name());
+    }
+
+    @Test
     void legacyFieldToStringIsUnchanged() {
         Ast.Field legacy = new Ast.Field("stock", new Ast.TypeRef("Int"), false, java.util.OptionalLong.of(0));
         assertEquals("Field[name=stock, type=TypeRef[name=Int, list=false], id=false, min=OptionalLong[0]]",

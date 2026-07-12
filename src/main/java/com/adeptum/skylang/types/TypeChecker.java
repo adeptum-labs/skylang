@@ -464,7 +464,8 @@ public final class TypeChecker {
     private boolean maybePersistable(Ty arg) {
         Ty e = arg.erased();
         if (e.equals(Ty.INT) || e.equals(Ty.TEXT) || e.equals(Ty.BOOL) || e.equals(Ty.INSTANT)
-                || e.equals(Ty.MONEY) || e.equals(Ty.BYTES)) {
+                || e.equals(Ty.MONEY) || e.equals(Ty.BYTES)
+                || e.equals(Ty.DATE) || e.equals(Ty.DATETIME)) {
             return true;
         }
         return arg instanceof Ty.EntityTy et
@@ -649,8 +650,15 @@ public final class TypeChecker {
 
     private void checkDefault(String where, Ast.Expr value, Ty fieldTy) {
         if (value instanceof Ast.NameExpr n && n.name().equals("now")) {
-            if (!fieldTy.equals(Ty.INSTANT)) {
-                throw new CheckException(where + ": '= now' needs an Instant field, not " + fieldTy);
+            if (!fieldTy.equals(Ty.INSTANT) && !fieldTy.equals(Ty.DATETIME)) {
+                throw new CheckException(where
+                        + ": '= now' needs an Instant or DateTime field, not " + fieldTy);
+            }
+            return;
+        }
+        if (value instanceof Ast.NameExpr n && n.name().equals("today")) {
+            if (!fieldTy.equals(Ty.DATE)) {
+                throw new CheckException(where + ": '= today' needs a Date field, not " + fieldTy);
             }
             return;
         }
@@ -828,7 +836,8 @@ public final class TypeChecker {
     private Ty resolveAskType(Ast.Type type, String where) {
         Ty t = resolveType(type, where);
         Ty e = t.erased();
-        if (!e.equals(Ty.INT) && !e.equals(Ty.TEXT) && !e.equals(Ty.MONEY) && !e.equals(Ty.INSTANT)) {
+        if (!e.equals(Ty.INT) && !e.equals(Ty.TEXT) && !e.equals(Ty.MONEY) && !e.equals(Ty.INSTANT)
+                && !e.equals(Ty.DATE) && !e.equals(Ty.DATETIME)) {
             throw new CheckException(where + ": cannot prompt for " + t);
         }
         return t;
@@ -1367,8 +1376,9 @@ public final class TypeChecker {
             case Ast.NameExpr n -> {
                 Ty t = env.get(n.name());
                 if (t == null) {
-                    if (n.name().equals("now")) {
-                        throw new CheckException(where + ": 'now' cannot appear here — contracts and examples"
+                    if (n.name().equals("now") || n.name().equals("today")) {
+                        throw new CheckException(where + ": '" + n.name()
+                                + "' cannot appear here — contracts and examples"
                                 + " must stay deterministic; read the clock inside the body instead");
                     }
                     throw new CheckException(where + ": unknown name '" + n.name() + "'");
@@ -1553,7 +1563,8 @@ public final class TypeChecker {
         }
         Ty l = infer(ce.args().get(0), env, where).erased();
         Ty r = infer(ce.args().get(1), env, where).erased();
-        boolean ordered = l.equals(r) && (l.equals(Ty.INT) || l.equals(Ty.MONEY) || l.equals(Ty.INSTANT));
+        boolean ordered = l.equals(r) && (l.equals(Ty.INT) || l.equals(Ty.MONEY) || l.equals(Ty.INSTANT)
+                || l.equals(Ty.DATE) || l.equals(Ty.DATETIME));
         if (!ordered) {
             throw new CheckException(where + ": " + ce.callee() + " needs two values of the same ordered"
                     + " type, got " + l + " and " + r);
@@ -1681,7 +1692,8 @@ public final class TypeChecker {
             }
             case "<", "<=", ">", ">=" -> {
                 boolean ordered = le.equals(re)
-                        && (le.equals(Ty.INT) || le.equals(Ty.MONEY) || le.equals(Ty.INSTANT));
+                        && (le.equals(Ty.INT) || le.equals(Ty.MONEY) || le.equals(Ty.INSTANT)
+                                || le.equals(Ty.DATE) || le.equals(Ty.DATETIME));
                 if (!ordered) {
                     throw new CheckException(where + ": operator '" + be.op()
                             + "' cannot compare " + l + " and " + r);
