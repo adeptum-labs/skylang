@@ -92,6 +92,36 @@ class ViewVerifierTest {
         assertFalse(verifier.unmetExpectations(view, MARKUP).isEmpty());
     }
 
+    private static Ast.View paramView() {
+        return Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session { current() -> Maybe<Account>  intent "x" }
+                page Login at "/" {
+                  param   accessDenied Bool
+                  shows   Session.current() as a summary of (email)
+                  appears the access-denied alert when accessDenied
+                }
+                """, "t.sky").views().get(0);
+    }
+
+    @Test
+    void acceptsASatisfiedAppearsWhen() {
+        assertTrue(verifier.unmetExpectations(paramView(), """
+                <h:panelGroup styleClass="accessDenied" rendered="#{bean.accessDenied}">
+                  <h:outputText value="Access denied."/>
+                </h:panelGroup>
+                """).isEmpty());
+    }
+
+    @Test
+    void reportsAMissingAppearsWhenBinding() {
+        List<String> unmet = verifier.unmetExpectations(paramView(),
+                "<h:outputText value=\"Access denied.\"/>");
+        assertEquals(1, unmet.size());
+        assertTrue(unmet.get(0).contains("accessDenied"), unmet.get(0));
+    }
+
     private static final String BRANDING = """
             <h:panelGroup styleClass="branding">
               <h:graphicImage id="logoImage" value="#{bean.logoDataUri}" alt="logo"/>

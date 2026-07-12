@@ -79,6 +79,8 @@ public final class UiPromptBuilder {
               <h:graphicImage id="FIELDImage" value="#{bean.FIELDDataUri}" alt="FIELD"/>; the bean
               exposes String getFIELDDataUri() returning "data:image/png;base64," plus the
               Base64-encoded bytes, or "" when the value (or its record) is absent.
+            - Each name under "Request params" is a bean property with BOTH a getter and a setter
+              of the matching Java type (Boolean, Long, or String) — the page's view params set it.
             """;
 
     public String system(List<String> vocabulary) {
@@ -101,6 +103,11 @@ public final class UiPromptBuilder {
         sb.append("view ").append(view.name());
         view.route().ifPresent(r -> sb.append(" at \"").append(r).append("\""));
         sb.append('\n');
+        if (!view.params().isEmpty()) {
+            sb.append("Request params: ").append(view.params().stream()
+                    .map(p -> p.name() + " " + p.type().sky())
+                    .collect(Collectors.joining(", "))).append('\n');
+        }
 
         Ast.Shows shows = view.shows();
         String shape = shows.projection().map(Ast.Projection::kind)

@@ -103,6 +103,28 @@ class UiPromptBuilderTest {
             """;
 
     @Test
+    void userPromptListsRequestParamsAndAppearsWhen() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Account { id Int @id  email Text }
+                service Session {
+                  current() -> Maybe<Account>  intent "x"
+                }
+                page Login at "/" {
+                  param   accessDenied Bool
+                  shows   Session.current() as a summary of (email)
+                  appears the access-denied alert when accessDenied
+                }
+                """, "shop.sky");
+        String user = prompts.user(m, m.views().get(0));
+        assertTrue(user.contains("Request params:") && user.contains("accessDenied Bool"),
+                "declared params must reach the model:\n" + user);
+        assertTrue(user.contains("styleClass=\"accessDenied\"")
+                        && user.contains("rendered=\"#{bean.accessDenied}\""),
+                "the conditional element contract must reach the model:\n" + user);
+    }
+
+    @Test
     void systemPromptStatesTheImageContract() {
         String system = prompts.system(UiPromptBuilder.STANDARD);
         assertTrue(system.contains("h:graphicImage"), system);

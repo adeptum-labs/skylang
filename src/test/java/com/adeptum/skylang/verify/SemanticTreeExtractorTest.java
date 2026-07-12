@@ -54,6 +54,17 @@ class SemanticTreeExtractorTest {
     private final SemanticTreeExtractor extractor = new SemanticTreeExtractor();
 
     @Test
+    void extractsRenderedConditionals() {
+        SemanticTree tree = extractor.extract("""
+                <h:panelGroup styleClass="accessDenied alert" rendered="#{bean.accessDenied}">
+                  <h:outputText value="Access denied."/>
+                </h:panelGroup>
+                """);
+        assertTrue(tree.hasConditional("accessDenied"));
+        assertFalse(tree.hasConditional("sessionExpired"));
+    }
+
+    @Test
     void extractsGraphicImageBindings() {
         SemanticTree tree = extractor.extract("""
                 <h:panelGroup styleClass="branding">

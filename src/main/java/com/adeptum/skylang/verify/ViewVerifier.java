@@ -77,6 +77,16 @@ public final class ViewVerifier {
         return type instanceof Ast.TypeRef ref && !ref.list() && ref.name().equals("Bytes");
     }
 
+    /** The first bare name in a condition — the styleClass the conditional element must carry. */
+    private static String firstName(Ast.Expr e) {
+        return switch (e) {
+            case Ast.NameExpr n -> n.name();
+            case Ast.BinExpr b -> firstName(b.left());
+            case Ast.NotExpr n -> firstName(n.value());
+            default -> "conditional";
+        };
+    }
+
     /** @return a description of each unmet expectation; empty means the markup satisfies the view. */
     public List<String> unmetExpectations(Ast.View view, String markup) {
         return unmetExpectations(view, markup, java.util.Set.of());
@@ -135,9 +145,12 @@ public final class ViewVerifier {
                 case Ast.AppearsActionState ignored -> {
                     // State-dependent looks need a data-driven render; prompt-guided for now.
                 }
-                case Ast.AppearsWhen ignored -> {
-                    // Structurally verified in the param-aware overload; render-verified by the
-                    // staged two-fetch test.
+                case Ast.AppearsWhen w -> {
+                    String param = firstName(w.when());
+                    if (!tree.hasConditional(param)) {
+                        unmet.add("expected a conditional element for '" + param
+                                + "' (styleClass \"" + param + "\" with a rendered binding)");
+                    }
                 }
                 case Ast.AppearsProse ignored -> {
                 }

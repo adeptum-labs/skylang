@@ -81,7 +81,15 @@ public final class SemanticTreeExtractor {
             }
         }
 
-        return new SemanticTree(columns, controls, tableClasses, imageFields);
+        List<SemanticTree.Conditional> conditionals = new ArrayList<>();
+        for (Element el : doc.getAllElements()) {
+            String rendered = el.attr("rendered");
+            if (!rendered.isBlank()) {
+                conditionals.add(new SemanticTree.Conditional(classesOf(el), rendered));
+            }
+        }
+
+        return new SemanticTree(columns, controls, tableClasses, imageFields, conditionals);
     }
 
     /** The style-class tokens directly on an element — both {@code class} and Faces {@code styleClass}. */
