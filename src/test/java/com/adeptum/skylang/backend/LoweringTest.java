@@ -60,8 +60,19 @@ class LoweringTest {
         assertEquals("boolean", Lowering.javaType(type("Bool"), none));
         assertEquals("Money", Lowering.javaType(type("Money"), none));
         assertEquals("java.time.Instant", Lowering.javaType(type("Instant"), none));
+        assertEquals("java.time.LocalDate", Lowering.javaType(type("Date"), none));
+        assertEquals("java.time.LocalDateTime", Lowering.javaType(type("DateTime"), none));
         assertEquals("Bytes", Lowering.javaType(type("Bytes"), none));
         assertEquals("String", Lowering.javaType(type("Email"), none));
+    }
+
+    @Test
+    void dateWitnessesAreFixedIsoValues() {
+        Ast.Module empty = Parsing.parse("module t", "t.sky");
+        assertEquals("java.time.LocalDate.parse(\"2026-01-01\")",
+                Lowering.defaultJavaValue(new Ast.TypeRef("Date"), Map.of(), empty));
+        assertEquals("java.time.LocalDateTime.parse(\"2026-01-01T00:00:00\")",
+                Lowering.defaultJavaValue(new Ast.TypeRef("DateTime"), Map.of(), empty));
     }
 
     @Test

@@ -85,6 +85,8 @@ public final class Lowering {
             case "Text", "Email", "Currency" -> "String";
             case "Bool" -> "boolean";
             case "Instant" -> "java.time.Instant";
+            case "Date" -> "java.time.LocalDate";
+            case "DateTime" -> "java.time.LocalDateTime";
             default -> name;   // Money, Bytes, and entities map to their staged class
         };
     }
@@ -499,6 +501,8 @@ public final class Lowering {
             case "Currency" -> "\"EUR\"";
             case "Money" -> "Money.of(\"1\", \"EUR\")";
             case "Instant" -> "java.time.Instant.parse(\"2026-01-01T00:00:00Z\")";
+            case "Date" -> "java.time.LocalDate.parse(\"2026-01-01\")";
+            case "DateTime" -> "java.time.LocalDateTime.parse(\"2026-01-01T00:00:00\")";
             case "Bytes" -> "Bytes.ofUtf8(\"x\")";
             default -> defaultEntityValue(ref.name(), types, module);
         };
