@@ -210,6 +210,7 @@ public final class AstBuilder {
         boolean id = false;
         boolean unique = false;
         Optional<String> uniqueScope = Optional.empty();
+        Optional<String> mappedBy = Optional.empty();
         OptionalLong min = OptionalLong.empty();
         for (SkyLangParser.AnnotationContext a : ctx.annotation()) {
             String name = a.name.getText();
@@ -223,6 +224,13 @@ public final class AstBuilder {
                     unique = true;
                     uniqueScope = a.scope == null ? Optional.empty() : Optional.of(a.scope.getText());
                 }
+                case "mappedBy" -> {
+                    if (a.scope == null) {
+                        throw new IllegalArgumentException(
+                                "@mappedBy takes the child's back-reference field, e.g. @mappedBy(owner)");
+                    }
+                    mappedBy = Optional.of(a.scope.getText());
+                }
                 case "min" -> {
                     if (a.INT() == null) {
                         throw new IllegalArgumentException("@min requires an integer argument, e.g. @min(0)");
@@ -233,7 +241,8 @@ public final class AstBuilder {
             }
         }
         Optional<Ast.Expr> defaultValue = ctx.expr() == null ? Optional.empty() : Optional.of(expr(ctx.expr()));
-        return new Ast.Field(ctx.ID().getText(), type(ctx.type()), id, min, unique, uniqueScope, defaultValue);
+        return new Ast.Field(ctx.ID().getText(), type(ctx.type()), id, min, unique, uniqueScope,
+                mappedBy, defaultValue);
     }
 
     // ----- services & methods ------------------------------------------------

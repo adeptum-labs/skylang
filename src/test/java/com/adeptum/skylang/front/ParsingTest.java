@@ -444,6 +444,45 @@ class ParsingTest {
         assertEquals("Money", assertInstanceOf(Ast.TypeRef.class, ask.type()).name());
     }
 
+    private static Ast.Entity companyWith(String field) {
+        return Parsing.parse("""
+                module t
+                entity Company {
+                  id   Int @id
+                  name Text
+                  %s
+                }
+                entity Permission { id Int @id  name Text  owner Company }
+                """.formatted(field), "t.sky").entities().get(0);
+    }
+
+    @Test
+    void parsesMappedByAnnotation() {
+        Ast.Field permissions = companyWith("permissions [Permission] @mappedBy(owner)")
+                .fields().get(2);
+        assertEquals("owner", permissions.mappedBy().orElseThrow());
+        assertTrue(permissions.type() instanceof Ast.TypeRef ref && ref.list());
+    }
+
+    @Test
+    void mappedByToStringIsAppendOnly() {
+        Ast.Field permissions = companyWith("permissions [Permission] @mappedBy(owner)")
+                .fields().get(2);
+        assertTrue(permissions.toString().endsWith(", mappedBy=owner]"), permissions.toString());
+        Ast.Field plain = companyWith("labels [Text]").fields().get(2);
+        assertFalse(plain.toString().contains("mappedBy"), plain.toString());
+    }
+
+    @Test
+    void mappedByRejectsAMissingOrIntegerArgument() {
+        IllegalArgumentException bare = assertThrows(IllegalArgumentException.class,
+                () -> companyWith("permissions [Permission] @mappedBy"));
+        assertTrue(bare.getMessage().contains("back-reference"), bare.getMessage());
+        IllegalArgumentException numbered = assertThrows(IllegalArgumentException.class,
+                () -> companyWith("permissions [Permission] @mappedBy(3)"));
+        assertTrue(numbered.getMessage().contains("back-reference"), numbered.getMessage());
+    }
+
     @Test
     void parsesTodayDefaultAsName() {
         Ast.Module m = Parsing.parse("""
