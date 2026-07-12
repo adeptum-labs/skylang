@@ -114,8 +114,9 @@ operands alike — javac's overload resolution picks the semantics.
 
 Methods carry the full chapter-5 contract vocabulary. `raises Error when <condition>`
 names failures: errors are entities lowered to exceptions carrying their context fields,
-and conditions are formal expressions or the resolvable phrases (`no product has that id`,
-`email already registered`) — unresolvable prose is a check error. Each raises with a
+and conditions are formal expressions, the resolvable phrases (`no product has that id`,
+`email already registered`), or free prose that names the failure for the reader and the
+model — prose is never statically resolved; examples pin its behaviour. Each raises with a
 derivable witness becomes a generated test (an empty store for existence, a seeded
 duplicate for uniqueness, a boundary value for comparisons); `requires` lowers to a guard
 plus a boundary test. `ensures` gains `old(...)` (pre-call snapshots, including
