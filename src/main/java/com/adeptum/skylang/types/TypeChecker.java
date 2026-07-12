@@ -289,6 +289,67 @@ public final class TypeChecker {
                 f.defaultValue().ifPresent(v -> checkDefault(where, v, entities.get(e.name()).get(f.name())));
             }
         }
+        // Pins wait for the same reason: a pin may name a constant of a value set
+        // declared later in the file (role Role.Member).
+        for (Ast.Entity e : module.entities()) {
+            if (!e.values().isEmpty()) {
+                checkValuePins(e);
+            }
+        }
+    }
+
+    /**
+     * A values entity's data fields form a total constant table: every value pins every
+     * data field exactly once, with a constant the field's type accepts.
+     */
+    private void checkValuePins(Ast.Entity e) {
+        Map<String, Ty> fields = entities.get(e.name());
+        String carrier = e.fields().get(0).name();
+        List<Ast.Field> data = e.fields().subList(1, e.fields().size());
+        for (Ast.Field f : data) {
+            String where = "field '" + e.name() + "." + f.name() + "'";
+            if (f.defaultValue().isPresent()) {
+                throw new CheckException(where
+                        + ": a values entity's data fields take their values from pins, not defaults");
+            }
+            if (!pinnable(fields.get(f.name()))) {
+                throw new CheckException(where + ": a values entity's data field needs a constant"
+                        + " form — Int, Text, Bool, Money, or another values entity");
+            }
+        }
+        for (Ast.ValueDef v : e.values()) {
+            String where = "entity '" + e.name() + "', value '" + v.name() + "'";
+            List<String> pinned = new ArrayList<>();
+            for (Ast.FieldExpect pin : v.pins()) {
+                if (pin.field().equals(carrier)) {
+                    throw new CheckException(where + " pins the carrier field '" + carrier
+                            + "'; the value's name already fills it");
+                }
+                Ty fieldTy = fields.get(pin.field());
+                if (fieldTy == null) {
+                    throw new CheckException(where + " pins '" + pin.field()
+                            + "', which is not a field of " + e.name());
+                }
+                if (pinned.contains(pin.field())) {
+                    throw new CheckException(where + " pins '" + pin.field() + "' twice");
+                }
+                pinned.add(pin.field());
+                Ty valTy = infer(pin.expected(), Map.of(), where);
+                fits(where + ", pin '" + pin.field() + "'", pin.expected(), valTy, fieldTy);
+            }
+            for (Ast.Field f : data) {
+                if (!pinned.contains(f.name())) {
+                    throw new CheckException(where + " must pin field '" + f.name() + "'");
+                }
+            }
+        }
+    }
+
+    /** The field types a value can pin: those with a constant surface form. */
+    private boolean pinnable(Ty ty) {
+        Ty e = ty.erased();
+        return e.equals(Ty.INT) || e.equals(Ty.TEXT) || e.equals(Ty.BOOL) || e.equals(Ty.MONEY)
+                || (ty instanceof Ty.EntityTy et && valueSets.containsKey(et.name()));
     }
 
     // ----- persistability (a db-using module maps its entities to storage) ------
@@ -400,9 +461,10 @@ public final class TypeChecker {
 
     /** {@code values Member, Admin} seeds and closes the instance set of an enum-like entity. */
     private void registerValueSet(Ast.Entity e, Map<String, Ty> fields) {
-        if (e.fields().size() != 1 || !e.fields().get(0).id()) {
+        if (e.fields().isEmpty() || !e.fields().get(0).id()
+                || e.fields().stream().skip(1).anyMatch(Ast.Field::id)) {
             throw new CheckException("entity '" + e.name()
-                    + "': a values entity carries exactly one @id field naming each value");
+                    + "': a values entity's first field is its sole @id carrier naming each value");
         }
         Ty carrier = fields.get(e.fields().get(0).name());
         if (!carrier.equals(Ty.TEXT)) {

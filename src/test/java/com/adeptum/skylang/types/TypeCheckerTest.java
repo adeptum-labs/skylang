@@ -813,19 +813,106 @@ class TypeCheckerTest {
     }
 
     @Test
-    void valuesEntitiesNeedASingleTextIdField() {
-        CheckException shape = assertThrows(CheckException.class, () -> check("""
+    void valuesEntitiesNeedATextIdCarrierField() {
+        CheckException carrier = assertThrows(CheckException.class, () -> check("""
                 module m
-                entity Role { name Text @id  rank Int  values Member }
+                entity Role { name Text  values Member }
                 service S { f() -> Int  intent "x" }
                 """));
-        assertTrue(shape.getMessage().contains("values"), shape.getMessage());
+        assertTrue(carrier.getMessage().contains("@id"), carrier.getMessage());
         CheckException base = assertThrows(CheckException.class, () -> check("""
                 module m
                 entity Role { code Int @id  values Member }
                 service S { f() -> Int  intent "x" }
                 """));
         assertTrue(base.getMessage().contains("Text"), base.getMessage());
+    }
+
+    @Test
+    void pinnedValuesTypeCheck() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                entity Tier {
+                  name  Text @id
+                  label Text
+                  price Money
+                  role  Role
+                  values Free with label "Free" and price 0eur and role Role.Member,
+                         Pro with label "Pro" and price 399sek and role Role.Admin
+                }
+                entity Role { name Text @id  values Member, Admin }
+                service S { f() -> Int  intent "x" }
+                """));
+    }
+
+    @Test
+    void everyDataFieldMustBePinnedOnEveryValue() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Tier { name Text @id  label Text  rank Int  values Member with label "M" }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("rank"), e.getMessage());
+    }
+
+    @Test
+    void pinsNameOnlyDeclaredDataFields() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Tier { name Text @id  label Text  values Member with label "M" and colour "red" }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("colour"), e.getMessage());
+    }
+
+    @Test
+    void pinsTypeAgainstTheirField() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Tier { name Text @id  label Text  values Member with label 3 }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("label"), e.getMessage());
+    }
+
+    @Test
+    void rejectsADuplicatePin() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Tier { name Text @id  label Text  values Member with label "M" and label "N" }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("twice"), e.getMessage());
+    }
+
+    @Test
+    void rejectsPinningTheCarrierField() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Tier { name Text @id  label Text  values Member with name "M" and label "M" }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("name"), e.getMessage());
+    }
+
+    @Test
+    void rejectsDefaultsOnValueEntityDataFields() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Tier { name Text @id  label Text = "x"  values Member with label "M" }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("default"), e.getMessage());
+    }
+
+    @Test
+    void rejectsDataFieldTypesThatHaveNoPinConstant() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+                module m
+                entity Tier { name Text @id  since Instant  values Member with since now }
+                service S { f() -> Int  intent "x" }
+                """));
+        assertTrue(e.getMessage().contains("since"), e.getMessage());
     }
 
     @Test
