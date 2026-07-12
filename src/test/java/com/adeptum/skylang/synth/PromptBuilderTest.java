@@ -73,6 +73,20 @@ class PromptBuilderTest {
     }
 
     @Test
+    void describesTheAuthEffect() {
+        Ast.Module m = Parsing.parse("""
+                module bank
+                entity Account { id Int @id  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>  intent "The signed-in account."
+                }
+                """, "bank.sky");
+        String user = prompts.user(m, m.services().get(0), m.services().get(0).methods().get(0));
+        assertTrue(user.contains("auth.currentPrincipal()"),
+                "the model must know how to read the principal:\n" + user);
+    }
+
+    @Test
     void userPromptStatesTheUniquenessScope() {
         Ast.Module m = Parsing.parse("""
                 module bank

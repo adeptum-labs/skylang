@@ -88,6 +88,11 @@ public final class ProjectStager {
                 Files.writeString(main.resolve("Http.java"), SupportClasses.http(pkg));
                 Files.writeString(main.resolve("JdkHttp.java"), SupportClasses.jdkHttp(pkg));
             }
+            if (effects.contains("auth")) {
+                Files.writeString(main.resolve("Auth.java"), SupportClasses.auth(pkg));
+                Files.writeString(main.resolve("Principal.java"), SupportClasses.principal(pkg));
+                Files.writeString(main.resolve("SkyAuth.java"), SupportClasses.skyAuth(pkg));
+            }
             if (usesNow) {
                 Files.writeString(main.resolve("SkyClock.java"), SupportClasses.skyClock(pkg));
             }
@@ -406,7 +411,8 @@ public final class ProjectStager {
 
     /** The Java type each declared effect binds to under the JVM profile. */
     private static final Map<String, String> EFFECT_TYPES = Map.of(
-            "db", "Db", "clock", "java.time.Clock", "mail", "Mail", "http", "Http");
+            "db", "Db", "clock", "java.time.Clock", "mail", "Mail", "http", "Http",
+            "auth", "Auth");
 
     /**
      * The service's effects budget as injected handles: one final field per declared effect,

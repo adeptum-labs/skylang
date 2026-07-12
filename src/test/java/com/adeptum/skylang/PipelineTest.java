@@ -1084,6 +1084,38 @@ class PipelineTest {
         assertEquals(2, code);
     }
 
+    @Test
+    void aUsesAuthServiceStagesTheAuthLane(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module id
+                entity Account { id Int @id  email Text }
+                service Session uses auth, db {
+                  current() -> Maybe<Account>  intent "The signed-in account."
+                }
+                """, "id.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return java.util.Optional.empty();"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/id/Auth.java")),
+                "the auth effect interface should be staged");
+        assertTrue(Files.exists(buildDir.resolve("src/main/java/id/Principal.java")),
+                "the principal record should be staged");
+        String skyAuth = Files.readString(buildDir.resolve("src/main/java/id/SkyAuth.java"));
+        assertTrue(skyAuth.contains("sky.auth.principal"),
+                "the holder seeds from a system property so the web lane can pin it:\n" + skyAuth);
+        String svc = Files.readString(buildDir.resolve("src/main/java/id/Session.java"));
+        assertTrue(svc.contains("private final Auth auth;"),
+                "the auth effect should be an injected handle:\n" + svc);
+        String testEffects = Files.readString(buildDir.resolve("src/test/java/id/TestEffects.java"));
+        assertTrue(testEffects.contains("static Auth auth()")
+                        && testEffects.contains("sky-test-subject"),
+                "generated tests get a present pinned principal:\n" + testEffects);
+    }
+
     private static final String PARAM_MODULE = """
             module shop
             entity Account { id Int @id  email Text }

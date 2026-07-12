@@ -277,6 +277,8 @@ public final class PromptBuilder {
                 case "clock" -> sb.append("//   clock — java.time.Clock; the current time is clock.instant().\n");
                 case "mail" -> sb.append("//   mail — mail.send(to, subject, body).\n");
                 case "http" -> sb.append("//   http — http.get(url) returning the response body.\n");
+                case "auth" -> sb.append("//   auth — auth.currentPrincipal(): java.util.Optional<Principal>"
+                        + " (subject(), email(), displayName()); present means someone is signed in.\n");
                 default -> {
                 }
             }

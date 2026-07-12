@@ -229,6 +229,67 @@ public final class SupportClasses {
                 """.formatted(pkg);
     }
 
+    public static String auth(String pkg) {
+        return """
+                package %s;
+
+                /** The auth effect: reading the current principal is the only capability granted. */
+                @FunctionalInterface
+                public interface Auth {
+
+                    java.util.Optional<Principal> currentPrincipal();
+                }
+                """.formatted(pkg);
+    }
+
+    public static String principal(String pkg) {
+        return """
+                package %s;
+
+                /** The signed-in identity the auth effect exposes. */
+                public record Principal(String subject, String email, String displayName) {
+                }
+                """.formatted(pkg);
+    }
+
+    public static String skyAuth(String pkg) {
+        return """
+                package %s;
+
+                /**
+                 * The principal source behind the auth binding. Production leaves it absent until a
+                 * real mechanism (e.g. OpenID Connect) pins it; verification seeds it through the
+                 * 'sky.auth.principal' system property ("subject|email|displayName"), which crosses
+                 * container classloaders where a static pin would not.
+                 */
+                public final class SkyAuth {
+
+                    private static volatile java.util.Optional<Principal> principal = seeded();
+
+                    private SkyAuth() {
+                    }
+
+                    public static java.util.Optional<Principal> current() {
+                        return principal;
+                    }
+
+                    public static void pin(java.util.Optional<Principal> pinned) {
+                        principal = pinned;
+                    }
+
+                    private static java.util.Optional<Principal> seeded() {
+                        String seed = System.getProperty("sky.auth.principal", "");
+                        if (seed.isBlank()) {
+                            return java.util.Optional.empty();
+                        }
+                        String[] parts = seed.split("\\\\|", 3);
+                        return java.util.Optional.of(new Principal(parts[0],
+                                parts.length > 1 ? parts[1] : "", parts.length > 2 ? parts[2] : ""));
+                    }
+                }
+                """.formatted(pkg);
+    }
+
     public static String skyClock(String pkg) {
         return """
                 package %s;
@@ -324,6 +385,17 @@ public final class SupportClasses {
                         }
                     """);
         }
+        if (effects.contains("auth")) {
+            // SkyAuth backs the binding; a real mechanism (OIDC) later replaces this producer only.
+            sb.append("""
+
+                        @jakarta.enterprise.inject.Produces
+                        @jakarta.enterprise.context.ApplicationScoped
+                        public Auth auth() {
+                            return SkyAuth::current;
+                        }
+                    """);
+        }
         sb.append("}\n");
         return sb.toString();
     }
@@ -363,6 +435,13 @@ public final class SupportClasses {
         if (effects.contains("http")) {
             sb.append("\n    static Http http() {\n");
             sb.append("        return url -> { throw new UnsupportedOperationException(\"no outbound http under test\"); };\n");
+            sb.append("    }\n");
+        }
+        if (effects.contains("auth")) {
+            // Present by default: the signed-in state is precisely what was unverifiable before.
+            sb.append("\n    static Auth auth() {\n");
+            sb.append("        return () -> java.util.Optional.of(");
+            sb.append("new Principal(\"sky-test-subject\", \"test@example.sky\", \"Test User\"));\n");
             sb.append("    }\n");
         }
         sb.append("}\n");
