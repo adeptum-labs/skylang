@@ -91,7 +91,9 @@ Text           // a Unicode string
 Text(1..120)   // Text with a length constraint
 Money          // fixed-point decimal + currency, never a float
 Email          // Text that must match an email shape
-Instant        // a point in UTC time
+Instant        // a point in UTC time — something that happened
+Date           // a calendar day: no time, no zone (course days, deadlines)
+DateTime       // a wall-clock date and time with no zone (opening hours, local schedules)
 ```
 
 A **refined type** is a base type plus a machine-checkable predicate. `Email` is not a naming
@@ -145,6 +147,10 @@ value of the sibling `provider` field** instead of globally, so the same address
 under different providers. The scope must be a single reference: a field holding an
 identified entity or a values entity. A persistence-backed profile enforces the pair as a
 composite constraint on the stored table.
+
+Temporal defaults read the pinnable clock: `= now` fills an `Instant` (or a `DateTime`)
+at construction, and `= today` fills a `Date`. Neither keyword may appear in contracts —
+they would break determinism; read the clock inside the body instead.
 
 ### Closed value sets
 
@@ -351,7 +357,8 @@ page ProductList at "/products" {
   A `titled "…"` suffix names the section; a page may `shows` several sections.
 - `action "Label" on a row | on the order -> Service.method(row.id, ask T | prompt T)` — wires a
   control to a service method. `ask`/`prompt` marks an input the UI must collect (with the right
-  converter for `Money`, `Instant`, refined types, …). The `on <subject>` clause and the arguments
+  converter for `Money`, `Instant`, `Date`, `DateTime`, refined types, …). The `on <subject>`
+  clause and the arguments
   are both optional: `action "Sign out" -> Session.signOut()` is a page-level control bound to no
   row. On a page with several `shows`, a named subject (`on the order`) picks the section showing
   that entity.
@@ -498,6 +505,8 @@ Lowerings:
 | `Text`         | `String`                                  |
 | `Money`        | `BigDecimal` + `Currency`                 |
 | `Instant`      | `java.time.Instant`                       |
+| `Date`         | `java.time.LocalDate`                     |
+| `DateTime`     | `java.time.LocalDateTime`                 |
 | `Bytes`        | `byte[]`                                  |
 | `Maybe<T>`     | a null-free wrapper; `null` never escapes |
 | `Secret<T>`    | a compiler-tracked wrapper type           |
@@ -546,7 +555,9 @@ since those stay optional per profile.
 | `Int`          | `bigint`                                  |
 | `Text`         | `string`                                  |
 | `Money`        | a fixed-point decimal class + currency    |
-| `Instant`      | `Temporal.Instant`                        |
+| `Instant`      | `Temporal.Instant` (not yet lowered)      |
+| `Date`         | `Temporal.PlainDate` (not yet lowered)    |
+| `DateTime`     | `Temporal.PlainDateTime` (not yet lowered)|
 | `Bytes`        | `Uint8Array`                              |
 | `Maybe<T>`     | a tagged union; `null`/`undefined` never escape |
 

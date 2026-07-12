@@ -126,7 +126,8 @@ public final class TsProfile implements Profile {
     }
 
     private static final java.util.Set<String> UNLOWERED =
-            java.util.Set.of("Money", "Instant", "Bytes", "Email", "Currency", "Percentage");
+            java.util.Set.of("Money", "Instant", "Date", "DateTime", "Bytes",
+                    "Email", "Currency", "Percentage");
 
     private static void requireType(Ast.Type type, String where) {
         if (!(type instanceof Ast.TypeRef ref) || UNLOWERED.contains(ref.name())) {
