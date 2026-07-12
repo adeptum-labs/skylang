@@ -1706,6 +1706,30 @@ public final class TypeChecker {
         return helper.sig().returnType();
     }
 
+    /**
+     * The result type of a temporal {@code +}/{@code -}, or null if the operands are not a
+     * temporal combination. A span (Duration) added to or subtracted from a span is a span; a
+     * moment (Instant/DateTime) shifted by a span stays that moment; the gap between two like
+     * moments is a span (subtraction only). Adding two moments, or subtracting a moment from a
+     * span, has no meaning and falls through to the operator's rejection.
+     */
+    private static Ty temporalArithmetic(String op, Ty le, Ty re) {
+        if (le.equals(Ty.DURATION) && re.equals(Ty.DURATION)) {
+            return Ty.DURATION;
+        }
+        boolean plus = op.equals("+");
+        if (re.equals(Ty.DURATION) && (le.equals(Ty.INSTANT) || le.equals(Ty.DATETIME))) {
+            return le;
+        }
+        if (plus && le.equals(Ty.DURATION) && (re.equals(Ty.INSTANT) || re.equals(Ty.DATETIME))) {
+            return re;
+        }
+        if (!plus && le.equals(re) && (le.equals(Ty.INSTANT) || le.equals(Ty.DATETIME))) {
+            return Ty.DURATION;
+        }
+        return null;
+    }
+
     private Ty inferBinary(Ast.BinExpr be, Map<String, Ty> env, String where) {
         Ty l = infer(be.left(), env, where);
         Ty r = infer(be.right(), env, where);
@@ -1727,6 +1751,10 @@ public final class TypeChecker {
                 }
                 if (le.equals(Ty.MONEY) && re.equals(Ty.MONEY)) {
                     yield Ty.MONEY;
+                }
+                Ty temporal = temporalArithmetic(be.op(), le, re);
+                if (temporal != null) {
+                    yield temporal;
                 }
                 throw new CheckException(where + ": operator '" + be.op() + "' cannot combine " + l + " and " + r);
             }

@@ -1560,6 +1560,35 @@ class PipelineTest {
     }
 
     @Test
+    void temporalArithmeticLowersThroughStagedHelpers(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module spans
+                service Spans {
+                  extend(base Duration, extra Duration) -> Duration
+                    intent  "Lengthen a span."
+                    requires extra > 0s
+                    ensures result == (base + extra)
+                    example extend(30d, 2h) -> 32h
+                }
+                """, "spans.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String tests = Files.readString(buildDir.resolve("src/test/java/spans/SpansTest.java"));
+        assertTrue(tests.contains("plus("),
+                "the ensures should lower through the overloaded plus helper:\n" + tests);
+        assertTrue(tests.contains(
+                        "java.time.Duration plus(java.time.Duration a, java.time.Duration b)"),
+                "the temporal arithmetic helpers should be staged:\n" + tests);
+        assertTrue(tests.contains("java.time.Duration.between(b, a)"),
+                "a moment difference should stage as Duration.between:\n" + tests);
+    }
+
+    @Test
     void durationsPersistAsSecondsColumns(@TempDir Path root) throws IOException {
         Ast.Module module = Parsing.parse("""
                 module plan

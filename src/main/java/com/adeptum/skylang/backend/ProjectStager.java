@@ -677,6 +677,16 @@ public final class ProjectStager {
                     private static long min(long a, long b) { return Math.min(a, b); }
                     private static <T extends Comparable<T>> T max(T a, T b) { return a.compareTo(b) >= 0 ? a : b; }
                     private static <T extends Comparable<T>> T min(T a, T b) { return a.compareTo(b) <= 0 ? a : b; }
+                    private static java.time.Duration plus(java.time.Duration a, java.time.Duration b) { return a.plus(b); }
+                    private static java.time.Duration minus(java.time.Duration a, java.time.Duration b) { return a.minus(b); }
+                    private static java.time.Instant plus(java.time.Instant a, java.time.Duration b) { return a.plus(b); }
+                    private static java.time.Instant plus(java.time.Duration a, java.time.Instant b) { return b.plus(a); }
+                    private static java.time.Instant minus(java.time.Instant a, java.time.Duration b) { return a.minus(b); }
+                    private static java.time.Duration minus(java.time.Instant a, java.time.Instant b) { return java.time.Duration.between(b, a); }
+                    private static java.time.LocalDateTime plus(java.time.LocalDateTime a, java.time.Duration b) { return a.plus(b); }
+                    private static java.time.LocalDateTime plus(java.time.Duration a, java.time.LocalDateTime b) { return b.plus(a); }
+                    private static java.time.LocalDateTime minus(java.time.LocalDateTime a, java.time.Duration b) { return a.minus(b); }
+                    private static java.time.Duration minus(java.time.LocalDateTime a, java.time.LocalDateTime b) { return java.time.Duration.between(b, a); }
                 """;
         String lenDispatch = """
                     private static long len(Object o) {

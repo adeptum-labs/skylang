@@ -897,6 +897,61 @@ class TypeCheckerTest {
     }
 
     @Test
+    void doesTemporalArithmetic() {
+        assertDoesNotThrow(() -> check("""
+                module m
+                service S {
+                  span(a Duration, b Duration) -> Duration
+                    intent  "The combined span."
+                    ensures result == (a + b)
+                  shift(t Instant, d Duration) -> Instant
+                    intent  "The moment d after t."
+                    ensures result == (t + d)
+                  early(t Instant, d Duration) -> Instant
+                    intent  "The moment d before t."
+                    ensures result == (t - d)
+                  gap(a Instant, b Instant) -> Duration
+                    intent  "How long from a to b."
+                    ensures result == (b - a)
+                  reschedule(t DateTime, d Duration) -> DateTime
+                    intent  "The wall-clock time d later."
+                    ensures result == (t + d)
+                  between(a DateTime, b DateTime) -> Duration
+                    intent  "The span between two wall-clock times."
+                    ensures result == (b - a)
+                }
+                """));
+    }
+
+    @Test
+    void rejectsMeaninglessTemporalArithmetic() {
+        assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(a Instant, b Instant) -> Instant
+                    intent  "x"
+                    ensures result == (a + b)
+                }
+                """));
+        assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(d Duration, n Int) -> Duration
+                    intent  "x"
+                    ensures result == (d + n)
+                }
+                """));
+        assertThrows(CheckException.class, () -> check("""
+                module m
+                service S {
+                  f(day Date, d Duration) -> Date
+                    intent  "x"
+                    ensures result == (day + d)
+                }
+                """));
+    }
+
+    @Test
     void ordersDurationsAndPersistsThem() {
         assertDoesNotThrow(() -> check("""
                 module m
