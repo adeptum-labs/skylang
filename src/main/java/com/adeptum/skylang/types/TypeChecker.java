@@ -413,9 +413,36 @@ public final class TypeChecker {
                 continue;   // a pure value argument; nothing stores it
             }
             for (Ast.Field f : e.fields()) {
-                checkPersistable("entity '" + e.name() + "." + f.name() + "'",
-                        entities.get(e.name()).get(f.name()), component);
+                String where = "entity '" + e.name() + "." + f.name() + "'";
+                if (f.mappedBy().isPresent() && !component) {
+                    checkMappedBy(where, e, f);
+                    continue;   // an owned collection persists through its inverse side
+                }
+                checkPersistable(where, entities.get(e.name()).get(f.name()), component);
             }
+        }
+    }
+
+    /**
+     * {@code permissions [Permission] @mappedBy(owner)}: the children own the foreign key,
+     * so the named child field must be a plain single reference back to this entity.
+     */
+    private void checkMappedBy(String where, Ast.Entity e, Ast.Field f) {
+        Ty ty = entities.get(e.name()).get(f.name());
+        if (!(ty instanceof Ty.GenericTy g && (g.kind().equals("List") || g.kind().equals("Set"))
+                && g.args().get(0) instanceof Ty.EntityTy child && identified.contains(child.name()))) {
+            throw new CheckException(where
+                    + ": @mappedBy needs a collection of identified entities, not " + ty);
+        }
+        String back = f.mappedBy().orElseThrow();
+        Ty backTy = entities.get(child.name()).get(back);
+        if (backTy == null) {
+            throw new CheckException(where + ": the child '" + child.name()
+                    + "' has no field '" + back + "'");
+        }
+        if (!(backTy instanceof Ty.EntityTy parent) || !parent.name().equals(e.name())) {
+            throw new CheckException(where + ": '" + child.name() + "." + back + "' must reference "
+                    + e.name() + " back as a plain single reference, not " + backTy);
         }
     }
 

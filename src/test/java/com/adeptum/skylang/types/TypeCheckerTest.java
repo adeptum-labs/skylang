@@ -896,6 +896,58 @@ class TypeCheckerTest {
                 """));
     }
 
+    private static String owned(String parentField, String child) {
+        return """
+                module m
+                entity Company { id Int @id  name Text  %s }
+                %s
+                service S uses db { f() -> Int  intent "x" }
+                """.formatted(parentField, child);
+    }
+
+    @Test
+    void acceptsMappedByCollectionsOfIdentifiedEntities() {
+        assertDoesNotThrow(() -> check(owned(
+                "permissions [Permission] @mappedBy(owner)",
+                "entity Permission { id Int @id  name Text  owner Company }")));
+    }
+
+    @Test
+    void rejectsMappedByNamingAMissingChildField() {
+        CheckException e = assertThrows(CheckException.class, () -> check(owned(
+                "permissions [Permission] @mappedBy(owner)",
+                "entity Permission { id Int @id  name Text }")));
+        assertTrue(e.getMessage().contains("owner"), e.getMessage());
+    }
+
+    @Test
+    void rejectsMappedByWhoseChildFieldHasTheWrongType() {
+        CheckException wrongType = assertThrows(CheckException.class, () -> check(owned(
+                "permissions [Permission] @mappedBy(owner)",
+                "entity Permission { id Int @id  owner Text }")));
+        assertTrue(wrongType.getMessage().contains("Company"), wrongType.getMessage());
+        CheckException maybeRef = assertThrows(CheckException.class, () -> check(owned(
+                "permissions [Permission] @mappedBy(owner)",
+                "entity Permission { id Int @id  owner Maybe<Company> }")));
+        assertTrue(maybeRef.getMessage().contains("Company"), maybeRef.getMessage());
+    }
+
+    @Test
+    void rejectsMappedByOnANonCollectionField() {
+        CheckException e = assertThrows(CheckException.class, () -> check(owned(
+                "boss Permission @mappedBy(owner)",
+                "entity Permission { id Int @id  owner Company }")));
+        assertTrue(e.getMessage().contains("boss"), e.getMessage());
+    }
+
+    @Test
+    void rejectsMappedByOnAComponentElementList() {
+        CheckException e = assertThrows(CheckException.class, () -> check(owned(
+                "permissions [Permission] @mappedBy(owner)",
+                "entity Permission { name Text  owner Company }")));
+        assertTrue(e.getMessage().contains("identified"), e.getMessage());
+    }
+
     @Test
     void datesArePromptableInViews() {
         assertDoesNotThrow(() -> check("""
