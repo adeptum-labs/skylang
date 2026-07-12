@@ -170,12 +170,12 @@ public final class SupportClasses {
         return effects;
     }
 
-    /** True when any entity field defaults to {@code now} — the pinnable clock is needed. */
+    /** True when any entity field defaults to {@code now} or {@code today} — the pinnable clock is needed. */
     public static boolean usesNow(Ast.Module module) {
         return module.entities().stream()
                 .flatMap(e -> e.fields().stream())
                 .anyMatch(f -> f.defaultValue().orElse(null) instanceof Ast.NameExpr n
-                        && n.name().equals("now"));
+                        && (n.name().equals("now") || n.name().equals("today")));
     }
 
     public static String mail(String pkg) {
@@ -234,8 +234,8 @@ public final class SupportClasses {
                 package %s;
 
                 /**
-                 * The clock behind '= now' field defaults. Production reads UTC; a test harness
-                 * pins it so entity construction stays deterministic.
+                 * The clock behind '= now' and '= today' field defaults. Production reads UTC;
+                 * a test harness pins it so entity construction stays deterministic.
                  */
                 public final class SkyClock {
 
@@ -246,6 +246,14 @@ public final class SupportClasses {
 
                     public static java.time.Instant now() {
                         return clock.instant();
+                    }
+
+                    public static java.time.LocalDate today() {
+                        return java.time.LocalDate.ofInstant(clock.instant(), clock.getZone());
+                    }
+
+                    public static java.time.LocalDateTime nowDateTime() {
+                        return java.time.LocalDateTime.ofInstant(clock.instant(), clock.getZone());
                     }
 
                     public static java.time.Clock current() {

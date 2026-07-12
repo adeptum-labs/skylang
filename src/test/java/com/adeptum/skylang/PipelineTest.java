@@ -1283,6 +1283,54 @@ class PipelineTest {
     }
 
     @Test
+    void todayDefaultStagesThePinnableClock(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module plan
+                entity Course { id Int @id  name Text  starts Date = today }
+                service Courses uses db {
+                  all() -> [Course]  intent "Every course."
+                }
+                """, "plan.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String skyClock = Files.readString(buildDir.resolve("src/main/java/plan/SkyClock.java"));
+        assertFalse(skyClock.contains("LocalDate.now(") || skyClock.contains("LocalDateTime.now("),
+                "the clock holder must not carry effect-linter tokens:\n" + skyClock);
+        assertTrue(Files.readString(buildDir.resolve("src/main/java/plan/Course.java"))
+                .contains("SkyClock.today()"), "the omitting constructor reads today from the clock");
+        assertTrue(Files.readString(buildDir.resolve("src/test/java/plan/TestEffects.java"))
+                .contains("Clock.fixed"), "a '= today' module pins the test clock too");
+    }
+
+    @Test
+    void nowOnDateTimeStagesTheDateTimeClockRead(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module plan
+                entity Booking { id Int @id  bookedAt DateTime = now  createdAt Instant = now }
+                service Bookings uses db {
+                  all() -> [Booking]  intent "Every booking."
+                }
+                """, "plan.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return null;"), ALWAYS_PASS).build(module,
+                root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String booking = Files.readString(buildDir.resolve("src/main/java/plan/Booking.java"));
+        assertTrue(booking.contains("SkyClock.nowDateTime()"),
+                "'= now' on a DateTime field reads the wall clock:\n" + booking);
+        assertTrue(booking.contains("SkyClock.now()"),
+                "'= now' on an Instant field keeps its original read:\n" + booking);
+    }
+
+    @Test
     void bodyOutsideItsBudgetFailsTheBuild(@TempDir Path root) {
         Ast.Module module = Parsing.parse(NOTIFY, "notify.sky");
         new TypeChecker().check(module);

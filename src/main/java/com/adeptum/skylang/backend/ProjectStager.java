@@ -325,15 +325,22 @@ public final class ProjectStager {
         for (int i = 0; i < fields.size(); i++) {
             args.append(i > 0 ? ", " : "").append(i < first
                     ? fields.get(i).name()
-                    : defaultValue(fields.get(i).defaultValue().orElseThrow(), values));
+                    : defaultValue(fields.get(i), types, values));
         }
         return "\n    public " + entity.name() + "(" + params + ") {\n"
                 + "        this(" + args + ");\n    }\n";
     }
 
-    private static String defaultValue(Ast.Expr value, java.util.Set<String> values) {
+    private static String defaultValue(Ast.Field field, Map<String, Ast.TypeDecl> types,
+                                       java.util.Set<String> values) {
+        Ast.Expr value = field.defaultValue().orElseThrow();
         if (value instanceof Ast.NameExpr n && n.name().equals("now")) {
-            return "SkyClock.now()";
+            // The checker admits 'now' on Instant and DateTime fields only.
+            return "java.time.LocalDateTime".equals(Lowering.javaType(field.type(), types))
+                    ? "SkyClock.nowDateTime()" : "SkyClock.now()";
+        }
+        if (value instanceof Ast.NameExpr n && n.name().equals("today")) {
+            return "SkyClock.today()";
         }
         return Lowering.javaValue(value, values);
     }
