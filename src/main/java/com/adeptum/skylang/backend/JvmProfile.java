@@ -27,6 +27,7 @@ import com.adeptum.skylang.types.CheckException;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -123,6 +124,30 @@ public final class JvmProfile implements Profile {
                 ? projectName + ".war" : projectName + ".jar";
         out.println("  build/" + ID + " ▸ mvn package ▸ target/" + artifact);
         return true;
+    }
+
+    /**
+     * Serve the packaged war from the staged project's own toolchain. The runner is a test-scope
+     * class on purpose: the war carries no container and no Faces implementation (they are
+     * {@code provided}/{@code test}), exactly as a war deployed to a real TomEE does not — so the
+     * artifact stays byte-for-byte what {@link #emit} shipped, and only the host comes from the
+     * test classpath.
+     */
+    @Override
+    public RunPlan runPlan(Ast.Module module, String projectName, Path buildDir, int port) {
+        if (module.views().isEmpty()) {
+            throw new CheckException(module.name() + " has no views to run");
+        }
+        Path war = buildDir.resolve("target").resolve(projectName + ".war");
+        return new RunPlan(
+                List.of("mvn", "-B", "test-compile", "exec:java",
+                        "-Dexec.mainClass=" + module.name() + ".RunServer",
+                        "-Dexec.classpathScope=test",
+                        "-Dexec.args=" + port + " " + war),
+                buildDir,
+                war,
+                "SKY RUNNING app=",
+                "/");
     }
 
     @Override

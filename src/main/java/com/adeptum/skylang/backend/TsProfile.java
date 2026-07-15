@@ -172,6 +172,12 @@ public final class TsProfile implements Profile {
         return new com.adeptum.skylang.verify.NodeVerifier();
     }
 
+    /** The profile carries no interface library, so it has nothing to bring up in a browser. */
+    @Override
+    public RunPlan runPlan(Ast.Module module, String projectName, Path buildDir, int port) {
+        throw notYet("running the emitted app");
+    }
+
     @Override
     public boolean emit(String projectName, Path buildDir, java.io.PrintStream out) {
         String tsc = System.getenv().getOrDefault("SKY_TSC", "tsc");

@@ -794,6 +794,7 @@ Two invariants hold the design together:
 | `sky onboard`       | Configure the provider, model, reasoning effort, and key; writes `~/.sky/config` | no |
 | `sky check`         | Hard-layer type + contract check only; no synthesis (fast, offline)     | no |
 | `sky build`         | Type-check, synthesize/verify unfrozen bodies, emit the target artifact | only on a cache miss |
+| `sky run`           | Build, then serve the emitted artifact in a browser (default port 8080) | only on a cache miss |
 | `sky preview`       | Serve the module's views live in a browser studio (default port 4599)   | no |
 | `sky tdd`           | Watch mode: on a new/edited failing test, regenerate just that method until its tests + contracts are green, then freeze — the red→generate→green loop made native | yes |
 | `sky freeze`        | Force-regenerate and re-verify all bodies, rewriting `sky.lock`         | yes |
@@ -805,6 +806,13 @@ Every command answers `--help` (`-h`). `sky check` is the fast inner-loop comman
 everything in the hard layer (types, refinements, effects, contract well-formedness) without
 touching the model, so editing signatures stays instant. A model is contacted only when a body
 genuinely has to be generated; everything that reads the sources or the frozen lock is offline.
+
+`sky run` and `sky preview` answer different questions. Preview serves the views inside a studio,
+where they can be reshaped in natural language. Run brings up the application itself: the artifact
+`sky build` emits, deployed to a container and opened at its front door — the module's first
+declared view. Saving the source rebuilds and relaunches it; a rebuild that fails leaves the
+running application alone. `sky run --skip-build` serves the artifact already in the build
+directory, which is fast but may be stale.
 
 The active profile is declared in `sky.project` (§11) and shown in the `sky build` output.
 

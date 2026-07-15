@@ -21,6 +21,7 @@
 
 package com.adeptum.skylang.preview;
 
+import com.adeptum.skylang.Browser;
 import com.adeptum.skylang.Pipeline;
 import com.adeptum.skylang.Ticker;
 import com.adeptum.skylang.backend.Profile;
@@ -159,7 +160,7 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
         String url = "http://localhost:" + handle.studioPort() + "/";
         out.println("preview ready — " + url
                 + "  (edit in the browser or the file; close the window or Ctrl-C to stop)");
-        openBrowser(url, out);
+        Browser.open(url, out);
 
         Thread watcher = new Thread(() -> watch(sourceFile), "sky-preview-watch");
         watcher.setDaemon(true);
@@ -346,17 +347,5 @@ public final class PreviewSession implements EditHandler, AutoCloseable {
 
     private static List<String> viewNames(Ast.Module module) {
         return module.views().stream().map(Ast.View::name).toList();
-    }
-
-    private static void openBrowser(String url, PrintStream out) {
-        String os = System.getProperty("os.name", "").toLowerCase();
-        List<String> command = os.contains("mac") ? List.of("open", url)
-                : os.contains("win") ? List.of("cmd", "/c", "start", "", url)
-                : List.of("xdg-open", url);
-        try {
-            new ProcessBuilder(command).start();
-        } catch (IOException e) {
-            out.println("(open " + url + " in your browser)");
-        }
     }
 }

@@ -9,4 +9,7 @@ build/
 # Shade plugin side-output
 dependency-reduced-pom.xml
 
+# Local tooling scratch space
+.claude/
+
 # NOTE: sky.lock is intentionally NOT ignored — it is the freeze store and must be committed.

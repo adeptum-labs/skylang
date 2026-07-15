@@ -64,7 +64,27 @@ public final class FacesViewStager {
                 <servlet-name>Faces Servlet</servlet-name>
                 <url-pattern>*.xhtml</url-pattern>
               </servlet-mapping>
+              <welcome-file-list>
+                <welcome-file>index.html</welcome-file>
+              </welcome-file-list>
             </web-app>
+            """;
+
+    /**
+     * The application's front door: the root URL sends the browser on to the module's first
+     * declared view. Staged into the webapp, so the emitted artifact has it too — a deployed war
+     * answers {@code /} the same way {@code sky run} does.
+     */
+    private static final String INDEX_HTML = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8"/>
+              <meta http-equiv="refresh" content="0; url=%1$s.xhtml"/>
+              <title>%1$s</title>
+            </head>
+            <body><a href="%1$s.xhtml">%1$s</a></body>
+            </html>
             """;
 
     private static final String BEANS_XML = """
@@ -93,6 +113,8 @@ public final class FacesViewStager {
             Files.createDirectories(visual);
             Files.writeString(webInf.resolve("web.xml"), WEB_XML);
             Files.writeString(webInf.resolve("beans.xml"), BEANS_XML);
+            Files.writeString(webapp.resolve("index.html"),
+                    INDEX_HTML.formatted(module.views().get(0).name()));
 
             for (Ast.View view : module.views()) {
                 UiArtifact artifact = views.get(view.name());
@@ -129,6 +151,7 @@ public final class FacesViewStager {
             Files.writeString(test.resolve("ViewsRenderTest.java"), renderTest(pkg, module));
             Files.writeString(test.resolve("ViewsInteractionTest.java"), interactionTest(pkg, module));
             Files.writeString(test.resolve("PreviewServer.java"), PREVIEW_SERVER.formatted(pkg));
+            Files.writeString(test.resolve("RunServer.java"), RUN_SERVER.formatted(pkg));
         } catch (IOException e) {
             throw new UncheckedIOException("cannot stage web layer under " + buildDir, e);
         }
@@ -535,6 +558,116 @@ public final class FacesViewStager {
                     System.out.println("PREVIEW READY app=" + port);
                     System.out.flush();
                     new CountDownLatch(1).await();
+                }
+            }
+            """;
+
+    /**
+     * The {@code sky run} server: an embedded TomEE serving the packaged war at the root context.
+     * It unpacks the artifact rather than reading the staged tree, so what is served is the war
+     * {@code mvn package} produced, byte for byte.
+     */
+    private static final String RUN_SERVER = """
+            package %s;
+
+            import org.apache.tomee.embedded.Configuration;
+            import org.apache.tomee.embedded.Container;
+
+            import java.io.IOException;
+            import java.nio.file.Files;
+            import java.nio.file.Path;
+            import java.util.concurrent.CountDownLatch;
+            import java.util.zip.ZipEntry;
+            import java.util.zip.ZipInputStream;
+
+            import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
+
+            /** Serves the packaged war at the server root for `sky run`. */
+            public final class RunServer {
+
+                public static void main(String[] args) throws Exception {
+                    int port = Integer.parseInt(args[0]);
+                    Path war = Path.of(args[1]);
+                    if (!Files.exists(war)) {
+                        fail("no artifact at " + war);
+                    }
+
+                    Configuration configuration = new Configuration();
+                    configuration.setHttpPort(port);
+                    Container container = null;
+                    Path webapp = null;
+                    try {
+                        webapp = explode(war);
+                        container = new Container(configuration);
+                        container.deploy("", webapp.toFile());
+                    } catch (Exception e) {
+                        if (container != null) {
+                            try {
+                                container.close();
+                            } catch (Exception ignored) {
+                            }
+                        }
+                        fail("could not serve " + war.getFileName() + " on port " + port + ": " + e);
+                    }
+
+                    Container serving = container;
+                    Path unpacked = webapp;
+                    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                        try {
+                            serving.close();
+                        } catch (Exception ignored) {
+                        }
+                        // Each launch unpacks its own copy of the webapp; a session that reloads
+                        // all afternoon must not leave one behind every time.
+                        deleteTree(unpacked.getParent());
+                    }));
+
+                    System.out.println("SKY RUNNING app=" + port);
+                    System.out.flush();
+                    new CountDownLatch(1).await();
+                }
+
+                /**
+                 * Unpack the war into a temp directory — the container serves it exploded. The
+                 * directory name is the context path, not the argument to deploy(), so the
+                 * webapp must be called ROOT: Tomcat's own name for the root context.
+                 */
+                private static Path explode(Path war) throws IOException {
+                    Path dir = Files.createTempDirectory("sky-run").resolve("ROOT");
+                    Files.createDirectories(dir);
+                    try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(war))) {
+                        for (ZipEntry entry; (entry = zip.getNextEntry()) != null; ) {
+                            Path target = dir.resolve(entry.getName()).normalize();
+                            if (!target.startsWith(dir)) {
+                                throw new IOException("unsafe war entry: " + entry.getName());
+                            }
+                            if (entry.isDirectory()) {
+                                Files.createDirectories(target);
+                            } else {
+                                Files.createDirectories(target.getParent());
+                                Files.copy(zip, target, REPLACE_EXISTING);
+                            }
+                        }
+                    }
+                    return dir;
+                }
+
+                private static void deleteTree(Path dir) {
+                    try (var walk = Files.walk(dir)) {
+                        walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                            try {
+                                Files.deleteIfExists(p);
+                            } catch (IOException ignored) {
+                            }
+                        });
+                    } catch (IOException ignored) {
+                    }
+                }
+
+                private static void fail(String message) {
+                    System.out.println("SKY RUN ERROR " + message);
+                    System.out.flush();
+                    System.exit(1);
                 }
             }
             """;

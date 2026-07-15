@@ -273,6 +273,10 @@ class PipelineTest {
             }
             public Verifier verifier() { return ALWAYS_PASS; }
             public boolean emit(String projectName, Path dir, java.io.PrintStream out) { return true; }
+            public com.adeptum.skylang.backend.RunPlan runPlan(Ast.Module module, String projectName,
+                                                              Path dir, int port) {
+                throw new UnsupportedOperationException("the fake target does not serve its artifact");
+            }
             public String systemPrompt() { return prompts.system(); }
             public String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method,
                                      List<com.adeptum.skylang.deps.Resolved> deps) {
@@ -873,6 +877,25 @@ class PipelineTest {
         assertTrue(Files.readString(buildDir.resolve("src/main/java/shop/Product.java")).contains("getName"),
                 "web-profile entities need JavaBean getters so Faces EL can read them");
         assertTrue(Files.readString(buildDir.resolve("pom.xml")).contains("tomee-embedded"), "a web POM should be staged");
+    }
+
+    /** What `sky run` needs is staged into the project itself, so the emitted war has a front door too. */
+    @Test
+    void stagesTheFrontDoorAndTheRunServer(@TempDir Path root) throws Exception {
+        Ast.Module module = checkedViewModule();
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        new Pipeline(routingStub(VIEW_REPLY), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        String index = Files.readString(buildDir.resolve("src/main/webapp/index.html"));
+        assertTrue(index.contains("url=ProductList.xhtml"),
+                "the root should send the browser to the first declared view: " + index);
+        assertTrue(Files.readString(buildDir.resolve("src/main/webapp/WEB-INF/web.xml"))
+                        .contains("<welcome-file>index.html</welcome-file>"),
+                "and the container should know to serve it");
+        assertTrue(Files.exists(buildDir.resolve("src/test/java/shop/RunServer.java")),
+                "the server that hosts the packaged war should be staged");
     }
 
     @Test

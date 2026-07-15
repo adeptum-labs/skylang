@@ -188,7 +188,8 @@ to the `java` block when a native body is the culprit.
 The `sky` command line is a small set of focused commands, and every project command runs
 bare inside a project directory (the sole `.sky` file is the source): `check` (offline
 hard-layer checkpoint), `build` (full pipeline, ending in `build/jvm-jakarta ▸ mvn package ▸
-target/shop.jar`; `--recheck` is the offline CI form), `tdd` (watch-mode generation),
+target/shop.jar`; `--recheck` is the offline CI form), `run` (build, then serve that artifact
+in a browser), `tdd` (watch-mode generation),
 `preview` (live view studio), `freeze` (deliberate full regeneration), `clean` (delete the
 disposable staged project; the lock is untouched), `why` (explain one method — `sky why
 Catalog.restock` prints its spec, `frozen @ <hash> (Java, N lines)` and its verified
@@ -377,4 +378,4 @@ build needs none.
 | `.../freeze/` | `sky.lock` read/write + spec hashing |
 | `.../backend/` | JVM profile: type/expression lowering + project stager |
 | `.../Pipeline.java` | orchestrates synthesize → stage → verify → freeze |
-| `.../cli/` | picocli commands: `onboard`, `check`, `build`, `preview`, `tdd`, `freeze`, `why`, `test`, `clean` |
+| `.../cli/` | picocli commands: `onboard`, `check`, `build`, `run`, `preview`, `tdd`, `freeze`, `why`, `test`, `clean` |

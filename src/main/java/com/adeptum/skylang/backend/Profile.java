@@ -74,6 +74,12 @@ public interface Profile {
      */
     boolean emit(String projectName, Path buildDir, java.io.PrintStream out);
 
+    /**
+     * How to serve the artifact {@link #emit} produced, on {@code port} — what {@code sky run}
+     * executes. A profile that cannot host its own artifact rejects the request outright.
+     */
+    RunPlan runPlan(Ast.Module module, String projectName, Path buildDir, int port);
+
     String systemPrompt();
 
     String userPrompt(Ast.Module module, Ast.Service service, Ast.Method method, List<Resolved> deps);
