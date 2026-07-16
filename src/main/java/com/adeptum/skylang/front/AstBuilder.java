@@ -518,6 +518,16 @@ public final class AstBuilder {
                 ? Optional.empty()
                 : Optional.of(ctx.ID(ctx.ID().size() - 1).getText());
         String label = unquote(ctx.STRING().getText());
+        if (t.IN() != null) {
+            // "sign in [then page X]": the only target with the IN keyword; check it before
+            // the plain PAGE branch, whose token the optional then-clause shares.
+            requireSignTarget(t, t.ID(0).getText().equals("sign"));
+            Optional<String> thenPage = t.PAGE() != null
+                    ? Optional.of(t.ID(1).getText())
+                    : Optional.empty();
+            return new Ast.Action(label, rowVar, "", "", List.of(),
+                    thenPage, Optional.empty(), Optional.of("in"));
+        }
         if (t.PAGE() != null) {
             return new Ast.Action(label, rowVar, "", "", List.of(),
                     Optional.of(t.ID(0).getText()));
@@ -526,11 +536,26 @@ public final class AstBuilder {
             return new Ast.Action(label, rowVar, "", "", List.of(),
                     Optional.empty(), Optional.of(t.ID(0).getText()));
         }
+        if (t.DOT() == null) {
+            // Two bare words: only "sign out" means anything.
+            requireSignTarget(t, t.ID(0).getText().equals("sign") && t.ID(1).getText().equals("out"));
+            return new Ast.Action(label, rowVar, "", "", List.of(),
+                    Optional.empty(), Optional.empty(), Optional.of("out"));
+        }
         List<Ast.ActionArg> args = new ArrayList<>();
         for (SkyLangParser.ActionArgContext a : t.actionArg()) {
             args.add(actionArg(a));
         }
         return new Ast.Action(label, rowVar, t.ID(0).getText(), t.ID(1).getText(), args);
+    }
+
+    /** A bare action target must read "sign in" or "sign out"; anything else is a typo. */
+    private static void requireSignTarget(SkyLangParser.ActionTargetContext t, boolean wellFormed) {
+        if (!wellFormed) {
+            throw new SkyParseException("unknown action target '" + t.getText()
+                    + "' — expected Service.method(...), page <Name>, flow <Name>,"
+                    + " sign in, or sign out");
+        }
     }
 
     private Ast.ActionArg actionArg(SkyLangParser.ActionArgContext ctx) {

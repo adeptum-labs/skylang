@@ -232,6 +232,29 @@ class UiPromptBuilderTest {
     }
 
     @Test
+    void userPromptPrescribesSignButtonsOnTheSecurityHandle() {
+        Ast.Module m = Parsing.parse("""
+                module id
+                entity Account { id Int  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>  intent "Who is signed in."
+                }
+                view Dashboard at "/home" {
+                  shows Session.current() as a summary of (email)
+                }
+                page Login at "/" {
+                  shows Session.current() as a summary of (email)
+                  action "Logga in med Google" -> sign in then page Dashboard
+                  action "Logga ut" -> sign out
+                }
+                """, "id.sky");
+        String user = prompts.user(m, m.views().get(1));
+        assertTrue(user.contains("skySecurity.signIn(\"Dashboard\")"), user);
+        assertTrue(user.contains("skySecurity.signOut()"), user);
+        assertTrue(user.contains("#{bean.signIn}") && user.contains("#{bean.signOut}"), user);
+    }
+
+    @Test
     void userPromptDescribesAppearance() {
         Ast.Module m = Parsing.parse(SRC, "shop.sky");
         Ast.View view = m.views().get(0);

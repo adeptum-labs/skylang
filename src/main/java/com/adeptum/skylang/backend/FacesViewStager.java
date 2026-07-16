@@ -164,12 +164,14 @@ public final class FacesViewStager {
      */
     private static String renderTest(String pkg, Ast.Module module) {
         StringBuilder methods = new StringBuilder();
-        if (showsAuthBackedQuery(module)) {
-            // Seeded before any container boot: the property crosses the webapp classloader,
-            // so the deployed SkyAuth sees a present principal and the signed-in state renders.
+        if (showsAuthBackedQuery(module) || SupportClasses.signActions(module)) {
+            // Seeded before any container boot: the properties cross the webapp classloader,
+            // so the deployed SkyAuth sees a present principal, the signed-in state renders,
+            // and a clicked sign action stays on the pinned holder instead of a provider.
             methods.append("\n    static {\n")
                     .append("        System.setProperty(\"sky.auth.principal\",")
-                    .append(" \"sky-test-subject|test@example.sky|Test User\");\n    }\n");
+                    .append(" \"sky-test-subject|test@example.sky|Test User\");\n")
+                    .append("        System.setProperty(\"sky.auth.mode\", \"pinned\");\n    }\n");
         }
         for (Ast.View view : module.views()) {
             String lower = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1);
@@ -302,6 +304,14 @@ public final class FacesViewStager {
     private static String interactionTest(String pkg, Ast.Module module) {
         Map<String, Ast.TypeDecl> types = Lowering.typesOf(module);
         StringBuilder methods = new StringBuilder();
+        if (showsAuthBackedQuery(module) || SupportClasses.signActions(module)) {
+            // Same seeding as the render lane: a present principal, and sign actions pinned
+            // so a click never leaves the container.
+            methods.append("\n    static {\n")
+                    .append("        System.setProperty(\"sky.auth.principal\",")
+                    .append(" \"sky-test-subject|test@example.sky|Test User\");\n")
+                    .append("        System.setProperty(\"sky.auth.mode\", \"pinned\");\n    }\n");
+        }
         for (Ast.View view : module.views()) {
             String lower = Character.toLowerCase(view.name().charAt(0)) + view.name().substring(1);
             methods.append("\n    @Test\n    void ").append(lower).append("Interacts() throws Exception {\n");

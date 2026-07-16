@@ -185,6 +185,8 @@ actionTarget
     : ID DOT ID LPAREN (actionArg (COMMA actionArg)*)? RPAREN  // Catalog.restock(row.id, ask Int)
     | PAGE ID                                                  // page ProductList
     | FLOW ID                                                  // flow Checkout
+    | ID IN (THEN PAGE ID)?                                    // sign in [then page Dashboard]
+    | ID ID                                                    // sign out
     ;
 actionArg    : expr | (ASK | PROMPT) type ;                          // row.id | ask Int | prompt Int
 

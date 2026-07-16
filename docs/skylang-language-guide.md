@@ -388,6 +388,10 @@ page ProductList at "/products" {
   step must be bound to a page (`step Cart -> page CartPage`), and the render is verified to
   navigate there. Entering a flow from a page promotes the flow's `page <Name>` targets — in
   steps and transitions alike — from prose to checked references: each must name a declared page.
+- `action "Label" -> sign in [then page <Name>]` and `action "Label" -> sign out` — drive the
+  auth effect (§10.2): sign-in hands the request to the deployment's identity mechanism and
+  lands on the named page; sign-out ends the session. Both require a service that `uses auth`,
+  and the render is verified to carry a button driving them.
 - `param <name> <Type>` declares a request parameter (Bool-, Int-, or Text-based, e.g. a `Slug`
   for the tenant) the page receives in its URL. Params type-check as `shows`/action arguments,
   and `appears <subject> when <condition>` renders a subject conditionally on them — verified by
@@ -580,9 +584,18 @@ flow Checkout {
   `currentPrincipal() -> Maybe<Principal>` (subject, email, display name). Verification pins a
   **present** principal — generated tests through `TestEffects.auth()`, the render lane through
   a system-property seed — so a page whose controls depend on the signed-in state is verifiable.
-  The production binding (e.g. OpenID Connect) replaces only the effect's producer and is not
-  yet shipped; one limitation of the present-by-default test principal: a pure-auth method with
-  a `-> nothing` example cannot pass, since nothing makes the principal absent per-example.
+  One limitation of the present-by-default test principal: a pure-auth method with a
+  `-> nothing` example cannot pass, since nothing makes the principal absent per-example.
+
+  The production binding ships with the sign actions: a page declaring
+  `action "Logga in med Google" -> sign in then page Dashboard` (and `-> sign out`) stages the
+  standard Jakarta Security OpenID Connect mechanism plus a `SkySecurity` handle the page's
+  bean drives, and the `Auth` producer switches to the container's identity. Provider and
+  credentials come from the deployment environment — `SKY_OIDC_PROVIDER`,
+  `SKY_OIDC_CLIENT_ID`, `SKY_OIDC_CLIENT_SECRET` — never from the specification. The offline
+  lanes run with `sky.auth.mode=pinned`, where signing in/out just pins or clears the seeded
+  principal, so no build ever contacts an identity provider; the handshake itself is a
+  deployment concern, the same trust boundary as the `db` producer's real database.
 
 The same two-layer rule holds: you declare the shape and the guarantees; the generator fills
 the wiring; the contracts verify it.

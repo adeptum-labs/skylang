@@ -125,9 +125,17 @@ public final class ViewVerifier {
                         + " (h:graphicImage bound to " + field + "DataUri)");
             }
         }
-        // A navigation action must be a real navigation control whose outcome names its target —
-        // the page itself, or the entered flow's entry page.
+        // A sign action posts to the security handle; a navigation action must be a real
+        // navigation control whose outcome names its target — the page itself, or the
+        // entered flow's entry page.
         for (Ast.Action a : view.actions()) {
+            if (a.signTarget().isPresent()) {
+                if (!tree.hasButton(a.label())) {
+                    unmet.add("expected a button labelled \"" + a.label()
+                            + "\" driving sign-" + a.signTarget().get());
+                }
+                continue;
+            }
             String target = a.pageTarget()
                     .or(() -> a.flowTarget().flatMap(f -> entryPageOf(module, f)))
                     .orElse(null);

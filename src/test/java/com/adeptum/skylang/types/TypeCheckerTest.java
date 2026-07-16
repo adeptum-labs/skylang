@@ -535,6 +535,54 @@ class TypeCheckerTest {
         assertTrue(e.getMessage().contains("Done"), e.getMessage());
     }
 
+    private static String withAuthView(String uses, String view) {
+        return """
+                module id
+                entity Account { id Int  email Text }
+                service Session %s {
+                  current() -> Maybe<Account>  intent "Who is signed in."
+                }
+                %s
+                """.formatted(uses, view);
+    }
+
+    @Test
+    void acceptsSignActionsWhenTheAuthEffectIsBound() {
+        assertDoesNotThrow(() -> check(withAuthView("uses auth", """
+                view Dashboard at "/home" {
+                  shows  Session.current() as a summary of (email)
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                  action "Logga in med Google" -> sign in then page Dashboard
+                  action "Logga ut" -> sign out
+                }
+                """)));
+    }
+
+    @Test
+    void rejectsSignActionsWithoutTheAuthEffect() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withAuthView("", """
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                  action "Logga in med Google" -> sign in
+                }
+                """)));
+        assertTrue(e.getMessage().contains("uses auth"), e.getMessage());
+    }
+
+    @Test
+    void rejectsSignInThenAnUndeclaredPage() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withAuthView("uses auth", """
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                  action "Logga in med Google" -> sign in then page Dashboard
+                }
+                """)));
+        assertTrue(e.getMessage().contains("no page"), e.getMessage());
+        assertTrue(e.getMessage().contains("Dashboard"), e.getMessage());
+    }
+
     @Test
     void rejectsViewUnknownColumn() {
         CheckException e = assertThrows(CheckException.class, () -> check(withView("""

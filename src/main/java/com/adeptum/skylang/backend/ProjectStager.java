@@ -88,10 +88,16 @@ public final class ProjectStager {
                 Files.writeString(main.resolve("Http.java"), SupportClasses.http(pkg));
                 Files.writeString(main.resolve("JdkHttp.java"), SupportClasses.jdkHttp(pkg));
             }
+            boolean signActions = SupportClasses.signActions(module);
             if (effects.contains("auth")) {
                 Files.writeString(main.resolve("Auth.java"), SupportClasses.auth(pkg));
                 Files.writeString(main.resolve("Principal.java"), SupportClasses.principal(pkg));
                 Files.writeString(main.resolve("SkyAuth.java"), SupportClasses.skyAuth(pkg));
+            }
+            if (signActions) {
+                Files.writeString(main.resolve("SkySecurity.java"), SupportClasses.skySecurity(pkg));
+                Files.writeString(main.resolve("OidcConfig.java"), SupportClasses.oidcConfig(pkg));
+                Files.writeString(main.resolve("OpenidConfig.java"), SupportClasses.openidConfig(pkg));
             }
             if (usesNow) {
                 Files.writeString(main.resolve("SkyClock.java"), SupportClasses.skyClock(pkg));
@@ -100,7 +106,8 @@ public final class ProjectStager {
                 new JpaStager().stage(module, buildDir);
             }
             if (!module.views().isEmpty() && !effects.isEmpty()) {
-                Files.writeString(main.resolve("Effects.java"), SupportClasses.effectProducers(pkg, effects));
+                Files.writeString(main.resolve("Effects.java"),
+                        SupportClasses.effectProducers(pkg, effects, signActions));
             }
             if (!effects.isEmpty() || usesNow) {
                 Files.writeString(test.resolve("TestEffects.java"),

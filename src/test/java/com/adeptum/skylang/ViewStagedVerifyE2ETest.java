@@ -209,6 +209,100 @@ class ViewStagedVerifyE2ETest {
                 + out.toString(StandardCharsets.UTF_8));
     }
 
+    // The shape of Fikus's Login page: an auth-backed summary with sign-in/out actions.
+    private static final String SIGN_VIEW = """
+            module id
+            entity Account { id Int @id  email Text }
+            service Session uses auth {
+              current() -> Maybe<Account>  intent "The signed-in account, if any."
+            }
+            view Dashboard at "/home" {
+              shows Session.current() as a summary of (email)
+            }
+            page Login at "/" {
+              shows  Session.current() as a summary of (email)
+              action "Logga in med Google" -> sign in then page Dashboard
+              action "Logga ut" -> sign out
+            }
+            """;
+
+    private static final String SIGN_LOGIN_REPLY = """
+            ```xhtml
+            <h:form id="f">
+              <h:panelGrid id="branding" columns="1">
+                <h:outputText value="#{loginBean.email}"/>
+              </h:panelGrid>
+              <h:commandButton value="Logga in med Google" action="#{loginBean.signIn}"/>
+              <h:commandButton value="Logga ut" action="#{loginBean.signOut}"/>
+            </h:form>
+            ```
+            ```java
+            @jakarta.inject.Named
+            @jakarta.faces.view.ViewScoped
+            public class LoginBean implements java.io.Serializable {
+                @jakarta.inject.Inject
+                Session session;
+
+                @jakarta.inject.Inject
+                SkySecurity skySecurity;
+
+                public String getEmail() {
+                    return session.current().map(Account::email).orElse("");
+                }
+
+                public String signIn() {
+                    return skySecurity.signIn("Dashboard");
+                }
+
+                public String signOut() {
+                    return skySecurity.signOut();
+                }
+            }
+            ```
+            """;
+
+    private static final String SIGN_DASHBOARD_REPLY = """
+            ```xhtml
+            <h:form id="f">
+              <h:panelGrid id="who" columns="1">
+                <h:outputText value="#{dashboardBean.email}"/>
+              </h:panelGrid>
+            </h:form>
+            ```
+            ```java
+            @jakarta.inject.Named
+            @jakarta.faces.view.ViewScoped
+            public class DashboardBean implements java.io.Serializable {
+                @jakarta.inject.Inject
+                Session session;
+
+                public String getEmail() {
+                    return session.current().map(Account::email).orElse("");
+                }
+            }
+            ```
+            """;
+
+    @Test
+    void signActionLoginStagesAndRendersOffline(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(SIGN_VIEW, "id.sky");
+        new TypeChecker().check(module);
+
+        StubLlm stub = new StubLlm((system, user) -> {
+            if (!system.contains("UI-synthesis")) {
+                return "return java.util.Optional.empty();";
+            }
+            return user.contains("view Login") ? SIGN_LOGIN_REPLY : SIGN_DASHBOARD_REPLY;
+        });
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(stub, new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "sign-action render verification failed:\n"
+                + out.toString(StandardCharsets.UTF_8));
+    }
+
     @Test
     void dbBackedViewRendersInContainer(@TempDir Path root) {
         Ast.Module module = Parsing.parse(STORE_VIEW, "store.sky");

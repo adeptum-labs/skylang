@@ -290,6 +290,148 @@ public final class SupportClasses {
                 """.formatted(pkg);
     }
 
+    /** True when any view action signs in or out — the trigger for staging the security lane. */
+    public static boolean signActions(Ast.Module module) {
+        return module.views().stream()
+                .flatMap(v -> v.actions().stream())
+                .anyMatch(a -> a.signTarget().isPresent());
+    }
+
+    public static String skySecurity(String pkg) {
+        return """
+                package %s;
+
+                /**
+                 * Drives the auth effect from the interface layer: sign-in hands the request to the
+                 * container's OpenID mechanism and sign-out ends the session. Under
+                 * 'sky.auth.mode=pinned' (the offline verification lanes) both act on the pinned
+                 * SkyAuth holder instead, so a build never contacts an identity provider.
+                 */
+                @jakarta.inject.Named("skySecurity")
+                @jakarta.enterprise.context.RequestScoped
+                public class SkySecurity {
+
+                    public String signIn(String outcome) {
+                        if (pinned()) {
+                            SkyAuth.pin(java.util.Optional.of(
+                                    new Principal("sky-dev-subject", "dev@example.sky", "Dev User")));
+                            return outcome == null || outcome.isBlank()
+                                    ? null
+                                    : outcome + "?faces-redirect=true";
+                        }
+                        jakarta.faces.context.FacesContext faces =
+                                jakarta.faces.context.FacesContext.getCurrentInstance();
+                        jakarta.security.enterprise.SecurityContext security =
+                                jakarta.enterprise.inject.spi.CDI.current()
+                                        .select(jakarta.security.enterprise.SecurityContext.class).get();
+                        security.authenticate(
+                                (jakarta.servlet.http.HttpServletRequest) faces.getExternalContext().getRequest(),
+                                (jakarta.servlet.http.HttpServletResponse) faces.getExternalContext().getResponse(),
+                                jakarta.security.enterprise.authentication.mechanism.http.AuthenticationParameters
+                                        .withParams().newAuthentication(true));
+                        faces.responseComplete();
+                        return null;
+                    }
+
+                    public String signOut() {
+                        if (pinned()) {
+                            SkyAuth.pin(java.util.Optional.empty());
+                            return null;
+                        }
+                        jakarta.faces.context.FacesContext faces =
+                                jakarta.faces.context.FacesContext.getCurrentInstance();
+                        try {
+                            ((jakarta.servlet.http.HttpServletRequest) faces.getExternalContext().getRequest())
+                                    .logout();
+                        } catch (jakarta.servlet.ServletException e) {
+                            throw new IllegalStateException("sign-out failed", e);
+                        }
+                        faces.getExternalContext().invalidateSession();
+                        return null;
+                    }
+
+                    /** The principal: the pinned holder under test, else the container's identity. */
+                    public static java.util.Optional<Principal> currentPrincipal() {
+                        if (pinned()) {
+                            return SkyAuth.current();
+                        }
+                        jakarta.security.enterprise.SecurityContext security =
+                                jakarta.enterprise.inject.spi.CDI.current()
+                                        .select(jakarta.security.enterprise.SecurityContext.class).get();
+                        java.security.Principal caller = security.getCallerPrincipal();
+                        if (caller == null) {
+                            return java.util.Optional.empty();
+                        }
+                        String email = "";
+                        String name = caller.getName();
+                        try {
+                            var openid = jakarta.enterprise.inject.spi.CDI.current()
+                                    .select(jakarta.security.enterprise.identitystore.openid.OpenIdContext.class)
+                                    .get();
+                            email = openid.getClaims().getEmail().orElse("");
+                            name = openid.getClaims().getName().orElse(name);
+                        } catch (RuntimeException e) {
+                            // No OpenID session behind this caller: the container name suffices.
+                        }
+                        return java.util.Optional.of(new Principal(caller.getName(), email, name));
+                    }
+
+                    private static boolean pinned() {
+                        return "pinned".equals(System.getProperty("sky.auth.mode", ""));
+                    }
+                }
+                """.formatted(pkg);
+    }
+
+    public static String oidcConfig(String pkg) {
+        return """
+                package %s;
+
+                /**
+                 * Binds the container's OpenID Connect mechanism behind the sign-in action. All
+                 * values resolve through EL against the environment-backed openidConfig bean, so
+                 * nothing secret is ever staged.
+                 */
+                @jakarta.security.enterprise.authentication.mechanism.http.OpenIdAuthenticationMechanismDefinition(
+                        providerURI = "${openidConfig.providerUri}",
+                        clientId = "${openidConfig.clientId}",
+                        clientSecret = "${openidConfig.clientSecret}",
+                        redirectURI = "${baseURL}/callback")
+                @jakarta.enterprise.context.ApplicationScoped
+                public class OidcConfig {
+                }
+                """.formatted(pkg);
+    }
+
+    public static String openidConfig(String pkg) {
+        return """
+                package %s;
+
+                /** OpenID settings read from the environment at deployment time — never the spec. */
+                @jakarta.inject.Named("openidConfig")
+                @jakarta.enterprise.context.ApplicationScoped
+                public class OpenidConfig {
+
+                    public String getProviderUri() {
+                        return env("SKY_OIDC_PROVIDER");
+                    }
+
+                    public String getClientId() {
+                        return env("SKY_OIDC_CLIENT_ID");
+                    }
+
+                    public String getClientSecret() {
+                        return env("SKY_OIDC_CLIENT_SECRET");
+                    }
+
+                    private static String env(String name) {
+                        String value = System.getenv(name);
+                        return value == null ? "" : value;
+                    }
+                }
+                """.formatted(pkg);
+    }
+
     public static String skyClock(String pkg) {
         return """
                 package %s;
@@ -330,6 +472,11 @@ public final class SupportClasses {
 
     /** CDI producers binding the declared effects for the web profile. */
     public static String effectProducers(String pkg, Set<String> effects) {
+        return effectProducers(pkg, effects, false);
+    }
+
+    /** As above; with sign actions the auth producer reads the security handle instead. */
+    public static String effectProducers(String pkg, Set<String> effects, boolean signActions) {
         StringBuilder sb = new StringBuilder();
         sb.append("package ").append(pkg).append(";\n\n");
         sb.append("/** Binds each declared effect for the deployed application. */\n");
@@ -386,15 +533,28 @@ public final class SupportClasses {
                     """);
         }
         if (effects.contains("auth")) {
-            // SkyAuth backs the binding; a real mechanism (OIDC) later replaces this producer only.
-            sb.append("""
+            if (signActions) {
+                // The interface drives sign-in/out, so the principal comes from the security
+                // handle: the container's OpenID identity in production, the pin under test.
+                sb.append("""
 
-                        @jakarta.enterprise.inject.Produces
-                        @jakarta.enterprise.context.ApplicationScoped
-                        public Auth auth() {
-                            return SkyAuth::current;
-                        }
-                    """);
+                            @jakarta.enterprise.inject.Produces
+                            @jakarta.enterprise.context.ApplicationScoped
+                            public Auth auth() {
+                                return SkySecurity::currentPrincipal;
+                            }
+                        """);
+            } else {
+                // SkyAuth backs the binding; sign actions later replace this producer only.
+                sb.append("""
+
+                            @jakarta.enterprise.inject.Produces
+                            @jakarta.enterprise.context.ApplicationScoped
+                            public Auth auth() {
+                                return SkyAuth::current;
+                            }
+                        """);
+            }
         }
         sb.append("}\n");
         return sb.toString();

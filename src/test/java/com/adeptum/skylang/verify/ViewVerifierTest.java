@@ -250,6 +250,33 @@ class ViewVerifierTest {
                 """, "shop.sky");
     }
 
+    private static Ast.View signView() {
+        return Parsing.parse("""
+                module id
+                entity Account { id Int  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>  intent "Who is signed in."
+                }
+                view Dashboard at "/home" {
+                  shows Session.current() as a summary of (email)
+                }
+                page Login at "/" {
+                  shows Session.current() as a summary of (email)
+                  action "Logga in med Google" -> sign in then page Dashboard
+                }
+                """, "id.sky").views().get(1);
+    }
+
+    @Test
+    void aSignActionIsSatisfiedByACommandButtonNotAnOutcome() {
+        String markup = "<h:commandButton value=\"Logga in med Google\" action=\"#{bean.signIn}\"/>";
+        assertTrue(verifier.unmetExpectations(signView(), markup).isEmpty());
+
+        List<String> unmet = verifier.unmetExpectations(signView(), "<h:outputText value=\"x\"/>");
+        assertEquals(1, unmet.size());
+        assertTrue(unmet.get(0).contains("Logga in med Google"), unmet.get(0));
+    }
+
     @Test
     void aFlowActionMustNavigateToTheFlowsEntryPage() {
         Ast.Module m = flowModule();

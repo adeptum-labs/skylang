@@ -110,9 +110,10 @@ public final class TypeChecker {
         for (Ast.Flow f : module.flows()) {
             flows.put(f.name(), f);
         }
+        boolean authBound = module.services().stream().anyMatch(s -> s.uses().contains("auth"));
         Set<String> enteredFlows = new HashSet<>();
         for (Ast.View v : module.views()) {
-            checkView(v, services, viewNames, flows);
+            checkView(v, services, viewNames, flows, authBound);
             for (Ast.Action a : v.actions()) {
                 a.flowTarget().ifPresent(enteredFlows::add);
             }
@@ -745,7 +746,7 @@ public final class TypeChecker {
     }
 
     private void checkView(Ast.View v, Map<String, Map<String, MethodSig>> services,
-                           Set<String> viewNames, Map<String, Ast.Flow> flows) {
+                           Set<String> viewNames, Map<String, Ast.Flow> flows, boolean authBound) {
         String where = "view " + v.name();
 
         if (v.shows() == null) {
@@ -786,10 +787,14 @@ public final class TypeChecker {
         // row-typed / prompted arguments of matching type.
         for (Ast.Action a : v.actions()) {
             String actionWhere = where + " action \"" + a.label() + "\"";
-            if (a.pageTarget().isPresent() || a.flowTarget().isPresent()) {
+            if (a.pageTarget().isPresent() || a.flowTarget().isPresent() || a.signTarget().isPresent()) {
                 if (a.rowVar().isPresent()) {
                     throw new CheckException(actionWhere + ": navigation is page-level — drop"
                             + " 'on " + a.rowVar().get() + "'");
+                }
+                if (a.signTarget().isPresent() && !authBound) {
+                    throw new CheckException(actionWhere + ": signing " + a.signTarget().get()
+                            + " needs the auth effect — declare a service that 'uses auth'");
                 }
                 if (a.pageTarget().isPresent() && !viewNames.contains(a.pageTarget().get())) {
                     throw new CheckException(actionWhere + ": no page named '"

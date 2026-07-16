@@ -1169,6 +1169,57 @@ class PipelineTest {
                 "the render lane must seed a present principal before the container boots:\n" + render);
     }
 
+    @Test
+    void signActionsStageTheSecurityLane(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module id
+                entity Account { id Int @id  email Text }
+                service Session uses auth, db {
+                  current() -> Maybe<Account>  intent "The signed-in account."
+                }
+                view Dashboard at "/home" {
+                  shows  Session.current() as a summary of (email)
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                  action "Logga in med Google" -> sign in then page Dashboard
+                  action "Logga ut" -> sign out
+                }
+                """, "id.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub("""
+                ```xhtml
+                <h:panelGroup>
+                  <h:outputText id="email" value="#{bean.email}"/>
+                  <h:commandButton value="Logga in med Google" action="#{bean.signIn}"/>
+                  <h:commandButton value="Logga ut" action="#{bean.signOut}"/>
+                </h:panelGroup>
+                ```
+                ```java
+                public class LoginBean {}
+                ```
+                """), ALWAYS_PASS).build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String security = Files.readString(buildDir.resolve("src/main/java/id/SkySecurity.java"));
+        assertTrue(security.contains("sky.auth.mode") && security.contains("signIn"),
+                "the security handle must carry a pinned offline mode:\n" + security);
+        String oidc = Files.readString(buildDir.resolve("src/main/java/id/OidcConfig.java"));
+        assertTrue(oidc.contains("OpenIdAuthenticationMechanismDefinition")
+                        && oidc.contains("openidConfig.clientId"),
+                "sign-in must bind the standard OpenID mechanism through EL:\n" + oidc);
+        String openid = Files.readString(buildDir.resolve("src/main/java/id/OpenidConfig.java"));
+        assertTrue(openid.contains("SKY_OIDC_PROVIDER") && openid.contains("SKY_OIDC_CLIENT_ID")
+                        && openid.contains("SKY_OIDC_CLIENT_SECRET"),
+                "provider and credentials come from the environment, never the spec:\n" + openid);
+        String producers = Files.readString(buildDir.resolve("src/main/java/id/Effects.java"));
+        assertTrue(producers.contains("SkySecurity::currentPrincipal"),
+                "the auth producer must consult the security handle when sign actions exist:\n"
+                        + producers);
+    }
+
     private static final String PARAM_MODULE = """
             module shop
             entity Account { id Int @id  email Text }

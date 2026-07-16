@@ -327,6 +327,58 @@ class ParsingTest {
     }
 
     @Test
+    void parsesSignInAndSignOutActionTargets() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>  intent "Who is signed in."
+                }
+                view Dashboard at "/home" {
+                  shows Session.current() as a summary of (email)
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                  action "Logga in med Google" -> sign in then page Dashboard
+                  action "Logga ut" -> sign out
+                }
+                """, "t.sky");
+        Ast.Action in = m.views().get(1).actions().get(0);
+        assertEquals("in", in.signTarget().orElseThrow());
+        assertEquals("Dashboard", in.pageTarget().orElseThrow());
+        Ast.Action out = m.views().get(1).actions().get(1);
+        assertEquals("out", out.signTarget().orElseThrow());
+        assertTrue(out.pageTarget().isEmpty());
+    }
+
+    @Test
+    void rejectsABareActionTargetThatIsNotSignInOrOut() {
+        assertThrows(SkyParseException.class, () -> Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>  intent "x"
+                }
+                page Login at "/" {
+                  shows  Session.current() as a summary of (email)
+                  action "X" -> frob nicate
+                }
+                """, "t.sky"));
+    }
+
+    @Test
+    void actionToStringShowsASignTargetOnlyWhenPresent() {
+        assertEquals("Action[label=Logga in, sign=in, page=Dashboard]",
+                new Ast.Action("Logga in", java.util.Optional.empty(), "", "", List.of(),
+                        java.util.Optional.of("Dashboard"), java.util.Optional.empty(),
+                        java.util.Optional.of("in")).toString());
+        assertEquals("Action[label=Logga ut, sign=out]",
+                new Ast.Action("Logga ut", java.util.Optional.empty(), "", "", List.of(),
+                        java.util.Optional.empty(), java.util.Optional.empty(),
+                        java.util.Optional.of("out")).toString());
+    }
+
+    @Test
     void actionToStringShowsAPageTargetOnlyWhenPresent() {
         assertEquals("Action[label=Products, page=ProductList]",
                 new Ast.Action("Products", java.util.Optional.empty(), "", "",

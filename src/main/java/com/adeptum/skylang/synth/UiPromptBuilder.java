@@ -130,7 +130,7 @@ public final class UiPromptBuilder {
         List<String> signatures = new ArrayList<>();
         appendSignature(module, shows.query().service(), shows.query().method(), signatures);
         for (Ast.Action a : view.actions()) {
-            if (a.pageTarget().isEmpty()) {
+            if (a.pageTarget().isEmpty() && a.flowTarget().isEmpty() && a.signTarget().isEmpty()) {
                 appendSignature(module, a.service(), a.method(), signatures);
             }
         }
@@ -142,6 +142,22 @@ public final class UiPromptBuilder {
         if (!view.actions().isEmpty()) {
             sb.append("Actions:\n");
             for (Ast.Action a : view.actions()) {
+                // Sign actions first: a "sign in then page X" also carries that page as its target.
+                if (a.signTarget().isPresent()) {
+                    boolean in = a.signTarget().get().equals("in");
+                    String beanMethod = in ? "signIn" : "signOut";
+                    String call = in
+                            ? "skySecurity.signIn(\"" + a.pageTarget().orElse("") + "\")"
+                            : "skySecurity.signOut()";
+                    sb.append("  \"").append(a.label()).append("\" on the page -> sign ")
+                            .append(in ? "in" : "out")
+                            .append(" — render exactly <h:commandButton value=\"").append(a.label())
+                            .append("\" action=\"#{bean.").append(beanMethod)
+                            .append("}\"/> inside an h:form, and implement on the bean: public String ")
+                            .append(beanMethod).append("() { return ").append(call)
+                            .append("; } with an injected SkySecurity skySecurity field.\n");
+                    continue;
+                }
                 if (a.pageTarget().isPresent()) {
                     sb.append("  \"").append(a.label())
                             .append("\" on the page -> navigate to page ").append(a.pageTarget().get())

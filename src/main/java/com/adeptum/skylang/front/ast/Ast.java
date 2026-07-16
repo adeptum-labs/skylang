@@ -527,35 +527,45 @@ public final class Ast {
 
     /**
      * {@code action "Restock" on row -> Catalog.restock(row.id, ask Int)}; without an
-     * {@code on <subject>} the action is page-level. {@code action "X" -> page Y} navigates
-     * and {@code action "X" -> flow Y} enters a flow instead of calling a method, carrying
-     * the target in {@code pageTarget}/{@code flowTarget} with an empty service and method.
-     * The view freeze hash covers this record's string form, so {@code toString} is pinned:
-     * an action with a subject keeps the original record format, and the {@code rowVar},
-     * {@code page} and {@code flow} attributes are omitted when absent.
+     * {@code on <subject>} the action is page-level. {@code action "X" -> page Y} navigates,
+     * {@code action "X" -> flow Y} enters a flow, and {@code action "X" -> sign in|out}
+     * drives the auth effect instead of calling a method, carrying the target in
+     * {@code pageTarget}/{@code flowTarget}/{@code signTarget} with an empty service and
+     * method ({@code sign in then page Y} carries both). The view freeze hash covers this
+     * record's string form, so {@code toString} is pinned: an action with a subject keeps
+     * the original record format, and the {@code rowVar}, {@code page}, {@code flow} and
+     * {@code sign} attributes are omitted when absent.
      */
     public record Action(String label, Optional<String> rowVar, String service, String method,
                          List<ActionArg> args, Optional<String> pageTarget,
-                         Optional<String> flowTarget) {
+                         Optional<String> flowTarget, Optional<String> signTarget) {
 
         public Action(String label, Optional<String> rowVar, String service, String method,
                       List<ActionArg> args) {
-            this(label, rowVar, service, method, args, Optional.empty(), Optional.empty());
+            this(label, rowVar, service, method, args,
+                    Optional.empty(), Optional.empty(), Optional.empty());
         }
 
         public Action(String label, Optional<String> rowVar, String service, String method,
                       List<ActionArg> args, Optional<String> pageTarget) {
-            this(label, rowVar, service, method, args, pageTarget, Optional.empty());
+            this(label, rowVar, service, method, args, pageTarget, Optional.empty(), Optional.empty());
+        }
+
+        public Action(String label, Optional<String> rowVar, String service, String method,
+                      List<ActionArg> args, Optional<String> pageTarget, Optional<String> flowTarget) {
+            this(label, rowVar, service, method, args, pageTarget, flowTarget, Optional.empty());
         }
 
         @Override
         public String toString() {
+            String target = signTarget
+                    .map(d -> ", sign=" + d + pageTarget.map(p -> ", page=" + p).orElse(""))
+                    .or(() -> pageTarget.map(p -> ", page=" + p))
+                    .or(() -> flowTarget.map(f -> ", flow=" + f))
+                    .orElse(", service=" + service + ", method=" + method + ", args=" + args);
             return "Action[label=" + label
                     + rowVar.map(r -> ", rowVar=" + r).orElse("")
-                    + pageTarget.map(p -> ", page=" + p)
-                            .or(() -> flowTarget.map(f -> ", flow=" + f))
-                            .orElse(", service=" + service + ", method=" + method + ", args=" + args)
-                    + "]";
+                    + target + "]";
         }
     }
 
