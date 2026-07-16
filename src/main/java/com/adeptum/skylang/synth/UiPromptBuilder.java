@@ -130,7 +130,9 @@ public final class UiPromptBuilder {
         List<String> signatures = new ArrayList<>();
         appendSignature(module, shows.query().service(), shows.query().method(), signatures);
         for (Ast.Action a : view.actions()) {
-            appendSignature(module, a.service(), a.method(), signatures);
+            if (a.pageTarget().isEmpty()) {
+                appendSignature(module, a.service(), a.method(), signatures);
+            }
         }
         if (!signatures.isEmpty()) {
             sb.append("Services (inject these; call only these instance methods):\n");
@@ -140,6 +142,14 @@ public final class UiPromptBuilder {
         if (!view.actions().isEmpty()) {
             sb.append("Actions:\n");
             for (Ast.Action a : view.actions()) {
+                if (a.pageTarget().isPresent()) {
+                    sb.append("  \"").append(a.label())
+                            .append("\" on the page -> navigate to page ").append(a.pageTarget().get())
+                            .append(" — render exactly <h:button outcome=\"").append(a.pageTarget().get())
+                            .append("\" value=\"").append(a.label())
+                            .append("\"/>; no bean method backs this action.\n");
+                    continue;
+                }
                 String args = a.args().stream()
                         .map(arg -> renderArg(arg, types))
                         .collect(Collectors.joining(", "));

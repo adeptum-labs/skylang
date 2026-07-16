@@ -181,7 +181,10 @@ viewClause
 
 viewQuery    : ID DOT ID LPAREN args? RPAREN ;                        // Catalog.all()
 projection   : ID ID? ID OF LPAREN ID (COMMA ID)* RPAREN ;           // a [sortable] table of (...)
-actionTarget : ID DOT ID LPAREN (actionArg (COMMA actionArg)*)? RPAREN ; // Catalog.restock(row.id, ask Int)
+actionTarget
+    : ID DOT ID LPAREN (actionArg (COMMA actionArg)*)? RPAREN  // Catalog.restock(row.id, ask Int)
+    | PAGE ID                                                  // page ProductList
+    ;
 actionArg    : expr | (ASK | PROMPT) type ;                          // row.id | ask Int | prompt Int
 
 expectPred

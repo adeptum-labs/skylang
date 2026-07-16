@@ -515,18 +515,27 @@ public final class Ast {
 
     /**
      * {@code action "Restock" on row -> Catalog.restock(row.id, ask Int)}; without an
-     * {@code on <subject>} the action is page-level. The view freeze hash covers this
-     * record's string form, so {@code toString} is pinned: an action with a subject keeps
-     * the original record format, and the {@code rowVar} attribute is omitted when absent.
+     * {@code on <subject>} the action is page-level. {@code action "X" -> page Y} navigates
+     * instead of calling a method, carrying the target view in {@code pageTarget} with an
+     * empty service and method. The view freeze hash covers this record's string form, so
+     * {@code toString} is pinned: an action with a subject keeps the original record format,
+     * and the {@code rowVar} and {@code page} attributes are omitted when absent.
      */
     public record Action(String label, Optional<String> rowVar, String service, String method,
-                         List<ActionArg> args) {
+                         List<ActionArg> args, Optional<String> pageTarget) {
+
+        public Action(String label, Optional<String> rowVar, String service, String method,
+                      List<ActionArg> args) {
+            this(label, rowVar, service, method, args, Optional.empty());
+        }
 
         @Override
         public String toString() {
             return "Action[label=" + label
                     + rowVar.map(r -> ", rowVar=" + r).orElse("")
-                    + ", service=" + service + ", method=" + method + ", args=" + args + "]";
+                    + pageTarget.map(p -> ", page=" + p)
+                            .orElse(", service=" + service + ", method=" + method + ", args=" + args)
+                    + "]";
         }
     }
 

@@ -198,4 +198,35 @@ class ViewVerifierTest {
         assertEquals(1, unmet.size());
         assertTrue(unmet.get(0).contains("logo") && unmet.get(0).contains("image"), unmet.get(0));
     }
+
+    private static Ast.View navView() {
+        return Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text  stock Int @min(0) }
+                service Catalog {
+                  all() -> [Product]  intent "all"
+                }
+                view ProductList at "/products" {
+                  shows Catalog.all() as a table of (name, stock)
+                }
+                view Home at "/" {
+                  shows Catalog.all() as a table of (name, stock)
+                  action "Products" -> page ProductList
+                }
+                """, "shop.sky").views().get(1);
+    }
+
+    @Test
+    void reportsAMissingNavigationControl() {
+        List<String> unmet = verifier.unmetExpectations(navView(), MARKUP);
+        assertEquals(1, unmet.size());
+        assertTrue(unmet.get(0).contains("Products") && unmet.get(0).contains("ProductList"),
+                unmet.get(0));
+    }
+
+    @Test
+    void acceptsANavigationControlWithTheTargetOutcome() {
+        String markup = MARKUP + "<h:button value=\"Products\" outcome=\"ProductList\"/>\n";
+        assertTrue(verifier.unmetExpectations(navView(), markup).isEmpty());
+    }
 }

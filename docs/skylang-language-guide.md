@@ -373,6 +373,10 @@ page ProductList at "/products" {
   are both optional: `action "Sign out" -> Session.signOut()` is a page-level control bound to no
   row. On a page with several `shows`, a named subject (`on the order`) picks the section showing
   that entity.
+- `action "Label" -> page <Name>` — navigates to another page of the module instead of calling a
+  method. The target must be a declared page (`sky check` rejects an unknown name), navigation is
+  page-level (no `on <subject>`), and the render is verified to carry a real navigation control
+  whose outcome is the target page.
 - `param <name> <Type>` declares a request parameter (Bool-, Int-, or Text-based, e.g. a `Slug`
   for the tenant) the page receives in its URL. Params type-check as `shows`/action arguments,
   and `appears <subject> when <condition>` renders a subject conditionally on them — verified by

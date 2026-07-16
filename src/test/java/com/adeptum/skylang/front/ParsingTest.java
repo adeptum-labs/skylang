@@ -258,6 +258,39 @@ class ParsingTest {
     }
 
     @Test
+    void parsesPageNavigationActionTarget() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Product { id Int @id  name Text }
+                service Catalog {
+                  all() -> [Product]  intent "Every product."
+                }
+                view ProductList at "/products" {
+                  shows  Catalog.all() as a table of (name)
+                }
+                page Home at "/" {
+                  shows  Catalog.all() as a table of (name)
+                  action "Products" -> page ProductList
+                }
+                """, "t.sky");
+        Ast.Action action = m.views().get(1).actions().get(0);
+        assertEquals("Products", action.label());
+        assertTrue(action.rowVar().isEmpty());
+        assertEquals("ProductList", action.pageTarget().orElseThrow());
+        assertTrue(action.args().isEmpty());
+    }
+
+    @Test
+    void actionToStringShowsAPageTargetOnlyWhenPresent() {
+        assertEquals("Action[label=Products, page=ProductList]",
+                new Ast.Action("Products", java.util.Optional.empty(), "", "",
+                        List.of(), java.util.Optional.of("ProductList")).toString());
+        assertEquals("Action[label=Sign out, service=Session, method=signOut, args=[]]",
+                new Ast.Action("Sign out", java.util.Optional.empty(), "Session", "signOut",
+                        List.of(), java.util.Optional.empty()).toString());
+    }
+
+    @Test
     void parsesListReturnType() {
         Ast.Module m = Parsing.parse(SHOP_VIEW, "shop.sky");
         Ast.Method all = m.services().get(0).methods().get(0);

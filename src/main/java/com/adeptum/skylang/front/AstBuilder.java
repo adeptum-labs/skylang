@@ -512,17 +512,21 @@ public final class AstBuilder {
 
     private Ast.Action action(SkyLangParser.ActionClauseContext ctx) {
         SkyLangParser.ActionTargetContext t = ctx.actionTarget();
-        List<Ast.ActionArg> args = new ArrayList<>();
-        for (SkyLangParser.ActionArgContext a : t.actionArg()) {
-            args.add(actionArg(a));
-        }
         // "on row" | "on a row" | "on the order": the row variable is the last word;
         // with no "on" clause at all, the action is page-level.
         Optional<String> rowVar = ctx.ID().isEmpty()
                 ? Optional.empty()
                 : Optional.of(ctx.ID(ctx.ID().size() - 1).getText());
-        return new Ast.Action(unquote(ctx.STRING().getText()), rowVar,
-                t.ID(0).getText(), t.ID(1).getText(), args);
+        String label = unquote(ctx.STRING().getText());
+        if (t.PAGE() != null) {
+            return new Ast.Action(label, rowVar, "", "", List.of(),
+                    Optional.of(t.ID(0).getText()));
+        }
+        List<Ast.ActionArg> args = new ArrayList<>();
+        for (SkyLangParser.ActionArgContext a : t.actionArg()) {
+            args.add(actionArg(a));
+        }
+        return new Ast.Action(label, rowVar, t.ID(0).getText(), t.ID(1).getText(), args);
     }
 
     private Ast.ActionArg actionArg(SkyLangParser.ActionArgContext ctx) {

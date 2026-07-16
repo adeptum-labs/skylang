@@ -31,15 +31,25 @@ import java.util.Set;
  * assertions hold regardless of the component library that produced the markup.
  */
 public record SemanticTree(List<Column> columns, List<Control> controls, Set<String> tableClasses,
-                           List<String> imageFields, List<Conditional> conditionals) {
+                           List<String> imageFields, List<Conditional> conditionals,
+                           List<Navigation> navigations) {
 
     public SemanticTree(List<Column> columns, List<Control> controls, Set<String> tableClasses) {
-        this(columns, controls, tableClasses, List.of(), List.of());
+        this(columns, controls, tableClasses, List.of(), List.of(), List.of());
     }
 
     public SemanticTree(List<Column> columns, List<Control> controls, Set<String> tableClasses,
                         List<String> imageFields) {
-        this(columns, controls, tableClasses, imageFields, List.of());
+        this(columns, controls, tableClasses, imageFields, List.of(), List.of());
+    }
+
+    public SemanticTree(List<Column> columns, List<Control> controls, Set<String> tableClasses,
+                        List<String> imageFields, List<Conditional> conditionals) {
+        this(columns, controls, tableClasses, imageFields, conditionals, List.of());
+    }
+
+    /** A navigation control ({@code h:button}/{@code h:link}): its label and its outcome view. */
+    public record Navigation(String name, String outcome) {
     }
 
     /** A data-table column: the row field it binds and its header text. */
@@ -85,5 +95,11 @@ public record SemanticTree(List<Column> columns, List<Control> controls, Set<Str
     public boolean hasConditional(String param) {
         return conditionals.stream()
                 .anyMatch(c -> c.classes().contains(param) && c.rendered().contains(param));
+    }
+
+    /** True if a navigation control named {@code label} leads to the view {@code outcome}. */
+    public boolean navigatesTo(String label, String outcome) {
+        return navigations.stream()
+                .anyMatch(n -> label.equals(n.name()) && outcome.equals(n.outcome()));
     }
 }

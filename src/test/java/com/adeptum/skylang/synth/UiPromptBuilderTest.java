@@ -187,6 +187,27 @@ class UiPromptBuilderTest {
     }
 
     @Test
+    void userPromptPrescribesANavigationButton() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text  stock Int @min(0) }
+                service Catalog {
+                  all() -> [Product]  intent "all"
+                }
+                view ProductList at "/products" {
+                  shows Catalog.all() as a table of (name, stock)
+                }
+                view Home at "/" {
+                  shows Catalog.all() as a table of (name)
+                  action "Products" -> page ProductList
+                }
+                """, "shop.sky");
+        String user = prompts.user(m, m.views().get(1));
+        assertTrue(user.contains("\"Products\" on the page -> navigate to page ProductList"), user);
+        assertTrue(user.contains("<h:button outcome=\"ProductList\""), user);
+    }
+
+    @Test
     void userPromptDescribesAppearance() {
         Ast.Module m = Parsing.parse(SRC, "shop.sky");
         Ast.View view = m.views().get(0);

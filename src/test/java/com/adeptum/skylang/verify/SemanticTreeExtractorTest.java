@@ -105,4 +105,16 @@ class SemanticTreeExtractorTest {
         assertTrue(tree.controlInRegion("Restock", "toolbar"), "the button's enclosing region should be captured");
         assertFalse(tree.controlInRegion("Restock", "sidebar"));
     }
+
+    @Test
+    void extractsNavigationOutcomes() {
+        SemanticTree tree = extractor.extract("""
+                <h:button value="Products" outcome="ProductList"/>
+                <h:link value="Home" outcome="Home"/>
+                """);
+        assertTrue(tree.navigatesTo("Products", "ProductList"));
+        assertTrue(tree.navigatesTo("Home", "Home"));
+        assertFalse(tree.navigatesTo("Products", "Elsewhere"));
+        assertFalse(tree.navigatesTo("Missing", "ProductList"));
+    }
 }

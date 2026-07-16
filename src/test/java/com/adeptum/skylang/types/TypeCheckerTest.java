@@ -415,6 +415,45 @@ class TypeCheckerTest {
     }
 
     @Test
+    void acceptsActionNavigatingToADeclaredPage() {
+        assertDoesNotThrow(() -> check(withView("""
+                view ProductList at "/products" {
+                  shows  Catalog.all() as a table of (name, stock)
+                }
+                view Home at "/" {
+                  shows  Catalog.all() as a table of (name)
+                  action "Products" -> page ProductList
+                }
+                """)));
+    }
+
+    @Test
+    void rejectsActionNavigatingToAnUndeclaredPage() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view Home at "/" {
+                  shows  Catalog.all() as a table of (name)
+                  action "Products" -> page ProductList
+                }
+                """)));
+        assertTrue(e.getMessage().contains("no page"), e.getMessage());
+        assertTrue(e.getMessage().contains("ProductList"), e.getMessage());
+    }
+
+    @Test
+    void rejectsARowLevelNavigationAction() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view ProductList at "/products" {
+                  shows  Catalog.all() as a table of (name, stock)
+                }
+                view Home at "/" {
+                  shows  Catalog.all() as a table of (name)
+                  action "Open" on row -> page ProductList
+                }
+                """)));
+        assertTrue(e.getMessage().contains("page-level"), e.getMessage());
+    }
+
+    @Test
     void rejectsViewUnknownColumn() {
         CheckException e = assertThrows(CheckException.class, () -> check(withView("""
                 view V {

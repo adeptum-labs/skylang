@@ -105,6 +105,15 @@ public final class ViewVerifier {
                         + " (h:graphicImage bound to " + field + "DataUri)");
             }
         }
+        // A navigation action must be a real navigation control whose outcome names its target.
+        for (Ast.Action a : view.actions()) {
+            if (a.pageTarget().isPresent()
+                    && !tree.navigatesTo(a.label(), a.pageTarget().get())) {
+                unmet.add("expected \"" + a.label() + "\" to navigate to page "
+                        + a.pageTarget().get() + " (an h:button/h:link with outcome=\""
+                        + a.pageTarget().get() + "\")");
+            }
+        }
         for (Ast.Expect e : view.expects()) {
             switch (e) {
                 case Ast.ExpectColumns c -> {

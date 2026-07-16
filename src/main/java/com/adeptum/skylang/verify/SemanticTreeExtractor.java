@@ -89,7 +89,18 @@ public final class SemanticTreeExtractor {
             }
         }
 
-        return new SemanticTree(columns, controls, tableClasses, imageFields, conditionals);
+        // Navigation controls carry the target view as a Faces outcome, cut at any query string.
+        List<SemanticTree.Navigation> navigations = new ArrayList<>();
+        for (String tag : new String[]{"h:button", "h:link"}) {
+            for (Element nav : doc.getElementsByTag(tag)) {
+                String outcome = nav.attr("outcome");
+                if (!outcome.isBlank()) {
+                    navigations.add(new SemanticTree.Navigation(label(nav), outcome.split("\\?")[0]));
+                }
+            }
+        }
+
+        return new SemanticTree(columns, controls, tableClasses, imageFields, conditionals, navigations);
     }
 
     /** The style-class tokens directly on an element — both {@code class} and Faces {@code styleClass}. */

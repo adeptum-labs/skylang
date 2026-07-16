@@ -26,11 +26,13 @@ import com.adeptum.skylang.front.ast.Ast;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -98,9 +100,13 @@ public final class TypeChecker {
         for (Ast.Component c : module.components()) {
             checkComponent(c);
         }
-        // Check every view against the entities and the service signatures.
+        // Check every view against the entities, the service signatures, and the page names.
+        Set<String> viewNames = new HashSet<>();
         for (Ast.View v : module.views()) {
-            checkView(v, services);
+            viewNames.add(v.name());
+        }
+        for (Ast.View v : module.views()) {
+            checkView(v, services, viewNames);
         }
         for (Ast.Flow f : module.flows()) {
             checkFlow(f);
@@ -716,7 +722,8 @@ public final class TypeChecker {
         return new MethodSig(params, resolveType(m.returnType(), service + "." + m.name() + " return type"));
     }
 
-    private void checkView(Ast.View v, Map<String, Map<String, MethodSig>> services) {
+    private void checkView(Ast.View v, Map<String, Map<String, MethodSig>> services,
+                           Set<String> viewNames) {
         String where = "view " + v.name();
 
         if (v.shows() == null) {
@@ -753,9 +760,21 @@ public final class TypeChecker {
             rowTypes.add(checkShows(v, extra, services, where, paramEnv));
         }
 
-        // Each action must call a declared method with row-typed / prompted arguments of matching type.
+        // Each action either navigates to a declared page or calls a declared method with
+        // row-typed / prompted arguments of matching type.
         for (Ast.Action a : v.actions()) {
             String actionWhere = where + " action \"" + a.label() + "\"";
+            if (a.pageTarget().isPresent()) {
+                if (a.rowVar().isPresent()) {
+                    throw new CheckException(actionWhere + ": navigation is page-level — drop"
+                            + " 'on " + a.rowVar().get() + "'");
+                }
+                if (!viewNames.contains(a.pageTarget().get())) {
+                    throw new CheckException(actionWhere + ": no page named '"
+                            + a.pageTarget().get() + "' in this module");
+                }
+                continue;
+            }
             MethodSig sig = lookup(services, a.service(), a.method(), actionWhere);
             checkArgCount(actionWhere, a.service() + "." + a.method(), a.args().size(), sig.params().size());
             Map<String, Ty> env = a.rowVar().isEmpty()
