@@ -364,8 +364,17 @@ public final class FacesViewStager {
             methods.append("            try {\n");
             methods.append("                driver.get(\"http://localhost:\" + port + \"/app/")
                     .append(view.name()).append(".xhtml\");\n");
-            methods.append("                assertNotNull(driver.findElement(By.tagName(\"table\")), \"view ")
-                    .append(view.name()).append(" should render a table in a real browser\");\n");
+            boolean tableView = view.shows().projection()
+                    .map(Ast.Projection::kind).filter("table"::equals).isPresent();
+            if (tableView) {
+                methods.append("                assertNotNull(driver.findElement(By.tagName(\"table\")), \"view ")
+                        .append(view.name()).append(" should render a table in a real browser\");\n");
+            } else {
+                // A summary or form renders no table; a non-empty body is the browser-level gate.
+                methods.append("                assertFalse(driver.findElement(By.tagName(\"body\"))")
+                        .append(".getText().isEmpty() && driver.findElements(By.cssSelector(\"input, button\")).isEmpty(), \"view ")
+                        .append(view.name()).append(" rendered nothing in a real browser\");\n");
+            }
             // Text inputs are the clicked action's prompted arguments, in order; each gets a
             // value that satisfies its declared type so converters and validators accept it.
             methods.append("                String[] samples = {").append(askSamples(view, types)).append("};\n");
