@@ -101,7 +101,7 @@ clause
     : INTENT STRING                                # intentClause
     | REQUIRES expr                                # requiresClause
     | ENSURES expr+                                # ensuresClause   // continuation lines join one keyword
-    | EXAMPLE call (ON seed)? ARROW exampleResult  # exampleClause
+    | EXAMPLE call (ON seed)? ARROW exampleResult (WHEN ID (ID | IN))?  # exampleClause  // ... when signed out
     | RAISES ID WHEN raisesCondition               # raisesClause
     | SPEC STRING LBRACE (GIVEN expr)? WHEN call THEN thenAssert+ RBRACE  # specClause
     | NATIVE_BLOCK                                 # nativeClause   // java { ... }
@@ -201,6 +201,8 @@ appearsPred
     | ACTION STRING IS ID (WHEN viewProse)?        # appearsActionState  // is disabled when status is Shipped
     | ID IS ID                                     # appearsStyle        // rows is compact
     | COLUMNS (IN ID)? LPAREN ID (COMMA ID)* RPAREN # appearsColumnOrder // columns [in order] (name, stock)
+    | (ID | MINUS)+ WHEN ID IN                     # appearsSignedIn     // the sign-out control when signed in
+    | (ID | MINUS)+ WHEN ID ID                     # appearsSignedOut    // the welcome banner when signed out
     | (ID | MINUS)+ WHEN expr                      # appearsWhen         // the alert when accessDenied
     | viewProse                                    # appearsProse        // sections in a two-column grid
     ;

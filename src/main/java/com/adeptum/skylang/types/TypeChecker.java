@@ -905,6 +905,13 @@ public final class TypeChecker {
                                 + " appears: the when-condition must be Bool, got " + t);
                     }
                 }
+                case Ast.AppearsSigned s -> {
+                    if (!authBound) {
+                        throw new CheckException(where + " appears: 'when signed "
+                                + (s.signedIn() ? "in" : "out") + "' needs the auth effect"
+                                + " — declare a service that 'uses auth'");
+                    }
+                }
                 case Ast.AppearsProse ignored -> {
                 }
             }

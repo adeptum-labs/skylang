@@ -259,22 +259,25 @@ public final class SupportClasses {
                 /**
                  * The principal source behind the auth binding. Production leaves it absent until a
                  * real mechanism (e.g. OpenID Connect) pins it; verification seeds it through the
-                 * 'sky.auth.principal' system property ("subject|email|displayName"), which crosses
-                 * container classloaders where a static pin would not.
+                 * 'sky.auth.principal' system property ("subject|email|displayName"), read on every
+                 * call — the class may be shared across container deployments in one JVM, so a
+                 * cached seed would leak one deployment's state into the next. An explicit pin
+                 * overrides the seed until re-pinned.
                  */
                 public final class SkyAuth {
 
-                    private static volatile java.util.Optional<Principal> principal = seeded();
+                    private static volatile java.util.Optional<Principal> pinned = null;
 
                     private SkyAuth() {
                     }
 
                     public static java.util.Optional<Principal> current() {
-                        return principal;
+                        java.util.Optional<Principal> override = pinned;
+                        return override != null ? override : seeded();
                     }
 
-                    public static void pin(java.util.Optional<Principal> pinned) {
-                        principal = pinned;
+                    public static void pin(java.util.Optional<Principal> value) {
+                        pinned = value;
                     }
 
                     private static java.util.Optional<Principal> seeded() {

@@ -1220,6 +1220,67 @@ class PipelineTest {
                         + producers);
     }
 
+    @Test
+    void aSignedOutExampleWiresAnAbsentPrincipal(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module id
+                entity Account { id Int @id  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>
+                    intent  "The signed-in account, if any."
+                    example current() -> nothing when signed out
+                }
+                """, "id.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(new StubLlm("return java.util.Optional.empty();"), ALWAYS_PASS)
+                .build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String test = Files.readString(buildDir.resolve("src/test/java/id/SessionTest.java"));
+        assertTrue(test.contains("Optional::empty"),
+                "the signed-out example must construct the service on an absent principal:\n" + test);
+    }
+
+    @Test
+    void signedAppearsRendersBothPrincipalStates(@TempDir Path root) throws IOException {
+        Ast.Module module = Parsing.parse("""
+                module id
+                entity Account { id Int @id  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>  intent "The signed-in account."
+                }
+                page Login at "/" {
+                  shows   Session.current() as a summary of (email)
+                  appears the sign-out control when signed in
+                  appears the welcome banner when signed out
+                }
+                """, "id.sky");
+        new TypeChecker().check(module);
+        Path buildDir = root.resolve("build/jvm-jakarta");
+
+        int code = new Pipeline(routingStub("""
+                ```xhtml
+                <h:panelGroup>
+                  <h:outputText id="email" value="#{bean.email}"/>
+                  <h:panelGroup styleClass="signedIn" rendered="#{bean.signedIn}">signed in</h:panelGroup>
+                  <h:panelGroup styleClass="signedOut" rendered="#{not bean.signedIn}">welcome</h:panelGroup>
+                </h:panelGroup>
+                ```
+                ```java
+                public class LoginBean {}
+                ```
+                """), ALWAYS_PASS).build(module, root.resolve("sky.lock"), buildDir, quiet(), quiet());
+
+        assertEquals(0, code);
+        String render = Files.readString(buildDir.resolve("src/test/java/id/ViewsRenderTest.java"));
+        assertTrue(render.contains("clearProperty(\"sky.auth.principal\")"),
+                "the render lane must also render the signed-out state:\n" + render);
+        assertTrue(render.contains(".signedIn") && render.contains(".signedOut"),
+                "both state markers must be asserted:\n" + render);
+    }
+
     private static final String PARAM_MODULE = """
             module shop
             entity Account { id Int @id  email Text }

@@ -99,6 +99,8 @@ public final class AppearsCompiler {
                     + st.when().map(w -> " when " + w).orElse("");
             case Ast.AppearsWhen w -> "appears " + String.join(" ", w.subject()) + " when "
                     + com.adeptum.skylang.backend.Lowering.skyText(w.when());
+            case Ast.AppearsSigned s -> "appears " + String.join(" ", s.subject())
+                    + " when signed " + (s.signedIn() ? "in" : "out");
             case Ast.AppearsProse p -> "appears " + p.text();
         };
     }

@@ -392,6 +392,10 @@ page ProductList at "/products" {
   auth effect (§10.2): sign-in hands the request to the deployment's identity mechanism and
   lands on the named page; sign-out ends the session. Both require a service that `uses auth`,
   and the render is verified to carry a button driving them.
+- `appears <subject> when signed in` / `when signed out` — the subject renders only in that
+  auth state (it needs a service that `uses auth`). Verified with a dual-state render: the
+  page is served once with a principal and once without, and the marked element must appear
+  exactly in its declared state. Any other `when <word> <word>` tail stays ordinary prose.
 - `param <name> <Type>` declares a request parameter (Bool-, Int-, or Text-based, e.g. a `Slug`
   for the tenant) the page receives in its URL. Params type-check as `shows`/action arguments,
   and `appears <subject> when <condition>` renders a subject conditionally on them — verified by
@@ -584,8 +588,8 @@ flow Checkout {
   `currentPrincipal() -> Maybe<Principal>` (subject, email, display name). Verification pins a
   **present** principal — generated tests through `TestEffects.auth()`, the render lane through
   a system-property seed — so a page whose controls depend on the signed-in state is verifiable.
-  One limitation of the present-by-default test principal: a pure-auth method with a
-  `-> nothing` example cannot pass, since nothing makes the principal absent per-example.
+  An example may leave that default: `example current() -> nothing when signed out` runs that
+  one example on an absent principal, so pure-auth methods verify both states.
 
   The production binding ships with the sign actions: a page declaring
   `action "Logga in med Google" -> sign in then page Dashboard` (and `-> sign out`) stages the

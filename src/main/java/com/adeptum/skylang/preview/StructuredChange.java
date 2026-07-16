@@ -215,7 +215,8 @@ public sealed interface StructuredChange {
             case Ast.AppearsPlacement ignored -> 2;
             case Ast.AppearsActionState ignored -> 3;
             case Ast.AppearsWhen ignored -> 4;
-            case Ast.AppearsProse ignored -> 5;
+            case Ast.AppearsSigned ignored -> 5;
+            case Ast.AppearsProse ignored -> 6;
         };
     }
 

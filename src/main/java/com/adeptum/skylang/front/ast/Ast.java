@@ -398,15 +398,21 @@ public final class Ast {
      * this record's string form, so {@code toString} is pinned: byte-identical to the original
      * record format unless the example seeds state.
      */
-    public record Example(CallExpr call, Result result, Optional<Seed> seed) {
+    public record Example(CallExpr call, Result result, Optional<Seed> seed,
+                          Optional<String> signedState) {
         public Example(CallExpr call, Result result) {
-            this(call, result, Optional.empty());
+            this(call, result, Optional.empty(), Optional.empty());
+        }
+
+        public Example(CallExpr call, Result result, Optional<Seed> seed) {
+            this(call, result, seed, Optional.empty());
         }
 
         @Override
         public String toString() {
             return "Example[call=" + call + ", result=" + result
-                    + (seed.isEmpty() ? "" : ", seed=" + seed.get()) + "]";
+                    + (seed.isEmpty() ? "" : ", seed=" + seed.get())
+                    + signedState.map(s -> ", signed=" + s).orElse("") + "]";
         }
     }
 
@@ -600,7 +606,14 @@ public final class Ast {
 
     public sealed interface Appears
             permits AppearsPlacement, AppearsStyle, AppearsColumnOrder, AppearsActionState, AppearsProse,
-                    AppearsWhen {
+                    AppearsWhen, AppearsSigned {
+    }
+
+    /**
+     * {@code appears the sign-out control when signed in} — the subject renders only in the
+     * named auth state; verified by rendering the page in both principal states.
+     */
+    public record AppearsSigned(List<String> subject, boolean signedIn) implements Appears {
     }
 
     /**

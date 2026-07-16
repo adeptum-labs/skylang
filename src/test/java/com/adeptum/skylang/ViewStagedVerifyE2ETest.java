@@ -303,6 +303,69 @@ class ViewStagedVerifyE2ETest {
                 + out.toString(StandardCharsets.UTF_8));
     }
 
+    private static final String SIGNED_STATE_VIEW = """
+            module id
+            entity Account { id Int @id  email Text }
+            service Session uses auth {
+              current() -> Maybe<Account>  intent "The signed-in account, if any."
+            }
+            page Login at "/" {
+              shows   Session.current() as a summary of (email)
+              appears the sign-out control when signed in
+              appears the welcome banner when signed out
+            }
+            """;
+
+    private static final String SIGNED_STATE_REPLY = """
+            ```xhtml
+            <h:form id="f">
+              <h:outputText id="email" value="#{loginBean.email}"/>
+              <h:panelGroup styleClass="signedIn" rendered="#{loginBean.signedIn}">
+                <h:outputText value="sign out lives here"/>
+              </h:panelGroup>
+              <h:panelGroup styleClass="signedOut" rendered="#{not loginBean.signedIn}">
+                <h:outputText value="welcome"/>
+              </h:panelGroup>
+            </h:form>
+            ```
+            ```java
+            @jakarta.inject.Named
+            @jakarta.faces.view.ViewScoped
+            public class LoginBean implements java.io.Serializable {
+                @jakarta.inject.Inject
+                Session session;
+
+                @jakarta.inject.Inject
+                Auth auth;
+
+                public String getEmail() {
+                    return session.current().map(Account::email).orElse("");
+                }
+
+                public boolean isSignedIn() {
+                    return auth.currentPrincipal().isPresent();
+                }
+            }
+            ```
+            """;
+
+    @Test
+    void signedStateAppearsRendersBothStatesInContainer(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(SIGNED_STATE_VIEW, "id.sky");
+        new TypeChecker().check(module);
+
+        StubLlm stub = new StubLlm((system, user) -> system.contains("UI-synthesis")
+                ? SIGNED_STATE_REPLY
+                : "return java.util.Optional.empty();");
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(stub, new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "signed-state render verification failed:\n"
+                + out.toString(StandardCharsets.UTF_8));
+    }
+
     @Test
     void dbBackedViewRendersInContainer(@TempDir Path root) {
         Ast.Module module = Parsing.parse(STORE_VIEW, "store.sky");

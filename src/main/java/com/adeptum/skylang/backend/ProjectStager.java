@@ -501,12 +501,19 @@ public final class ProjectStager {
 
     /** The effect wiring for one test: a fresh store kept in a local so the test can seed it. */
     private static String construction(Ast.Service service) {
+        return construction(service, false);
+    }
+
+    /** As above; a signed-out example gets an absent principal instead of the pinned one. */
+    private static String construction(Ast.Service service, boolean signedOut) {
         StringBuilder sb = new StringBuilder();
         if (service.uses().contains("db")) {
             sb.append("        Db db = TestEffects.db();\n");
         }
         String wiring = service.uses().stream()
-                .map(e -> e.equals("db") ? "db" : "TestEffects." + e + "()")
+                .map(e -> e.equals("db") ? "db"
+                        : e.equals("auth") && signedOut ? "((Auth) java.util.Optional::empty)"
+                        : "TestEffects." + e + "()")
                 .collect(Collectors.joining(", "));
         sb.append("        ").append(service.name()).append(" svc = new ").append(service.name())
                 .append("(").append(wiring).append(");\n");
@@ -747,7 +754,7 @@ public final class ProjectStager {
         Map<String, String> env = new LinkedHashMap<>();
         StringBuilder sb = new StringBuilder();
         sb.append("\n    @Test\n    void ").append(m.name()).append("_example_").append(n).append("() throws Exception {\n");
-        sb.append(construction(service));
+        sb.append(construction(service, ex.signedState().filter("out"::equals).isPresent()));
 
         List<Ast.Expr> args = ex.call().args();
         for (int i = 0; i < m.params().size(); i++) {

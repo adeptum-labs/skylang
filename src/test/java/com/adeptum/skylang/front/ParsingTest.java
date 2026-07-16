@@ -379,6 +379,56 @@ class ParsingTest {
     }
 
     @Test
+    void parsesASignedStateExampleQualifier() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>
+                    intent  "The signed-in account, if any."
+                    example current() -> nothing when signed out
+                }
+                """, "t.sky");
+        Ast.Example ex = m.services().get(0).methods().get(0).examples().get(0);
+        assertEquals("out", ex.signedState().orElseThrow());
+    }
+
+    @Test
+    void exampleToStringShowsTheSignedStateOnlyWhenPresent() {
+        Ast.Example plain = Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>
+                    intent  "x"
+                    example current() -> nothing
+                }
+                """, "t.sky").services().get(0).methods().get(0).examples().get(0);
+        assertFalse(plain.toString().contains("signed"), plain.toString());
+    }
+
+    @Test
+    void parsesASignedStateAppearsPredicate() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Account { id Int @id  email Text }
+                service Session uses auth {
+                  current() -> Maybe<Account>  intent "x"
+                }
+                page Login at "/" {
+                  shows   Session.current() as a summary of (email)
+                  appears the sign-out control when signed in
+                  appears the welcome banner when signed out
+                }
+                """, "t.sky");
+        Ast.View view = m.views().get(0);
+        Ast.AppearsSigned in = assertInstanceOf(Ast.AppearsSigned.class, view.appears().get(0));
+        assertTrue(in.signedIn());
+        Ast.AppearsSigned out = assertInstanceOf(Ast.AppearsSigned.class, view.appears().get(1));
+        assertFalse(out.signedIn());
+    }
+
+    @Test
     void actionToStringShowsAPageTargetOnlyWhenPresent() {
         assertEquals("Action[label=Products, page=ProductList]",
                 new Ast.Action("Products", java.util.Optional.empty(), "", "",

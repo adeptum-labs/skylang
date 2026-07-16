@@ -400,6 +400,14 @@ public final class UiPromptBuilder {
                         + param + "\" rendered=\"#{bean." + Lowering.skyText(w.when())
                         + "}\"> so it appears only when " + Lowering.skyText(w.when());
             }
+            case Ast.AppearsSigned s -> {
+                String marker = s.signedIn() ? "signedIn" : "signedOut";
+                String rendered = s.signedIn() ? "#{bean.signedIn}" : "#{not bean.signedIn}";
+                yield "render \"" + String.join(" ", s.subject()) + "\" inside <h:panelGroup styleClass=\""
+                        + marker + "\" rendered=\"" + rendered + "\"> so it appears only when signed "
+                        + (s.signedIn() ? "in" : "out") + "; expose boolean isSignedIn() on the bean as"
+                        + " auth.currentPrincipal().isPresent() with an injected Auth auth field";
+            }
             case Ast.AppearsProse p -> p.text();
         };
     }

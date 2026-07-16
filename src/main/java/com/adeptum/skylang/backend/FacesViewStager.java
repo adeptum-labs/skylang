@@ -164,7 +164,8 @@ public final class FacesViewStager {
      */
     private static String renderTest(String pkg, Ast.Module module) {
         StringBuilder methods = new StringBuilder();
-        if (showsAuthBackedQuery(module) || SupportClasses.signActions(module)) {
+        if (showsAuthBackedQuery(module) || SupportClasses.signActions(module)
+                || hasSignedAppears(module)) {
             // Seeded before any container boot: the properties cross the webapp classloader,
             // so the deployed SkyAuth sees a present principal, the signed-in state renders,
             // and a clicked sign action stays on the pinned holder instead of a provider.
@@ -210,6 +211,38 @@ public final class FacesViewStager {
                             .append(" element should not render undriven\");\n");
                 }
             }
+            // Signed-state markers get the dual-state pair: the seeded render shows only the
+            // signed-in side; a second render on a cleared principal shows only the other.
+            boolean signedPredicates = view.appears().stream()
+                    .anyMatch(Ast.AppearsSigned.class::isInstance);
+            if (signedPredicates) {
+                for (Ast.Appears a : view.appears()) {
+                    if (a instanceof Ast.AppearsSigned s) {
+                        methods.append(s.signedIn()
+                                ? "        assertFalse(doc.select(\".signedIn\").isEmpty(),"
+                                        + " \"the signedIn element should render when signed in\");\n"
+                                : "        assertTrue(doc.select(\".signedOut\").isEmpty(),"
+                                        + " \"the signedOut element should not render when signed in\");\n");
+                    }
+                }
+                methods.append("        System.clearProperty(\"sky.auth.principal\");\n");
+                methods.append("        try {\n");
+                methods.append("            Document signedOut = Jsoup.parse(render(\"")
+                        .append(view.name()).append(".xhtml\"));\n");
+                for (Ast.Appears a : view.appears()) {
+                    if (a instanceof Ast.AppearsSigned s) {
+                        methods.append(s.signedIn()
+                                ? "            assertTrue(signedOut.select(\".signedIn\").isEmpty(),"
+                                        + " \"the signedIn element should not render when signed out\");\n"
+                                : "            assertFalse(signedOut.select(\".signedOut\").isEmpty(),"
+                                        + " \"the signedOut element should render when signed out\");\n");
+                    }
+                }
+                methods.append("        } finally {\n");
+                methods.append("            System.setProperty(\"sky.auth.principal\",")
+                        .append(" \"sky-test-subject|test@example.sky|Test User\");\n");
+                methods.append("        }\n");
+            }
             for (Ast.Appears a : view.appears()) {
                 if (a instanceof Ast.AppearsPlacement p) {
                     methods.append("        assertTrue(doc.select(\".").append(escape(p.region()))
@@ -230,6 +263,13 @@ public final class FacesViewStager {
 
     private static String escape(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /** True when any view carries a signed-state appearance predicate. */
+    private static boolean hasSignedAppears(Ast.Module module) {
+        return module.views().stream()
+                .flatMap(v -> v.appears().stream())
+                .anyMatch(Ast.AppearsSigned.class::isInstance);
     }
 
     /** True when any view's data source is declared by a service using the auth effect. */

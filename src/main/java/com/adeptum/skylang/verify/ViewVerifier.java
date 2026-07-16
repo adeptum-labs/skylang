@@ -191,6 +191,18 @@ public final class ViewVerifier {
                                 + "' (styleClass \"" + param + "\" with a rendered binding)");
                     }
                 }
+                case Ast.AppearsSigned s -> {
+                    // Both states bind the same bean property, so the rendered expression
+                    // carries "signedIn" whichever way the marker class points.
+                    String marker = s.signedIn() ? "signedIn" : "signedOut";
+                    boolean bound = tree.conditionals().stream().anyMatch(c ->
+                            c.classes().contains(marker) && c.rendered().contains("signedIn"));
+                    if (!bound) {
+                        unmet.add("expected a \"" + marker + "\" element rendered on the"
+                                + " signed-in state (styleClass \"" + marker
+                                + "\" bound to bean.signedIn)");
+                    }
+                }
                 case Ast.AppearsProse ignored -> {
                 }
             }

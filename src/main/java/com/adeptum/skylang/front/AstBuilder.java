@@ -600,6 +600,26 @@ public final class AstBuilder {
             }
             return new Ast.AppearsWhen(subject, expr(w.expr()));
         }
+        if (ctx instanceof SkyLangParser.AppearsSignedInContext || ctx instanceof SkyLangParser.AppearsSignedOutContext) {
+            // "when signed in|out" is the formal auth-state predicate; any other two trailing
+            // words stay ordinary prose, exactly as they parsed before.
+            List<String> subject = new ArrayList<>();
+            List<String> tail = new ArrayList<>();
+            boolean afterWhen = false;
+            for (int i = 0; i < ctx.getChildCount(); i++) {
+                String word = ctx.getChild(i).getText();
+                if (word.equals("when")) {
+                    afterWhen = true;
+                } else {
+                    (afterWhen ? tail : subject).add(word);
+                }
+            }
+            boolean signedIn = ctx instanceof SkyLangParser.AppearsSignedInContext;
+            if (tail.get(0).equals("signed") && (signedIn || tail.get(1).equals("out"))) {
+                return new Ast.AppearsSigned(subject, signedIn);
+            }
+            return new Ast.AppearsProse(String.join(" ", subject) + " when " + String.join(" ", tail));
+        }
         if (ctx instanceof SkyLangParser.AppearsPlacementContext p) {
             // "in toolbar" or "in the row's toolbar": the region is the last word.
             String region = p.ID(p.ID().size() - 1).getText();
@@ -685,7 +705,17 @@ public final class AstBuilder {
     private Ast.Example example(SkyLangParser.ExampleClauseContext ctx) {
         Ast.CallExpr call = call(ctx.call());
         Optional<Ast.Seed> seed = ctx.seed() == null ? Optional.empty() : Optional.of(seed(ctx.seed()));
-        return new Ast.Example(call, result(ctx.exampleResult()), seed);
+        Optional<String> signedState = Optional.empty();
+        if (ctx.WHEN() != null) {
+            String first = ctx.ID(0).getText();
+            String second = ctx.IN() != null ? "in" : ctx.ID(1).getText();
+            if (!first.equals("signed") || (!second.equals("in") && !second.equals("out"))) {
+                throw new SkyParseException("an example qualifier reads 'when signed in' or"
+                        + " 'when signed out', not 'when " + first + " " + second + "'");
+            }
+            signedState = Optional.of(second);
+        }
+        return new Ast.Example(call, result(ctx.exampleResult()), seed, signedState);
     }
 
     private Ast.Seed seed(SkyLangParser.SeedContext ctx) {
