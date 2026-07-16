@@ -100,16 +100,25 @@ public final class TypeChecker {
         for (Ast.Component c : module.components()) {
             checkComponent(c);
         }
-        // Check every view against the entities, the service signatures, and the page names.
+        // Check every view against the entities, the service signatures, the page names,
+        // and the flows a page action may enter.
         Set<String> viewNames = new HashSet<>();
         for (Ast.View v : module.views()) {
             viewNames.add(v.name());
         }
+        Map<String, Ast.Flow> flows = new HashMap<>();
+        for (Ast.Flow f : module.flows()) {
+            flows.put(f.name(), f);
+        }
+        Set<String> enteredFlows = new HashSet<>();
         for (Ast.View v : module.views()) {
-            checkView(v, services, viewNames);
+            checkView(v, services, viewNames, flows);
+            for (Ast.Action a : v.actions()) {
+                a.flowTarget().ifPresent(enteredFlows::add);
+            }
         }
         for (Ast.Flow f : module.flows()) {
-            checkFlow(f);
+            checkFlow(f, viewNames, enteredFlows.contains(f.name()));
         }
 
         // A page whose expectations its own data cannot satisfy is unbuildable; say so here,
@@ -145,13 +154,15 @@ public final class TypeChecker {
         }
     }
 
-    private void checkFlow(Ast.Flow f) {
+    private void checkFlow(Ast.Flow f, Set<String> viewNames, boolean entered) {
         String where = "flow " + f.name();
         java.util.Set<String> steps = new java.util.LinkedHashSet<>();
         for (Ast.FlowStep step : f.steps()) {
             if (!steps.add(step.name())) {
                 throw new CheckException(where + ": duplicate step '" + step.name() + "'");
             }
+            // A step's "page X" target is a formal binding; it must name a declared page.
+            requirePage(Ast.Flow.pageOf(step.target()), viewNames, where + " step " + step.name());
         }
         if (steps.isEmpty()) {
             throw new CheckException(where + " declares no steps");
@@ -163,6 +174,17 @@ public final class TypeChecker {
                 throw new CheckException(where + ": 'on " + t.trigger() + "' must be 'success'"
                         + " or a declared error entity");
             }
+            // Entering a flow from a page wires it into real navigation, which promotes its
+            // transitions' "page X" targets from prose to checked references.
+            if (entered) {
+                requirePage(Ast.Flow.pageOf(t.target()), viewNames, where + " 'on " + t.trigger() + "'");
+            }
+        }
+    }
+
+    private static void requirePage(Optional<String> page, Set<String> viewNames, String where) {
+        if (page.isPresent() && !viewNames.contains(page.get())) {
+            throw new CheckException(where + ": no page named '" + page.get() + "' in this module");
         }
     }
 
@@ -723,7 +745,7 @@ public final class TypeChecker {
     }
 
     private void checkView(Ast.View v, Map<String, Map<String, MethodSig>> services,
-                           Set<String> viewNames) {
+                           Set<String> viewNames, Map<String, Ast.Flow> flows) {
         String where = "view " + v.name();
 
         if (v.shows() == null) {
@@ -764,14 +786,26 @@ public final class TypeChecker {
         // row-typed / prompted arguments of matching type.
         for (Ast.Action a : v.actions()) {
             String actionWhere = where + " action \"" + a.label() + "\"";
-            if (a.pageTarget().isPresent()) {
+            if (a.pageTarget().isPresent() || a.flowTarget().isPresent()) {
                 if (a.rowVar().isPresent()) {
                     throw new CheckException(actionWhere + ": navigation is page-level — drop"
                             + " 'on " + a.rowVar().get() + "'");
                 }
-                if (!viewNames.contains(a.pageTarget().get())) {
+                if (a.pageTarget().isPresent() && !viewNames.contains(a.pageTarget().get())) {
                     throw new CheckException(actionWhere + ": no page named '"
                             + a.pageTarget().get() + "' in this module");
+                }
+                if (a.flowTarget().isPresent()) {
+                    Ast.Flow flow = flows.get(a.flowTarget().get());
+                    if (flow == null) {
+                        throw new CheckException(actionWhere + ": no flow named '"
+                                + a.flowTarget().get() + "' in this module");
+                    }
+                    if (flow.entryPage().isEmpty()) {
+                        throw new CheckException(actionWhere + ": flow " + flow.name()
+                                + " has no entry page — bind its first step to one"
+                                + " (step <Name> -> page <Page>)");
+                    }
                 }
                 continue;
             }

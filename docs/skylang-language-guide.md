@@ -377,6 +377,10 @@ page ProductList at "/products" {
   method. The target must be a declared page (`sky check` rejects an unknown name), navigation is
   page-level (no `on <subject>`), and the render is verified to carry a real navigation control
   whose outcome is the target page.
+- `action "Label" -> flow <Name>` — enters a declared flow at its first step. The flow's first
+  step must be bound to a page (`step Cart -> page CartPage`), and the render is verified to
+  navigate there. Entering a flow from a page promotes the flow's `page <Name>` targets — in
+  steps and transitions alike — from prose to checked references: each must name a declared page.
 - `param <name> <Type>` declares a request parameter (Bool-, Int-, or Text-based, e.g. a `Slug`
   for the tenant) the page receives in its URL. Params type-check as `shows`/action arguments,
   and `appears <subject> when <condition>` renders a subject conditionally on them — verified by
@@ -422,6 +426,11 @@ flow Checkout {
 
 The flow graph is verified against its `expect` clauses (no step skipped, no navigation after
 success), so a generated navigation that violates the declared shape fails the build.
+
+A page enters a flow with `action "Check out" -> flow Checkout`. Binding a step to a page
+(`step Cart -> page CartPage`) is formal — the page must exist — and the first step's binding
+is the flow's entry: where the entering action navigates to. An unentered flow may keep prose
+`page …` transition targets; entering it makes every such target a checked reference.
 
 The interface layer is **profile-supplied** (§10): a profile that does not target a UI simply omits
 `page`/`component`/`flow`, and the same domain and behaviour retarget unchanged.

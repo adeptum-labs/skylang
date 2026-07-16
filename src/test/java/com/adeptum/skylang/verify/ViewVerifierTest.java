@@ -229,4 +229,35 @@ class ViewVerifierTest {
         String markup = MARKUP + "<h:button value=\"Products\" outcome=\"ProductList\"/>\n";
         assertTrue(verifier.unmetExpectations(navView(), markup).isEmpty());
     }
+
+    private static Ast.Module flowModule() {
+        return Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text  stock Int @min(0) }
+                service Catalog {
+                  all() -> [Product]  intent "all"
+                }
+                view Cart at "/cart" {
+                  shows Catalog.all() as a table of (name, stock)
+                }
+                flow Checkout {
+                  step Cart -> page Cart
+                }
+                view Home at "/" {
+                  shows Catalog.all() as a table of (name, stock)
+                  action "Check out" -> flow Checkout
+                }
+                """, "shop.sky");
+    }
+
+    @Test
+    void aFlowActionMustNavigateToTheFlowsEntryPage() {
+        Ast.Module m = flowModule();
+        List<String> unmet = verifier.unmetExpectations(m, m.views().get(1), MARKUP, java.util.Set.of());
+        assertEquals(1, unmet.size());
+        assertTrue(unmet.get(0).contains("Check out") && unmet.get(0).contains("Cart"), unmet.get(0));
+
+        String markup = MARKUP + "<h:button value=\"Check out\" outcome=\"Cart\"/>\n";
+        assertTrue(verifier.unmetExpectations(m, m.views().get(1), markup, java.util.Set.of()).isEmpty());
+    }
 }

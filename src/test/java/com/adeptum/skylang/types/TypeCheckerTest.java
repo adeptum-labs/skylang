@@ -454,6 +454,88 @@ class TypeCheckerTest {
     }
 
     @Test
+    void acceptsActionEnteringADeclaredFlow() {
+        assertDoesNotThrow(() -> check(withView("""
+                view Cart at "/cart" {
+                  shows  Catalog.all() as a table of (name, stock)
+                }
+                flow Checkout {
+                  step Cart -> page Cart
+                }
+                view Home at "/" {
+                  shows  Catalog.all() as a table of (name)
+                  action "Check out" -> flow Checkout
+                }
+                """)));
+    }
+
+    @Test
+    void rejectsActionEnteringAnUndeclaredFlow() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view Home at "/" {
+                  shows  Catalog.all() as a table of (name)
+                  action "Check out" -> flow Checkout
+                }
+                """)));
+        assertTrue(e.getMessage().contains("no flow"), e.getMessage());
+        assertTrue(e.getMessage().contains("Checkout"), e.getMessage());
+    }
+
+    @Test
+    void rejectsEnteringAFlowWithoutAnEntryPage() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                flow Checkout {
+                  step Cart -> collect items into a cart
+                }
+                view Home at "/" {
+                  shows  Catalog.all() as a table of (name)
+                  action "Check out" -> flow Checkout
+                }
+                """)));
+        assertTrue(e.getMessage().contains("entry"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAFlowStepBoundToAnUndeclaredPage() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                flow Checkout {
+                  step Pay -> page Nowhere
+                }
+                """)));
+        assertTrue(e.getMessage().contains("no page"), e.getMessage());
+        assertTrue(e.getMessage().contains("Nowhere"), e.getMessage());
+    }
+
+    @Test
+    void anUnenteredFlowKeepsProseTransitionTargets() {
+        assertDoesNotThrow(() -> check(withView("""
+                flow Checkout {
+                  step Pay -> pay for the cart
+                  on success -> page Done
+                }
+                """)));
+    }
+
+    @Test
+    void enteringAFlowPromotesItsTransitionPageTargets() {
+        CheckException e = assertThrows(CheckException.class, () -> check(withView("""
+                view Cart at "/cart" {
+                  shows  Catalog.all() as a table of (name, stock)
+                }
+                flow Checkout {
+                  step Cart -> page Cart
+                  on success -> page Done
+                }
+                view Home at "/" {
+                  shows  Catalog.all() as a table of (name)
+                  action "Check out" -> flow Checkout
+                }
+                """)));
+        assertTrue(e.getMessage().contains("no page"), e.getMessage());
+        assertTrue(e.getMessage().contains("Done"), e.getMessage());
+    }
+
+    @Test
     void rejectsViewUnknownColumn() {
         CheckException e = assertThrows(CheckException.class, () -> check(withView("""
                 view V {

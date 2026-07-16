@@ -281,6 +281,52 @@ class ParsingTest {
     }
 
     @Test
+    void parsesFlowNavigationActionTarget() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Item { id Int @id  name Text }
+                service Catalog {
+                  all() -> [Item]  intent "all"
+                }
+                view Cart at "/cart" {
+                  shows Catalog.all() as a table of (name)
+                }
+                flow Checkout {
+                  step Cart -> page Cart
+                }
+                page Home at "/" {
+                  shows Catalog.all() as a table of (name)
+                  action "Check out" -> flow Checkout
+                }
+                """, "t.sky");
+        Ast.Action action = m.views().get(1).actions().get(0);
+        assertEquals("Check out", action.label());
+        assertEquals("Checkout", action.flowTarget().orElseThrow());
+        assertTrue(action.pageTarget().isEmpty());
+        assertTrue(action.args().isEmpty());
+    }
+
+    @Test
+    void flowEntryPageIsTheFirstStepsFormalPageBinding() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Item { id Int @id  name Text }
+                service Catalog {
+                  all() -> [Item]  intent "all"
+                }
+                flow Checkout {
+                  step Cart -> page Cart
+                  step Pay  -> collect the payment
+                }
+                flow Vague {
+                  step Wander -> look around freely
+                }
+                """, "t.sky");
+        assertEquals("Cart", m.flows().get(0).entryPage().orElseThrow());
+        assertTrue(m.flows().get(1).entryPage().isEmpty());
+    }
+
+    @Test
     void actionToStringShowsAPageTargetOnlyWhenPresent() {
         assertEquals("Action[label=Products, page=ProductList]",
                 new Ast.Action("Products", java.util.Optional.empty(), "", "",
@@ -288,6 +334,9 @@ class ParsingTest {
         assertEquals("Action[label=Sign out, service=Session, method=signOut, args=[]]",
                 new Ast.Action("Sign out", java.util.Optional.empty(), "Session", "signOut",
                         List.of(), java.util.Optional.empty()).toString());
+        assertEquals("Action[label=Check out, flow=Checkout]",
+                new Ast.Action("Check out", java.util.Optional.empty(), "", "", List.of(),
+                        java.util.Optional.empty(), java.util.Optional.of("Checkout")).toString());
     }
 
     @Test

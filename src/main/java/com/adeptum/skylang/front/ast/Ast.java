@@ -59,6 +59,18 @@ public final class Ast {
     /** {@code flow Checkout { step ... on ... expect ... }} — typed steps, guarded transitions. */
     public record Flow(String name, List<FlowStep> steps, List<FlowTransition> transitions,
                        List<String> expects) {
+
+        /** The formal {@code page X} form of a step/transition target, or empty for prose. */
+        public static Optional<String> pageOf(String target) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("^page (\\w+)$").matcher(target.strip());
+            return m.matches() ? Optional.of(m.group(1)) : Optional.empty();
+        }
+
+        /** The page bound to the first step — where entering the flow lands. */
+        public Optional<String> entryPage() {
+            return steps.isEmpty() ? Optional.empty() : pageOf(steps.get(0).target());
+        }
     }
 
     /** {@code step Pay -> CheckoutService.place(the cart, the customer)}. */
@@ -516,17 +528,24 @@ public final class Ast {
     /**
      * {@code action "Restock" on row -> Catalog.restock(row.id, ask Int)}; without an
      * {@code on <subject>} the action is page-level. {@code action "X" -> page Y} navigates
-     * instead of calling a method, carrying the target view in {@code pageTarget} with an
-     * empty service and method. The view freeze hash covers this record's string form, so
-     * {@code toString} is pinned: an action with a subject keeps the original record format,
-     * and the {@code rowVar} and {@code page} attributes are omitted when absent.
+     * and {@code action "X" -> flow Y} enters a flow instead of calling a method, carrying
+     * the target in {@code pageTarget}/{@code flowTarget} with an empty service and method.
+     * The view freeze hash covers this record's string form, so {@code toString} is pinned:
+     * an action with a subject keeps the original record format, and the {@code rowVar},
+     * {@code page} and {@code flow} attributes are omitted when absent.
      */
     public record Action(String label, Optional<String> rowVar, String service, String method,
-                         List<ActionArg> args, Optional<String> pageTarget) {
+                         List<ActionArg> args, Optional<String> pageTarget,
+                         Optional<String> flowTarget) {
 
         public Action(String label, Optional<String> rowVar, String service, String method,
                       List<ActionArg> args) {
-            this(label, rowVar, service, method, args, Optional.empty());
+            this(label, rowVar, service, method, args, Optional.empty(), Optional.empty());
+        }
+
+        public Action(String label, Optional<String> rowVar, String service, String method,
+                      List<ActionArg> args, Optional<String> pageTarget) {
+            this(label, rowVar, service, method, args, pageTarget, Optional.empty());
         }
 
         @Override
@@ -534,6 +553,7 @@ public final class Ast {
             return "Action[label=" + label
                     + rowVar.map(r -> ", rowVar=" + r).orElse("")
                     + pageTarget.map(p -> ", page=" + p)
+                            .or(() -> flowTarget.map(f -> ", flow=" + f))
                             .orElse(", service=" + service + ", method=" + method + ", args=" + args)
                     + "]";
         }

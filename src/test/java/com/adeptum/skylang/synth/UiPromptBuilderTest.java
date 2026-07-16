@@ -208,6 +208,30 @@ class UiPromptBuilderTest {
     }
 
     @Test
+    void userPromptPrescribesAFlowEntryButton() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text  stock Int @min(0) }
+                service Catalog {
+                  all() -> [Product]  intent "all"
+                }
+                view Cart at "/cart" {
+                  shows Catalog.all() as a table of (name, stock)
+                }
+                flow Checkout {
+                  step Cart -> page Cart
+                }
+                view Home at "/" {
+                  shows Catalog.all() as a table of (name)
+                  action "Check out" -> flow Checkout
+                }
+                """, "shop.sky");
+        String user = prompts.user(m, m.views().get(1));
+        assertTrue(user.contains("\"Check out\" on the page -> enter flow Checkout"), user);
+        assertTrue(user.contains("<h:button outcome=\"Cart\""), user);
+    }
+
+    @Test
     void userPromptDescribesAppearance() {
         Ast.Module m = Parsing.parse(SRC, "shop.sky");
         Ast.View view = m.views().get(0);

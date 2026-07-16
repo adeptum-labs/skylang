@@ -77,6 +77,17 @@ public final class ViewVerifier {
         return type instanceof Ast.TypeRef ref && !ref.list() && ref.name().equals("Bytes");
     }
 
+    /** The entry page of the named flow, when the module is in hand to resolve it. */
+    private static java.util.Optional<String> entryPageOf(Ast.Module module, String flow) {
+        if (module == null) {
+            return java.util.Optional.empty();
+        }
+        return module.flows().stream()
+                .filter(f -> f.name().equals(flow))
+                .findFirst()
+                .flatMap(Ast.Flow::entryPage);
+    }
+
     /** The first bare name in a condition — the styleClass the conditional element must carry. */
     private static String firstName(Ast.Expr e) {
         return switch (e) {
@@ -97,6 +108,15 @@ public final class ViewVerifier {
      * an {@code h:graphicImage} bound to the field's {@code DataUri} bean helper.
      */
     public List<String> unmetExpectations(Ast.View view, String markup, java.util.Set<String> imageColumns) {
+        return unmetExpectations(null, view, markup, imageColumns);
+    }
+
+    /**
+     * As above with the module in hand, so a flow-entry action can resolve its flow's entry
+     * page — the outcome its navigation control must carry.
+     */
+    public List<String> unmetExpectations(Ast.Module module, Ast.View view, String markup,
+                                          java.util.Set<String> imageColumns) {
         SemanticTree tree = extractor.extract(markup);
         List<String> unmet = new ArrayList<>();
         for (String field : imageColumns) {
@@ -105,13 +125,15 @@ public final class ViewVerifier {
                         + " (h:graphicImage bound to " + field + "DataUri)");
             }
         }
-        // A navigation action must be a real navigation control whose outcome names its target.
+        // A navigation action must be a real navigation control whose outcome names its target —
+        // the page itself, or the entered flow's entry page.
         for (Ast.Action a : view.actions()) {
-            if (a.pageTarget().isPresent()
-                    && !tree.navigatesTo(a.label(), a.pageTarget().get())) {
-                unmet.add("expected \"" + a.label() + "\" to navigate to page "
-                        + a.pageTarget().get() + " (an h:button/h:link with outcome=\""
-                        + a.pageTarget().get() + "\")");
+            String target = a.pageTarget()
+                    .or(() -> a.flowTarget().flatMap(f -> entryPageOf(module, f)))
+                    .orElse(null);
+            if (target != null && !tree.navigatesTo(a.label(), target)) {
+                unmet.add("expected \"" + a.label() + "\" to navigate to page " + target
+                        + " (an h:button/h:link with outcome=\"" + target + "\")");
             }
         }
         for (Ast.Expect e : view.expects()) {

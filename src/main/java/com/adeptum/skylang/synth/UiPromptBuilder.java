@@ -150,6 +150,17 @@ public final class UiPromptBuilder {
                             .append("\"/>; no bean method backs this action.\n");
                     continue;
                 }
+                if (a.flowTarget().isPresent()) {
+                    String entry = module.flows().stream()
+                            .filter(f -> f.name().equals(a.flowTarget().get()))
+                            .findFirst().flatMap(Ast.Flow::entryPage).orElse(a.flowTarget().get());
+                    sb.append("  \"").append(a.label())
+                            .append("\" on the page -> enter flow ").append(a.flowTarget().get())
+                            .append(" at its first step — render exactly <h:button outcome=\"")
+                            .append(entry).append("\" value=\"").append(a.label())
+                            .append("\"/>; no bean method backs this action.\n");
+                    continue;
+                }
                 String args = a.args().stream()
                         .map(arg -> renderArg(arg, types))
                         .collect(Collectors.joining(", "));

@@ -522,6 +522,10 @@ public final class AstBuilder {
             return new Ast.Action(label, rowVar, "", "", List.of(),
                     Optional.of(t.ID(0).getText()));
         }
+        if (t.FLOW() != null) {
+            return new Ast.Action(label, rowVar, "", "", List.of(),
+                    Optional.empty(), Optional.of(t.ID(0).getText()));
+        }
         List<Ast.ActionArg> args = new ArrayList<>();
         for (SkyLangParser.ActionArgContext a : t.actionArg()) {
             args.add(actionArg(a));
