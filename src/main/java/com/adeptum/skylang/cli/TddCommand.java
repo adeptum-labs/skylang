@@ -110,7 +110,7 @@ public final class TddCommand implements Callable<Integer> {
     private int cycle() {
         Ast.Module module;
         try {
-            module = Parsing.parseFile(file);
+            module = Parsing.parseUnit(file);
             new TypeChecker().check(module);
         } catch (SkyParseException | CheckException e) {
             System.out.println("  red   " + e.getMessage());

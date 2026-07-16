@@ -70,7 +70,7 @@ public final class TestCommand implements Callable<Integer> {
         ActiveProfile.Activation active;
         try {
             file = SourceFiles.resolve(file);
-            module = Parsing.parseFile(file);
+            module = Parsing.parseUnit(file);
             new TypeChecker().check(module);
             active = ActiveProfile.activate(profile, file, module);
         } catch (SkyParseException | CheckException | ConfigException e) {

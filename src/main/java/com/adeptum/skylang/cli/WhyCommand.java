@@ -69,7 +69,7 @@ public final class WhyCommand implements Callable<Integer> {
         Ast.Module module;
         ActiveProfile.Activation active;
         try {
-            module = Parsing.parseFile(file);
+            module = Parsing.parseUnit(file);
             new TypeChecker().check(module);
             active = ActiveProfile.activate(null, file, module);
         } catch (SkyParseException | CheckException | ConfigException e) {

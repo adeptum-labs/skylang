@@ -22,6 +22,7 @@
 package com.adeptum.skylang.cli;
 
 import com.adeptum.skylang.config.ConfigException;
+import com.adeptum.skylang.front.Parsing;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -60,6 +61,15 @@ final class SourceFiles {
         }
         if (sources.isEmpty()) {
             throw new ConfigException("no .sky file in this directory — name one explicitly");
+        }
+        // Several files declaring one module are one unit; the first anchors it. Mixed
+        // modules (or unreadable headers) stay ambiguous and are refused by name.
+        long modules = sources.stream()
+                .map(p -> Parsing.moduleHeaderOf(p).orElse("? " + p))
+                .distinct()
+                .count();
+        if (modules == 1) {
+            return sources.get(0);
         }
         throw new ConfigException("several .sky files here (" + sources.stream()
                 .map(p -> p.getFileName().toString())

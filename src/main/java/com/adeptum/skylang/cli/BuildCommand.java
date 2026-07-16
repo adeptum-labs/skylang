@@ -78,7 +78,7 @@ public final class BuildCommand implements Callable<Integer> {
 
         Ast.Module module;
         try {
-            module = Parsing.parseFile(file);
+            module = Parsing.parseUnit(file);
             new TypeChecker().check(module);
         } catch (SkyParseException | CheckException e) {
             System.err.println("error [frontend]: " + e.getMessage());

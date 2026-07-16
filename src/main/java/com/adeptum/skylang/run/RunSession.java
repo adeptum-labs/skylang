@@ -233,13 +233,13 @@ public final class RunSession implements AutoCloseable {
 
     private void watch(Path sourceFile) {
         Path dir = sourceFile.toAbsolutePath().getParent();
-        String name = sourceFile.getFileName().toString();
         try (WatchService watcher = FileSystems.getDefault().newWatchService()) {
             dir.register(watcher, StandardWatchEventKinds.ENTRY_MODIFY, StandardWatchEventKinds.ENTRY_CREATE);
             while (true) {
                 WatchKey key = watcher.take();
+                // Any .sky file may carry part of the running module, so all of them rebuild.
                 boolean touched = key.pollEvents().stream()
-                        .anyMatch(event -> name.equals(String.valueOf(event.context())));
+                        .anyMatch(event -> String.valueOf(event.context()).endsWith(".sky"));
                 key.reset();
                 if (touched) {
                     Thread.sleep(150);   // debounce an editor's write burst
@@ -264,7 +264,7 @@ public final class RunSession implements AutoCloseable {
             }
             try {
                 out.println("run: " + sourceFile.getFileName() + " changed — rebuilding.");
-                Ast.Module module = Parsing.parse(Files.readString(sourceFile), sourceFile.getFileName().toString());
+                Ast.Module module = Parsing.parseUnit(sourceFile);
                 new TypeChecker().check(module);
                 if (module.views().isEmpty()) {
                     throw new IOException(module.name() + " has no views to run");

@@ -51,7 +51,7 @@ public final class CheckCommand implements Callable<Integer> {
     public Integer call() {
         try {
             file = SourceFiles.resolve(file);
-            Ast.Module module = Parsing.parseFile(file);
+            Ast.Module module = Parsing.parseUnit(file);
             new TypeChecker().check(module);
             ActiveProfile.activate(profile, file, module);   // the portability boundary is frontend
             checkpoint(module);

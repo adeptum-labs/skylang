@@ -74,6 +74,13 @@ That is a complete, compilable program. You wrote four type lines and two contra
 bodies of `add` and `restock` are synthesized and then *verified* against the `ensures`
 clauses and the `example`.
 
+A module need not live in one file. Every `.sky` file in the project directory that opens
+with the same `module` header is part of the same unit — the files merge in filename order,
+so `a-domain.sky`, `b-services.sky` and `c-pages.sky` read as one module. Declaring the same
+name twice across files is an error naming both files. Files with a *different* header are
+simply other modules and are left alone; a bare command (`sky check` with no argument) works
+whenever the directory holds a single module, however many files carry it.
+
 ---
 
 ## 4. The type system

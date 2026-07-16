@@ -59,4 +59,11 @@ class SourceFilesTest {
         ConfigException many = assertThrows(ConfigException.class, () -> SourceFiles.resolve(null, dir));
         assertTrue(many.getMessage().contains("a.sky, b.sky"), many.getMessage());
     }
+
+    @Test
+    void severalFilesOfOneModuleResolveToTheFirst(@TempDir Path dir) throws IOException {
+        Path domain = Files.writeString(dir.resolve("a-domain.sky"), "module shop\n");
+        Files.writeString(dir.resolve("b-pages.sky"), "module shop\n");
+        assertEquals(domain, SourceFiles.resolve(null, dir));
+    }
 }
