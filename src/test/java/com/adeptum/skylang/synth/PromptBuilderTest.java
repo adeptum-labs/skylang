@@ -23,7 +23,10 @@ package com.adeptum.skylang.synth;
 
 import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.ast.Ast;
+import com.adeptum.skylang.types.TypeChecker;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -245,5 +248,46 @@ class PromptBuilderTest {
         String user = prompts.user(m, m.services().get(1), m.services().get(1).methods().get(0));
         assertTrue(user.contains("no effects"), "a service without a budget is pure computation");
         assertFalse(user.contains("db.save"), "no handles may be offered to a pure service");
+    }
+
+    // ----- developer-defined annotations ---------------------------------------
+
+    @Test
+    void annotationsInForceJoinTheBodyPrompt() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation fast(level Int) {
+                  intent "Prefer O({level}) memory."
+                  expect no intermediate list is larger than {level} items
+                }
+                annotation stored(store Text) { intent "Persist through {store}." }
+                @stored("mongodb")
+                entity Product { id Int }
+                @fast(1)
+                service Catalog {
+                  @fast(2)
+                  all() -> [Product]  intent "Every product."
+                }
+                """, "shop.sky");
+        new TypeChecker().check(m);
+        Ast.Service catalog = m.services().get(0);
+        String prompt = new PromptBuilder().user(m, catalog, catalog.methods().get(0), List.of());
+        assertTrue(prompt.contains("@fast(1): Prefer O(1) memory."), prompt);
+        assertTrue(prompt.contains("@fast(2): Prefer O(2) memory."), prompt);
+        assertTrue(prompt.contains("expect no intermediate list is larger than 1 items"), prompt);
+        assertTrue(prompt.contains("@stored(\"mongodb\"): Persist through mongodb."), prompt);
+    }
+
+    @Test
+    void unannotatedPromptsCarryNoAnnotationBlock() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Product { id Int }
+                service Catalog { all() -> [Product]  intent "Every product." }
+                """, "shop.sky");
+        new TypeChecker().check(m);
+        Ast.Service catalog = m.services().get(0);
+        String prompt = new PromptBuilder().user(m, catalog, catalog.methods().get(0), List.of());
+        assertFalse(prompt.contains("Annotations"), prompt);
     }
 }

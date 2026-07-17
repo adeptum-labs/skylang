@@ -98,11 +98,22 @@ public final class UiPromptBuilder {
                     .collect(Collectors.joining(", "));
             sb.append("record ").append(e.name()).append("(").append(components).append(")\n");
         }
+        for (Ast.Entity e : module.entities()) {
+            String entityNotes = AnnotationNotes.forEntity(module, e);
+            if (!entityNotes.isEmpty()) {
+                sb.append(entityNotes);
+            }
+        }
 
         sb.append("\n// View to render:\n");
         sb.append("view ").append(view.name());
         view.route().ifPresent(r -> sb.append(" at \"").append(r).append("\""));
         sb.append('\n');
+        String annotations = AnnotationNotes.forTarget(module, "Annotations in force — honor each",
+                view.annotations());
+        if (!annotations.isEmpty()) {
+            sb.append(annotations);
+        }
         if (!view.params().isEmpty()) {
             sb.append("Request params: ").append(view.params().stream()
                     .map(p -> p.name() + " " + p.type().sky())
@@ -238,6 +249,11 @@ public final class UiPromptBuilder {
     public String componentUser(Ast.Module module, Ast.Component component) {
         StringBuilder sb = new StringBuilder();
         sb.append("// Component to render:\n");
+        String annotations = AnnotationNotes.forTarget(module, "Annotations in force — honor each",
+                component.annotations());
+        if (!annotations.isEmpty()) {
+            sb.append(annotations);
+        }
         sb.append("component ").append(component.name()).append('(');
         sb.append(component.params().stream()
                 .map(p -> p.name() + " " + p.type().sky())

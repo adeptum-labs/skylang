@@ -70,6 +70,10 @@ public final class TsPromptBuilder {
             }
             sb.append('\n');
         }
+        String annotations = AnnotationNotes.forMethod(module, service, method);
+        if (!annotations.isEmpty()) {
+            sb.append(annotations).append('\n');
+        }
         sb.append("// Entities in scope (their TypeScript class shapes):\n");
         for (Ast.Entity e : module.entities()) {
             if (e.fields().isEmpty()) {
@@ -80,6 +84,10 @@ public final class TsPromptBuilder {
                     .map(f -> "readonly " + f.name() + ": " + TsStager.tsType(f.type()))
                     .collect(Collectors.joining(", "));
             sb.append("class ").append(e.name()).append(" { ").append(fields).append(" }\n");
+            String entityNotes = AnnotationNotes.forEntity(module, e);
+            if (!entityNotes.isEmpty()) {
+                sb.append(entityNotes);
+            }
         }
         if (!service.uses().isEmpty()) {
             sb.append("\n// Effects available on this: ")

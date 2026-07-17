@@ -23,6 +23,7 @@ package com.adeptum.skylang.synth;
 
 import com.adeptum.skylang.front.Parsing;
 import com.adeptum.skylang.front.ast.Ast;
+import com.adeptum.skylang.types.TypeChecker;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -329,5 +330,24 @@ class UiPromptBuilderTest {
         assertTrue(UiPromptBuilder.STANDARD.contains("f:validateLongRange"));
         assertTrue(UiPromptBuilder.STANDARD.contains("f:validateLength"));
         assertTrue(UiPromptBuilder.STANDARD.contains("f:validateRegex"));
+    }
+
+    // ----- developer-defined annotations ---------------------------------------
+
+    @Test
+    void viewAnnotationsJoinTheUiPrompt() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation compactui { intent "Render the densest reasonable layout." }
+                entity Product { id Int  name Text }
+                service Catalog { all() -> [Product]  intent "Every product." }
+                @compactui
+                view ProductList at "/products" {
+                  shows  Catalog.all() as a table of (name)
+                }
+                """, "shop.sky");
+        new TypeChecker().check(m);
+        String prompt = new UiPromptBuilder().user(m, m.views().get(0));
+        assertTrue(prompt.contains("@compactui: Render the densest reasonable layout."), prompt);
     }
 }

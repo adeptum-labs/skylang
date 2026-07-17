@@ -131,6 +131,11 @@ public final class PromptBuilder {
             sb.append('\n');
         }
 
+        String annotations = AnnotationNotes.forMethod(module, service, method);
+        if (!annotations.isEmpty()) {
+            sb.append(annotations).append('\n');
+        }
+
         sb.append("// Entities in scope (their Java record shapes):\n");
         for (Ast.Entity e : module.entities()) {
             String components = e.fields().stream()
@@ -148,6 +153,10 @@ public final class PromptBuilder {
                     .collect(Collectors.joining(", "));
             if (!scoped.isEmpty()) {
                 sb.append("  // ").append(scoped);
+            }
+            String entityNotes = AnnotationNotes.forEntity(module, e);
+            if (!entityNotes.isEmpty()) {
+                sb.append('\n').append(entityNotes.stripTrailing());
             }
             sb.append('\n');
         }
