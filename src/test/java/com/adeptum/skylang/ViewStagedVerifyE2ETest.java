@@ -118,6 +118,23 @@ class ViewStagedVerifyE2ETest {
         assertEquals(0, code, () -> "staged render verification failed:\n" + out.toString(StandardCharsets.UTF_8));
     }
 
+    /** A session-scoped service must still deploy: the bean serializes and TomEE proxies it per session. */
+    @Test
+    void sessionScopedServiceRendersInContainer(@TempDir Path root) {
+        Ast.Module module = Parsing.parse(
+                SHOP_VIEW.replace("service Catalog", "@scope(session)\nservice Catalog"),
+                "shop.sky");
+        new TypeChecker().check(module);
+
+        var out = new ByteArrayOutputStream();
+        int code = new Pipeline(stub(), new MavenVerifier())
+                .build(module, root.resolve("sky.lock"), root.resolve("build/jvm-jakarta"),
+                        new PrintStream(out), new PrintStream(out));
+
+        assertEquals(0, code, () -> "staged render verification failed:\n"
+                + out.toString(StandardCharsets.UTF_8));
+    }
+
     private static final String STORE_VIEW = """
             module store
             entity Order { id Int @id  total Money }
