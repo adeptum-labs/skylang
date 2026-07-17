@@ -237,6 +237,8 @@
     <nav>
       <a class="hide" href="#layers">Two&nbsp;layers</a>
       <a class="hide" href="#tests">Tests</a>
+      <a class="hide" href="#interface">Interface</a>
+      <a class="hide" href="#annotations">Annotations</a>
       <a class="hide" href="#pipeline">Pipeline</a>
       <a class="hide" href="#tooling">Tooling</a>
       <a href="https://github.com/adeptum-labs/skylang/blob/master/docs/skylang-language-guide.md">Guide</a>
@@ -499,6 +501,119 @@
     <span class="c"># example: stock</span>
     <span class="k">assert</span> result.stock == 8</pre>
           </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule" aria-hidden="true"><span>✳</span></div>
+
+  <!-- INTERFACE LAYER -->
+  <section class="band" id="interface">
+    <div class="wrap">
+      <p class="eyebrow">The interface layer</p>
+      <h2>Pages, flows, and components are contracts too.</h2>
+      <p class="lede">
+        The interface is declared, not assembled: what a page <code>shows</code>, which
+        <code>action</code>s it offers, how it <code>appears</code>, and what you
+        <code>expect</code> of it. The compiler synthesises the page, deploys the application
+        into an embedded container, and proves every expectation against the <em>rendered</em>
+        page — real markup, real navigation, offline. Flows bind multi-page journeys to typed
+        steps, components are reusable widgets with their own expectations, and
+        <code>sign&nbsp;in</code> is a declaration that compiles onto OpenID&nbsp;Connect.
+      </p>
+
+      <div class="split" data-reveal>
+        <div class="code">
+          <div class="cap"><span class="dot"></span> shop.sky · the page is the spec</div>
+<pre><span class="k">page</span> <span class="t">ProductList</span> <span class="k">at</span> <span class="s">"/products"</span> {
+  <span class="k">shows</span>   Catalog.all() <span class="k">as a</span> sortable table <span class="k">of</span> (name, stock)
+  <span class="k">action</span>  <span class="s">"Restock"</span> <span class="k">on</span> row -&gt; Catalog.restock(row, <span class="k">ask</span> <span class="t">Int</span>)
+  <span class="k">action</span>  <span class="s">"Sign in"</span> -&gt; sign <span class="k">in then page</span> <span class="t">Dashboard</span>
+  <span class="k">expect</span>  table has columns (name, stock)
+  <span class="k">appears</span> the sign-out control <span class="k">when</span> signed <span class="k">in</span>
+}
+
+<span class="k">flow</span> <span class="t">Checkout</span> {
+  <span class="k">step</span> Cart -&gt; <span class="k">page</span> <span class="t">CartPage</span>
+  <span class="k">step</span> Pay  -&gt; CheckoutService.place(the cart)
+  <span class="k">on</span> PaymentFailed -&gt; back to <span class="k">step</span> Pay
+}</pre>
+        </div>
+
+        <div class="arrow" aria-hidden="true">
+          <span class="m">render</span><span class="a">→</span><span class="m">prove · freeze</span>
+        </div>
+
+        <div class="term">
+          <div class="bar">$ sky build</div>
+<pre>  page ProductList  <span class="ok">▸ deployed &amp; rendered in-container</span>
+    <span class="ok">✓</span> table has columns (name, stock)
+    <span class="ok">✓</span> action "Restock" is a button
+    <span class="ok">✓</span> signed in: the sign-out control appears
+    <span class="ok">✓</span> signed out: the control is absent
+  flow Checkout     <span class="ok">▸ every step bound to a page</span>
+
+  <span class="dim">expectations hold on the semantic tree — not pixels,
+  not a headless-browser screenshot diff</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule" aria-hidden="true"><span>✳</span></div>
+
+  <!-- DEVELOPER-DEFINED ANNOTATIONS -->
+  <section class="band" id="annotations">
+    <div class="wrap">
+      <p class="eyebrow">Your own vocabulary</p>
+      <h2>Declare an annotation once. It drives behaviour wherever it lands.</h2>
+      <p class="lede">
+        An <code>annotation</code> is a named bundle of intent and expectations — optionally
+        parameterised — that attaches to an entity, a service, a method, a page, or a
+        component. Its substituted prose steers every implementation realised under the target
+        and joins its freeze hash: annotate a service and every body it owns is regenerated
+        and proven against its contracts again; sharpen the annotation itself and everything
+        it touches follows. Built-ins ride the same surface — <code>@scope(session)</code>
+        gives a service one bean instance per visitor.
+      </p>
+
+      <div class="split" data-reveal>
+        <div class="code">
+          <div class="cap"><span class="dot"></span> shop.sky · your vocabulary, checked like code</div>
+<pre><span class="k">annotation</span> <span class="t">memory_optimized</span> {
+  <span class="k">intent</span> <span class="s">"Prefer streaming, constant-memory
+          implementations; never materialize
+          whole collections."</span>
+}
+
+<span class="k">annotation</span> <span class="t">databasebacked</span>(store <span class="t">Text</span>) {
+  <span class="k">intent</span> <span class="s">"Persist through the {store} store."</span>
+  <span class="k">expect</span> every read and write goes through {store}
+}
+
+<span class="m">@memory_optimized</span>
+<span class="k">service</span> <span class="t">Catalog</span> {
+  <span class="t">all</span>() -&gt; [<span class="t">Product</span>]  <span class="k">intent</span> <span class="s">"Every product."</span>
+  <span class="t">restock</span>(id <span class="t">Int</span>, units <span class="t">Int</span>) -&gt; <span class="t">Product</span>
+    <span class="k">intent</span> <span class="s">"Increase stock."</span>
+}</pre>
+        </div>
+
+        <div class="arrow" aria-hidden="true">
+          <span class="m">attach</span><span class="a">→</span><span class="m">re-prove</span>
+        </div>
+
+        <div class="term">
+          <div class="bar">$ sky build</div>
+<pre>  <span class="dim">annotation memory_optimized · intent sharpened</span>
+
+  Catalog.all             <span class="re">▸ regenerated</span>      <span class="dim">✓ verified</span>
+  Catalog.restock         <span class="re">▸ regenerated</span>      <span class="dim">✓ verified</span>
+  AccountService.register <span class="ok">▸ frozen @ a17be0</span>   <span class="dim">(untouched)</span>
+
+  <span class="dim">an annotation is part of the specification:
+  change it, and only what it governs re-freezes</span></pre>
         </div>
       </div>
     </div>
