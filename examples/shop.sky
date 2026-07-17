@@ -24,3 +24,9 @@ view ProductList at "/products" {
   expect table has columns (name, stock)
   expect action "Restock" is button
 }
+
+@scope(session)
+service Cart {
+  add(qty Int) -> Int
+    intent "Add qty items to this visitor's cart and return the new count."
+}

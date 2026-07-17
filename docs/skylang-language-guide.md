@@ -212,6 +212,30 @@ service AccountService uses db, clock, mail {
 }
 ```
 
+### Service lifecycle: `@scope`
+
+By default a service compiles to one shared, stateless instance for the whole
+application. An annotation line before the declaration picks a different lifecycle:
+
+```sky
+@scope(session)
+service Cart {
+  add(qty Int) -> Int
+    intent "Add qty items to this visitor's cart and return the new count."
+}
+```
+
+| Scope         | One instance per…                                             |
+|---------------|----------------------------------------------------------------|
+| `application` | application — shared and stateless (the default)               |
+| `request`     | request — thrown away when the response is sent                |
+| `session`     | visitor session — per-user working state, like a cart          |
+| `cluster`     | cluster — application-wide state shared across all nodes       |
+
+The scope governs the service *instance*: with `session`, state the body keeps on the
+instance belongs to one visitor. Stored entities live in the store regardless of scope.
+§10.2 lists how each scope lowers on the JVM profile.
+
 ---
 
 ## 6. Methods: signature is hard, body is driven
@@ -562,6 +586,12 @@ backend stages a standard Maven project under `build/jvm-jakarta/` and delegates
 persistence layer, `clock` a controllable time source, `mail`/`http` the matching Jakarta
 facilities. The dependency registry maps logical names onto Maven artifacts — `bcrypt ^4.0`
 resolves to `org.mindrot:jbcrypt` at a pinned version.
+
+`@scope` lowers onto CDI: `application`, `request` and `session` become the matching
+`jakarta.enterprise.context` scope, with `session` beans staged serializable so they can
+passivate. `cluster` becomes Payara's Hazelcast-backed `@fish.payara.cluster.Clustered`
+singleton — the staged POM then carries the `payara-api` dependency; a container without
+the extension ignores the extra annotation and falls back to one instance per node.
 
 The standard library adds declarative constructs that compile onto the Jakarta stack:
 
