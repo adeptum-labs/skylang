@@ -152,4 +152,19 @@ class FreezeFormatTest {
         assertTrue(spec.contains("service-annotations [@fast(1)]"), spec);
         assertTrue(spec.contains(", annotations=[@fast(2)]]"), spec);
     }
+
+    /** Two services may declare value-identical methods; the spec must bind the true owner. */
+    @Test
+    void serviceAnnotationsBindByIdentityNotShape() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation fast { intent "Hurry." }
+                entity Product { id Int }
+                service Plain { all() -> [Product]  intent "Every product." }
+                @fast
+                service Quick { all() -> [Product]  intent "Every product." }
+                """, "shop.sky");
+        String spec = Pipeline.specString(m, m.services().get(1).methods().get(0));
+        assertTrue(spec.contains("service-annotations [@fast]"), spec);
+    }
 }

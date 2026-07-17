@@ -964,7 +964,9 @@ public final class Pipeline {
         }
         // The owning service's annotations steer this body's prompt, so they are part of its
         // spec; an unannotated service contributes nothing, keeping older hashes exact.
-        module.services().stream().filter(s -> s.methods().contains(method)).findFirst()
+        // Ownership is resolved by instance identity: two services may declare value-identical methods.
+        module.services().stream()
+                .filter(s -> s.methods().stream().anyMatch(m -> m == method)).findFirst()
                 .filter(s -> !s.annotations().isEmpty())
                 .ifPresent(s -> sb.append("service-annotations ").append(s.annotations()).append('\n'));
         sb.append("method ").append(method).append('\n');
