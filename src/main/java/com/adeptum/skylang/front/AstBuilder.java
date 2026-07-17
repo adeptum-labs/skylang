@@ -51,13 +51,13 @@ public final class AstBuilder {
             } else if (decl.service() != null) {
                 services.add(service(decl.service(), scopeOf(anns), uses(anns, true)));
             } else if (decl.typeDecl() != null) {
-                requireBare(anns, "a type");
+                requireBare(anns, "a type declaration");
                 types.add(typeDecl(decl.typeDecl()));
             } else if (decl.policy() != null) {
-                requireBare(anns, "a policy");
+                requireBare(anns, "a policy declaration");
                 policies.add(policy(decl.policy()));
             } else if (decl.flow() != null) {
-                requireBare(anns, "a flow");
+                requireBare(anns, "a flow declaration");
                 flows.add(flow(decl.flow()));
             } else if (decl.component() != null) {
                 components.add(component(decl.component(), uses(anns, false)));
@@ -336,7 +336,7 @@ public final class AstBuilder {
 
     private static void requireBare(List<SkyLangParser.AnnotationContext> annotations, String kind) {
         if (!annotations.isEmpty()) {
-            throw new IllegalArgumentException(kind + " declaration does not take annotations");
+            throw new IllegalArgumentException(kind + " does not take annotations");
         }
     }
 

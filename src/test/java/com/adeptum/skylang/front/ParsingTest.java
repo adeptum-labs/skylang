@@ -1438,6 +1438,20 @@ class ParsingTest {
     }
 
     @Test
+    void parsesAnnotationUsesOnAComponent() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation fast { intent "Hurry." }
+                entity Product { id Int  stock Int }
+                @fast
+                component StockBadge(product Product) {
+                  shows product.stock as a badge
+                }
+                """, "shop.sky");
+        assertEquals("@fast", m.components().get(0).annotations().get(0).toString());
+    }
+
+    @Test
     void unknownDeclAnnotationParsesForTheCheckerToJudge() {
         Ast.Module m = Parsing.parse("""
                 module shop
