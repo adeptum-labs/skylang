@@ -339,6 +339,8 @@ class UiPromptBuilderTest {
         Ast.Module m = Parsing.parse("""
                 module shop
                 annotation compactui { intent "Render the densest reasonable layout." }
+                annotation stored(store Text) { intent "Persist through {store}." }
+                @stored("mongodb")
                 entity Product { id Int  name Text }
                 service Catalog { all() -> [Product]  intent "Every product." }
                 @compactui
@@ -348,6 +350,23 @@ class UiPromptBuilderTest {
                 """, "shop.sky");
         new TypeChecker().check(m);
         String prompt = new UiPromptBuilder().user(m, m.views().get(0));
+        assertTrue(prompt.contains("@compactui: Render the densest reasonable layout."), prompt);
+        assertTrue(prompt.contains("@stored(\"mongodb\"): Persist through mongodb."), prompt);
+    }
+
+    @Test
+    void componentAnnotationsJoinTheComponentPrompt() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation compactui { intent "Render the densest reasonable layout." }
+                entity Product { id Int  stock Int }
+                @compactui
+                component StockBadge(product Product) {
+                  shows product.stock as a badge
+                }
+                """, "shop.sky");
+        new TypeChecker().check(m);
+        String prompt = new UiPromptBuilder().componentUser(m, m.components().get(0));
         assertTrue(prompt.contains("@compactui: Render the densest reasonable layout."), prompt);
     }
 }
