@@ -1318,4 +1318,78 @@ class ParsingTest {
                 type X = Text matching 5
                 """, "t.sky"));
     }
+
+    @Test
+    void parsesServiceScope() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                @scope(session)
+                service Cart {
+                  count() -> Int  intent "How many items."
+                }
+                """, "shop.sky");
+        assertEquals(Ast.Scope.SESSION, m.services().get(0).scope());
+    }
+
+    @Test
+    void serviceScopeDefaultsToApplication() {
+        Ast.Module m = Parsing.parse(SHOP, "shop.sky");
+        assertEquals(Ast.Scope.APPLICATION, m.services().get(0).scope());
+    }
+
+    @Test
+    void rejectsUnknownScopeValue() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> Parsing.parse("""
+                        module shop
+                        @scope(global)
+                        service Cart { count() -> Int  intent "How many." }
+                        """, "shop.sky"));
+        assertTrue(e.getMessage().contains("application, request, session or cluster"), e.getMessage());
+    }
+
+    @Test
+    void rejectsScopeOnAnEntity() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> Parsing.parse("""
+                        module shop
+                        @scope(session)
+                        entity Product { id Int }
+                        """, "shop.sky"));
+        assertTrue(e.getMessage().contains("@scope only applies to services"), e.getMessage());
+    }
+
+    @Test
+    void rejectsARepeatedScope() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> Parsing.parse("""
+                        module shop
+                        @scope(session)
+                        @scope(request)
+                        service Cart { count() -> Int  intent "How many." }
+                        """, "shop.sky"));
+        assertTrue(e.getMessage().contains("once"), e.getMessage());
+    }
+
+    @Test
+    void rejectsScopeWithoutAValue() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> Parsing.parse("""
+                        module shop
+                        @scope
+                        service Cart { count() -> Int  intent "How many." }
+                        """, "shop.sky"));
+        assertTrue(e.getMessage().contains("@scope("), e.getMessage());
+    }
+
+    @Test
+    void rejectsAnUnknownDeclarationAnnotation() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> Parsing.parse("""
+                        module shop
+                        @singleton
+                        service Cart { count() -> Int  intent "How many." }
+                        """, "shop.sky"));
+        assertTrue(e.getMessage().contains("unknown annotation @singleton"), e.getMessage());
+    }
 }

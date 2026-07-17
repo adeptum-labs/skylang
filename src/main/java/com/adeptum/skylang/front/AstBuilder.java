@@ -44,10 +44,13 @@ public final class AstBuilder {
         List<Ast.Flow> flows = new ArrayList<>();
         List<Ast.Component> components = new ArrayList<>();
         for (SkyLangParser.DeclContext decl : ctx.decl()) {
+            if (decl.service() == null) {
+                scope(decl.annotation(), false);
+            }
             if (decl.entity() != null) {
                 entities.add(entity(decl.entity()));
             } else if (decl.service() != null) {
-                services.add(service(decl.service()));
+                services.add(service(decl.service(), scope(decl.annotation(), true)));
             } else if (decl.typeDecl() != null) {
                 types.add(typeDecl(decl.typeDecl()));
             } else if (decl.policy() != null) {
@@ -250,7 +253,7 @@ public final class AstBuilder {
 
     // ----- services & methods ------------------------------------------------
 
-    private Ast.Service service(SkyLangParser.ServiceContext ctx) {
+    private Ast.Service service(SkyLangParser.ServiceContext ctx, Ast.Scope scope) {
         List<Ast.Method> methods = new ArrayList<>();
         for (SkyLangParser.MethodContext m : ctx.method()) {
             methods.add(method(m));
@@ -260,7 +263,38 @@ public final class AstBuilder {
         for (int i = 1; i < ctx.ID().size(); i++) {
             uses.add(ctx.ID(i).getText());
         }
-        return new Ast.Service(ctx.ID(0).getText(), methods, uses);
+        return new Ast.Service(ctx.ID(0).getText(), methods, uses, scope);
+    }
+
+    /** The declared @scope — the only annotation a declaration takes; defaults to application. */
+    private static Ast.Scope scope(List<SkyLangParser.AnnotationContext> annotations, boolean service) {
+        Ast.Scope declared = null;
+        for (SkyLangParser.AnnotationContext a : annotations) {
+            String name = a.name.getText();
+            if (!name.equals("scope")) {
+                throw new IllegalArgumentException("unknown annotation @" + name
+                        + " before a declaration");
+            }
+            if (!service) {
+                throw new IllegalArgumentException("@scope only applies to services");
+            }
+            if (declared != null) {
+                throw new IllegalArgumentException("@scope may appear once per service");
+            }
+            if (a.scope == null) {
+                throw new IllegalArgumentException(
+                        "@scope takes a lifecycle, e.g. @scope(session)");
+            }
+            declared = switch (a.scope.getText()) {
+                case "application" -> Ast.Scope.APPLICATION;
+                case "request" -> Ast.Scope.REQUEST;
+                case "session" -> Ast.Scope.SESSION;
+                case "cluster" -> Ast.Scope.CLUSTER;
+                default -> throw new IllegalArgumentException("unknown scope '"
+                        + a.scope.getText() + "': use application, request, session or cluster");
+            };
+        }
+        return declared == null ? Ast.Scope.APPLICATION : declared;
     }
 
     private Ast.Method method(SkyLangParser.MethodContext ctx) {

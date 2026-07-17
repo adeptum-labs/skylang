@@ -28,7 +28,7 @@ options { tokenVocab = SkyLangLexer; }
 
 module_ : MODULE ID decl* EOF ;
 
-decl : entity | service | view | typeDecl | policy | flow | component ;
+decl : annotation* (entity | service | view | typeDecl | policy | flow | component) ;
 
 // ----- policies: cross-cutting contracts -------------------------------------
 

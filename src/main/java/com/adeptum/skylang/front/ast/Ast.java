@@ -215,19 +215,35 @@ public final class Ast {
     }
 
     /**
-     * Behaviour with no state of its own; {@code uses} is the effects budget. The freeze
-     * hash covers this record's string form, so {@code toString} is pinned: byte-identical
-     * to the original record format unless a budget is declared.
+     * Behaviour with no stored state of its own; {@code uses} is the effects budget and
+     * {@code scope} the declared bean lifecycle. The freeze hash covers this record's string
+     * form, so {@code toString} is pinned: byte-identical to the original record format
+     * unless a budget or a non-default scope is declared.
      */
-    public record Service(String name, List<Method> methods, List<String> uses) {
+    public record Service(String name, List<Method> methods, List<String> uses, Scope scope) {
         public Service(String name, List<Method> methods) {
             this(name, methods, List.of());
+        }
+
+        public Service(String name, List<Method> methods, List<String> uses) {
+            this(name, methods, uses, Scope.APPLICATION);
         }
 
         @Override
         public String toString() {
             return "Service[name=" + name + ", methods=" + methods
-                    + (uses.isEmpty() ? "" : ", uses=" + uses) + "]";
+                    + (uses.isEmpty() ? "" : ", uses=" + uses)
+                    + (scope == Scope.APPLICATION ? "" : ", scope=" + scope.sky()) + "]";
+        }
+    }
+
+    /** The declared bean lifecycle: {@code @scope(...)} written before a service. */
+    public enum Scope {
+        APPLICATION, REQUEST, SESSION, CLUSTER;
+
+        /** The value as written in SkyLang source. */
+        public String sky() {
+            return name().toLowerCase(java.util.Locale.ROOT);
         }
     }
 

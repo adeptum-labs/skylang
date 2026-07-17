@@ -26,6 +26,7 @@ import com.adeptum.skylang.front.ast.Ast;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pins the exact spec text that freezes methods and views. Every frozen body in every existing
@@ -110,5 +111,20 @@ class FreezeFormatTest {
     void viewSpecStringIsStable() {
         Ast.Module module = Parsing.parse(SHOP, "shop.sky");
         assertEquals(GOLDEN_VIEW_SPEC, Pipeline.viewSpecString(module, module.views().get(0)));
+    }
+
+    /**
+     * A non-default scope joins the pinned service rendering (and so the view spec hash);
+     * the default appends nothing, keeping every existing sky.lock hash exact.
+     */
+    @Test
+    void scopedServiceRendersItsScopeSuffix() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                @scope(session)
+                service Cart { count() -> Int  intent "How many items." }
+                """, "shop.sky");
+        assertTrue(m.services().get(0).toString().endsWith(", scope=session]"),
+                m.services().get(0).toString());
     }
 }
