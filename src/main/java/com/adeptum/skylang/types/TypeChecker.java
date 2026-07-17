@@ -410,8 +410,14 @@ public final class TypeChecker {
                         + " argument for '" + p.name() + "'");
             }
             switch (u.arg().get()) {
-                case Ast.NameExpr n -> throw new CheckException(where + ": @" + u.name() + "("
-                        + n.name() + ") — quote text arguments: @" + u.name() + "(\"" + n.name() + "\")");
+                case Ast.NameExpr n -> {
+                    if (p.type().sky().equals("Text")) {
+                        throw new CheckException(where + ": @" + u.name() + "("
+                                + n.name() + ") — quote text arguments: @" + u.name() + "(\"" + n.name() + "\")");
+                    }
+                    throw new CheckException(where + ": @" + u.name() + "(" + n.name()
+                            + ") — expects an Int literal, e.g. @" + u.name() + "(1)");
+                }
                 case Ast.IntLit i when p.type().sky().equals("Int") -> { }
                 case Ast.StrLit s when p.type().sky().equals("Text") -> { }
                 default -> throw new CheckException(where + ": @" + u.name() + " expects a "

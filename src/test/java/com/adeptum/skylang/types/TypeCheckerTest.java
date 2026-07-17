@@ -2372,4 +2372,57 @@ class TypeCheckerTest {
                 """)));
         assertTrue(e.getMessage().contains("must be Int or Text"), e.getMessage());
     }
+
+    @Test
+    void rejectsAnUndeclaredAnnotationOnAMethod() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation fast { intent "Hurry." }
+                entity Product { id Int }
+                service Catalog {
+                  @quick
+                  all() -> [Product]  intent "Every product."
+                }
+                """)));
+        assertTrue(e.getMessage().contains("Catalog.all"), e.getMessage());
+        assertTrue(e.getMessage().contains("unknown annotation @quick"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAnUndeclaredAnnotationOnAView() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                entity Product { id Int  name Text }
+                service Catalog { all() -> [Product]  intent "Every product." }
+                @quick
+                view ProductList at "/products" {
+                  shows  Catalog.all() as a table of (name)
+                }
+                """)));
+        assertTrue(e.getMessage().contains("page 'ProductList'"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAnUndeclaredAnnotationOnAComponent() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                entity Product { id Int  stock Int }
+                @quick
+                component StockBadge(product Product) {
+                  shows product.stock as a badge
+                }
+                """)));
+        assertTrue(e.getMessage().contains("component 'StockBadge'"), e.getMessage());
+    }
+
+    @Test
+    void steersABareIntArgumentTowardAnIntLiteral() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation fast(level Int) { intent "Prefer O({level}) work." }
+                @fast(level)
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("expects an Int literal"), e.getMessage());
+    }
 }
