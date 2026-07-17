@@ -127,4 +127,29 @@ class FreezeFormatTest {
         assertTrue(m.services().get(0).toString().endsWith(", scope=session]"),
                 m.services().get(0).toString());
     }
+
+    /**
+     * Annotation declarations join every spec (conservative, like types and policies) and
+     * the owning service's uses join its methods' specs; an unannotated module contributes
+     * nothing, which the untouched golden tests above prove.
+     */
+    @Test
+    void annotatedSpecTextPinsDeclarationsAndUses() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation fast(level Int) { intent "Prefer O({level}) work." }
+                entity Product { id Int }
+                @fast(1)
+                service Catalog {
+                  @fast(2)
+                  all() -> [Product]  intent "Every product."
+                }
+                """, "shop.sky");
+        String spec = Pipeline.specString(m, m.services().get(0).methods().get(0));
+        assertTrue(spec.contains("annotation AnnotationDecl[name=fast, "
+                + "params=[Param[name=level, type=TypeRef[name=Int, list=false]]], "
+                + "intent=Prefer O({level}) work., expects=[]]"), spec);
+        assertTrue(spec.contains("service-annotations [@fast(1)]"), spec);
+        assertTrue(spec.contains(", annotations=[@fast(2)]]"), spec);
+    }
 }

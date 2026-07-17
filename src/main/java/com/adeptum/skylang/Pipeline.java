@@ -674,6 +674,9 @@ public final class Pipeline {
         for (Ast.Entity e : module.entities()) {
             sb.append("entity ").append(e).append('\n');
         }
+        for (Ast.AnnotationDecl a : module.annotationDecls()) {
+            sb.append("annotation ").append(a).append('\n');
+        }
         sb.append("component ").append(component).append('\n');
         return sb.toString();
     }
@@ -959,6 +962,11 @@ public final class Pipeline {
         for (Ast.Entity e : module.entities()) {
             sb.append("entity ").append(e).append('\n');
         }
+        // The owning service's annotations steer this body's prompt, so they are part of its
+        // spec; an unannotated service contributes nothing, keeping older hashes exact.
+        module.services().stream().filter(s -> s.methods().contains(method)).findFirst()
+                .filter(s -> !s.annotations().isEmpty())
+                .ifPresent(s -> sb.append("service-annotations ").append(s.annotations()).append('\n'));
         sb.append("method ").append(method).append('\n');
         return sb.toString();
     }
@@ -986,6 +994,9 @@ public final class Pipeline {
         }
         for (Ast.Policy p : module.policies()) {
             sb.append("policy ").append(p).append('\n');
+        }
+        for (Ast.AnnotationDecl a : module.annotationDecls()) {
+            sb.append("annotation ").append(a).append('\n');
         }
     }
 
