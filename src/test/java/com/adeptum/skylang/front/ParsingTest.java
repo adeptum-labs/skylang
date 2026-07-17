@@ -1536,6 +1536,26 @@ class ParsingTest {
         assertEquals(1, m.views().size());
     }
 
+    /** The projection-less shows is the shape a greedy prose loop once swallowed whole. */
+    @Test
+    void trailingProseDoesNotSwallowAProjectionlessPage() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text }
+                service Catalog { all() -> [Product]  intent "Every product." }
+                flow Checkout {
+                  step Pay -> pay the order
+                  expect the user pays
+                }
+                page ProductList {
+                  shows Catalog.all()
+                }
+                """, "shop.sky");
+        assertEquals(1, m.flows().size());
+        assertEquals(1, m.views().size());
+        assertEquals("the user pays", m.flows().get(0).expects().get(0));
+    }
+
     @Test
     void scopeAndCustomAnnotationsCoexistOnAService() {
         Ast.Module m = Parsing.parse("""
