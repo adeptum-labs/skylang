@@ -108,6 +108,9 @@ public final class WhyCommand implements Callable<Integer> {
         if (!service.uses().isEmpty()) {
             System.out.println("  uses      " + String.join(", ", service.uses()));
         }
+        if (!service.annotations().isEmpty()) {
+            System.out.println("  annotations  " + annotationList(service.annotations()));
+        }
         method.intent().ifPresent(i -> System.out.println("  intent    \"" + i + "\""));
         method.requires().forEach(r -> System.out.println("  requires  " + Lowering.skyText(r)));
         method.ensures().forEach(e -> System.out.println("  ensures   " + Lowering.skyText(e)));
@@ -116,6 +119,9 @@ public final class WhyCommand implements Callable<Integer> {
         }
         method.examples().forEach(ex -> System.out.println("  example   " + Lowering.skyText(ex.call())));
         method.specs().forEach(sp -> System.out.println("  spec      \"" + sp.title() + "\""));
+        if (!method.annotations().isEmpty()) {
+            System.out.println("  annotations  " + annotationList(method.annotations()));
+        }
 
         String key = module.name() + "." + service.name() + "." + method.name();
         String hash = Pipeline.methodSpecHash(module, method, active.profile(),
@@ -151,6 +157,10 @@ public final class WhyCommand implements Callable<Integer> {
 
     private static String counted(int n, String noun) {
         return n == 0 ? "" : "✓ " + n + " " + noun + (n == 1 ? "" : "s") + "   ";
+    }
+
+    private static String annotationList(java.util.List<Ast.AnnotationUse> annotations) {
+        return annotations.stream().map(Object::toString).collect(Collectors.joining(", "));
     }
 
     private static String condition(Ast.RaiseCondition condition) {

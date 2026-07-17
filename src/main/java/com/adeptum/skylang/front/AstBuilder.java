@@ -86,7 +86,7 @@ public final class AstBuilder {
             }
         }
         List<String> expects = new ArrayList<>();
-        for (SkyLangParser.ViewProseContext e : ctx.viewProse()) {
+        for (SkyLangParser.AnnotationProseContext e : ctx.annotationProse()) {
             expects.add(joinedWords(e));
         }
         return new Ast.AnnotationDecl(ctx.ID().getText(), params,

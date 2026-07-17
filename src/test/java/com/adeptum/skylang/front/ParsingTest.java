@@ -1498,4 +1498,57 @@ class ParsingTest {
                         """, "shop.sky"));
         assertTrue(e.getMessage().contains("field annotation"), e.getMessage());
     }
+
+    @Test
+    void trailingFlowProseDoesNotSwallowARoutelessPage() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Product { id Int  name Text }
+                service Catalog { all() -> [Product]  intent "Every product." }
+                flow Checkout {
+                  step Pay -> pay the order
+                  expect the user pays
+                }
+                page ProductList {
+                  shows Catalog.all() as a table of (name)
+                }
+                """, "shop.sky");
+        assertEquals(1, m.flows().size());
+        assertEquals(1, m.views().size());
+        assertEquals("the user pays", m.flows().get(0).expects().get(0));
+    }
+
+    @Test
+    void trailingComponentProseDoesNotSwallowARoutelessPage() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                entity Product { id Int  stock Int  name Text }
+                service Catalog { all() -> [Product]  intent "Every product." }
+                component StockBadge(product Product) {
+                  shows product.stock as a badge
+                  expect the badge shows the stock
+                }
+                page ProductList {
+                  shows Catalog.all() as a table of (name)
+                }
+                """, "shop.sky");
+        assertEquals(1, m.components().size());
+        assertEquals(1, m.views().size());
+    }
+
+    @Test
+    void scopeAndCustomAnnotationsCoexistOnAService() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation fast { intent "Hurry." }
+                entity Product { id Int }
+                @scope(session)
+                @fast
+                service Catalog { all() -> [Product]  intent "Every product." }
+                """, "shop.sky");
+        Ast.Service s = m.services().get(0);
+        assertEquals(Ast.Scope.SESSION, s.scope());
+        assertEquals("@fast", s.annotations().get(0).toString());
+        assertTrue(s.toString().contains("scope=session, annotations=[@fast]"), s.toString());
+    }
 }

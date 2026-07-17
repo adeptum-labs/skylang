@@ -139,4 +139,26 @@ class WhyCommandTest {
         int exit = new CommandLine(new SkyCli()).execute("why", shopFile().toString(), "Catalog.vanish");
         assertEquals(1, exit, "an unknown method should exit non-zero");
     }
+
+    @Test
+    void listsAnnotationUsesOnTheServiceAndTheMethod() throws IOException {
+        Path file = dir.resolve("shop.sky");
+        Files.writeString(file, """
+                module shop
+                annotation fast { intent "Hurry." }
+                entity Product { id Int  name Text  stock Int @min(0) }
+                @fast
+                service Catalog {
+                  @fast
+                  restock(p Product, units Int) -> Product
+                    intent  "Increase stock."
+                    ensures  result.stock == p.stock + units
+                }
+                """);
+
+        String output = run("why", file.toString(), "Catalog.restock");
+        long annotationLines = output.lines().filter(l -> l.contains("annotations  @fast")).count();
+        assertEquals(2, annotationLines,
+                "both the service's and the method's @fast use should be listed:\n" + output);
+    }
 }

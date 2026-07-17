@@ -34,7 +34,7 @@ decl : annotation* (entity | service | view | typeDecl | policy | flow | compone
 // annotation: substituted intent/expect prose that steers whatever it is attached to.
 annotationDecl : ANNOTATION ID (LPAREN params RPAREN)? LBRACE
                      INTENT STRING
-                     (EXPECT viewProse)*
+                     (EXPECT annotationProse)*
                  RBRACE ;
 
 // ----- policies: cross-cutting contracts -------------------------------------
@@ -172,12 +172,20 @@ componentClause
     ;
 
 // Prose inside the interface layer: free words up to the next clause keyword.
-// LBRACE/RBRACE let annotation prose reference a declared param as {name}, glued
-// without surrounding spaces (see AstBuilder.appendWords).
+// Braces are deliberately excluded — this rule is shared by flows, views and
+// components, so a bare brace here could read a block's closing RBRACE as prose
+// and swallow the declaration that follows. See annotationProse below for the
+// one place ({param} placeholders) that does need braces.
 viewProse : (ID | STRING | INT | MONEY | DURATION | COMMA | POSS | DOT | LPAREN | RPAREN
             | IS | IN | ON | OF | HAS | NOT | OR | AND | WHEN | COLUMNS | EVERY
-            | LT | LE | GT | GE | EQ | MINUS | FOR | ACTION | STEP | PAGE | SHOWS | TITLED
-            | LBRACE | RBRACE)+ ;
+            | LT | LE | GT | GE | EQ | MINUS | FOR | ACTION | STEP | PAGE | SHOWS | TITLED)+ ;
+
+// Prose inside an annotation declaration: view-prose vocabulary plus {param}
+// placeholders as a single unit, so a bare brace can never read as prose.
+annotationProse : (ID | STRING | INT | MONEY | DURATION | COMMA | POSS | DOT | LPAREN | RPAREN
+                  | IS | IN | ON | OF | HAS | NOT | OR | AND | WHEN | COLUMNS | EVERY
+                  | LT | LE | GT | GE | EQ | MINUS | FOR | ACTION | STEP | PAGE | SHOWS | TITLED
+                  | LBRACE ID RBRACE)+ ;
 
 route : AT_KW STRING ;
 
