@@ -28,7 +28,14 @@ options { tokenVocab = SkyLangLexer; }
 
 module_ : MODULE ID decl* EOF ;
 
-decl : annotation* (entity | service | view | typeDecl | policy | flow | component) ;
+decl : annotation* (entity | service | view | typeDecl | policy | flow | component | annotationDecl) ;
+
+// annotation fast(level Int) { intent "..." expect ... } — a developer-defined
+// annotation: substituted intent/expect prose that steers whatever it is attached to.
+annotationDecl : ANNOTATION ID (LPAREN params RPAREN)? LBRACE
+                     INTENT STRING
+                     (EXPECT viewProse)*
+                 RBRACE ;
 
 // ----- policies: cross-cutting contracts -------------------------------------
 
@@ -79,13 +86,13 @@ pinValue     : MONEY | DURATION | INT | STRING | TRUE | FALSE | ID (DOT ID)? ;
 
 field : ID type annotation* (ASSIGN expr)? ;
 
-annotation : AT name=ID (LPAREN (INT | scope=ID) RPAREN)? ;   // @id | @unique | @min(0) | @unique(provider)
+annotation : AT name=ID (LPAREN (INT | STRING | scope=ID) RPAREN)? ;   // @id | @min(0) | @unique(provider) | @stored("mongodb")
 
 // ----- services & methods ---------------------------------------------------
 
 service : SERVICE ID (USES ID (COMMA ID)*)? LBRACE method* RBRACE ;   // uses db, clock
 
-method : ID LPAREN params? RPAREN ARROW type clause+ ;
+method : annotation* ID LPAREN params? RPAREN ARROW type clause+ ;
 
 params : param (COMMA param)* ;
 param  : ID type ;
@@ -165,9 +172,12 @@ componentClause
     ;
 
 // Prose inside the interface layer: free words up to the next clause keyword.
+// LBRACE/RBRACE let annotation prose reference a declared param as {name}, glued
+// without surrounding spaces (see AstBuilder.appendWords).
 viewProse : (ID | STRING | INT | MONEY | DURATION | COMMA | POSS | DOT | LPAREN | RPAREN
-            | IS | IN | ON | OF | HAS | NOT | OR | AND | WHEN | COLUMNS
-            | LT | LE | GT | GE | EQ | MINUS | FOR | ACTION | STEP | PAGE | SHOWS | TITLED)+ ;
+            | IS | IN | ON | OF | HAS | NOT | OR | AND | WHEN | COLUMNS | EVERY
+            | LT | LE | GT | GE | EQ | MINUS | FOR | ACTION | STEP | PAGE | SHOWS | TITLED
+            | LBRACE | RBRACE)+ ;
 
 route : AT_KW STRING ;
 

@@ -23,7 +23,11 @@ package com.adeptum.skylang.front;
 
 import com.adeptum.skylang.front.ast.Ast;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1383,13 +1387,101 @@ class ParsingTest {
     }
 
     @Test
-    void rejectsAnUnknownDeclarationAnnotation() {
+    void parsesAnAnnotationDeclaration() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation databasebacked(store Text) {
+                  intent "Persist the annotated data through the {store} store."
+                  expect every read and write goes through {store}
+                }
+                """, "shop.sky");
+        Ast.AnnotationDecl d = m.annotationDecls().get(0);
+        assertEquals("databasebacked", d.name());
+        assertEquals("store", d.params().get(0).name());
+        assertEquals("Persist the annotated data through the {store} store.", d.intent());
+        assertEquals(List.of("every read and write goes through {store}"), d.expects());
+    }
+
+    @Test
+    void parsesAParameterlessAnnotationDeclaration() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation memory_optimized { intent "Prefer streaming implementations." }
+                """, "shop.sky");
+        assertEquals(List.of(), m.annotationDecls().get(0).params());
+        assertEquals(List.of(), m.annotationDecls().get(0).expects());
+    }
+
+    @Test
+    void parsesAnnotationUsesOnDeclarationsAndMethods() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                annotation fast(level Int) { intent "Prefer O({level}) work." }
+                annotation stored(store Text) { intent "Use {store}." }
+                @stored("mongodb")
+                entity Product { id Int }
+                @fast(1)
+                service Catalog {
+                  @fast(2)
+                  all() -> [Product]  intent "Every product."
+                }
+                @stored("redis")
+                view ProductList at "/products" {
+                  shows  Catalog.all() as a table of (id)
+                }
+                """, "shop.sky");
+        assertEquals("@stored(\"mongodb\")", m.entities().get(0).annotations().get(0).toString());
+        assertEquals("@fast(1)", m.services().get(0).annotations().get(0).toString());
+        assertEquals("@fast(2)",
+                m.services().get(0).methods().get(0).annotations().get(0).toString());
+        assertEquals("@stored(\"redis\")", m.views().get(0).annotations().get(0).toString());
+    }
+
+    @Test
+    void unknownDeclAnnotationParsesForTheCheckerToJudge() {
+        Ast.Module m = Parsing.parse("""
+                module shop
+                @singleton
+                service Cart { count() -> Int  intent "How many." }
+                """, "shop.sky");
+        assertEquals("@singleton", m.services().get(0).annotations().get(0).toString());
+    }
+
+    @Test
+    void rejectsAnnotationsOnAFlow() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> Parsing.parse("""
                         module shop
-                        @singleton
-                        service Cart { count() -> Int  intent "How many." }
+                        @fast
+                        flow Checkout { step Pay -> done }
                         """, "shop.sky"));
-        assertTrue(e.getMessage().contains("unknown annotation @singleton"), e.getMessage());
+        assertTrue(e.getMessage().contains("does not take annotations"), e.getMessage());
+    }
+
+    @Test
+    void mergesAnnotationDeclarationsAcrossUnitFiles(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("a_annotations.sky"), """
+                module shop
+                annotation fast { intent "Hurry." }
+                """);
+        Files.writeString(dir.resolve("b_catalog.sky"), """
+                module shop
+                entity Product { id Int }
+                @fast
+                service Catalog { all() -> [Product]  intent "Every product." }
+                """);
+        Ast.Module m = Parsing.parseUnit(dir.resolve("b_catalog.sky"));
+        assertEquals("fast", m.annotationDecls().get(0).name());
+        assertEquals("@fast", m.services().get(0).annotations().get(0).toString());
+    }
+
+    @Test
+    void rejectsAStringArgumentOnAFieldAnnotation() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> Parsing.parse("""
+                        module shop
+                        entity Product { id Int @unique("x") }
+                        """, "shop.sky"));
+        assertTrue(e.getMessage().contains("field annotation"), e.getMessage());
     }
 }

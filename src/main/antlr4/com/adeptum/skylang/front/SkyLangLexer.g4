@@ -69,6 +69,7 @@ PAGE     : 'page' ;
 FLOW     : 'flow' ;
 STEP     : 'step' ;
 COMPONENT : 'component' ;
+ANNOTATION : 'annotation' ;
 PROMPT   : 'prompt' ;
 TITLED   : 'titled' ;
 POSS     : '\'s' ;

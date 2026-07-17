@@ -43,34 +43,54 @@ public final class AstBuilder {
         List<Ast.View> views = new ArrayList<>();
         List<Ast.Flow> flows = new ArrayList<>();
         List<Ast.Component> components = new ArrayList<>();
+        List<Ast.AnnotationDecl> annotationDecls = new ArrayList<>();
         for (SkyLangParser.DeclContext decl : ctx.decl()) {
-            if (decl.service() == null) {
-                scope(decl.annotation(), false);
-            }
+            List<SkyLangParser.AnnotationContext> anns = decl.annotation();
             if (decl.entity() != null) {
-                entities.add(entity(decl.entity()));
+                entities.add(entity(decl.entity(), uses(anns, false)));
             } else if (decl.service() != null) {
-                services.add(service(decl.service(), scope(decl.annotation(), true)));
+                services.add(service(decl.service(), scopeOf(anns), uses(anns, true)));
             } else if (decl.typeDecl() != null) {
+                requireBare(anns, "a type");
                 types.add(typeDecl(decl.typeDecl()));
             } else if (decl.policy() != null) {
+                requireBare(anns, "a policy");
                 policies.add(policy(decl.policy()));
             } else if (decl.flow() != null) {
+                requireBare(anns, "a flow");
                 flows.add(flow(decl.flow()));
             } else if (decl.component() != null) {
-                components.add(component(decl.component()));
+                components.add(component(decl.component(), uses(anns, false)));
+            } else if (decl.annotationDecl() != null) {
+                requireBare(anns, "an annotation declaration");
+                annotationDecls.add(annotationDecl(decl.annotationDecl()));
             } else {
-                views.add(view(decl.view()));
+                views.add(view(decl.view(), uses(anns, false)));
             }
         }
         return new Ast.Module(ctx.ID().getText(), types, policies, entities, services, views,
-                flows, components);
+                flows, components, annotationDecls);
     }
 
     // ----- policies --------------------------------------------------------------
 
     private Ast.Policy policy(SkyLangParser.PolicyContext ctx) {
         return new Ast.Policy(ctx.ID().getText(), whenever(ctx.wheneverPhrase()), policyRule(ctx.policyRule()));
+    }
+
+    private Ast.AnnotationDecl annotationDecl(SkyLangParser.AnnotationDeclContext ctx) {
+        List<Ast.Param> params = new ArrayList<>();
+        if (ctx.params() != null) {
+            for (SkyLangParser.ParamContext p : ctx.params().param()) {
+                params.add(new Ast.Param(p.ID().getText(), type(p.type())));
+            }
+        }
+        List<String> expects = new ArrayList<>();
+        for (SkyLangParser.ViewProseContext e : ctx.viewProse()) {
+            expects.add(joinedWords(e));
+        }
+        return new Ast.AnnotationDecl(ctx.ID().getText(), params,
+                unquote(ctx.STRING().getText()), expects);
     }
 
     private Ast.Whenever whenever(SkyLangParser.WheneverPhraseContext ctx) {
@@ -159,7 +179,7 @@ public final class AstBuilder {
 
     // ----- entities ----------------------------------------------------------
 
-    private Ast.Entity entity(SkyLangParser.EntityContext ctx) {
+    private Ast.Entity entity(SkyLangParser.EntityContext ctx, List<Ast.AnnotationUse> annotations) {
         List<Ast.Field> fields = new ArrayList<>();
         for (SkyLangParser.FieldContext f : ctx.field()) {
             fields.add(field(f));
@@ -170,7 +190,7 @@ public final class AstBuilder {
                 values.add(valueDef(v));
             }
         }
-        return new Ast.Entity(ctx.ID().getText(), fields, values);
+        return new Ast.Entity(ctx.ID().getText(), fields, values, annotations);
     }
 
     private Ast.ValueDef valueDef(SkyLangParser.ValueDefContext ctx) {
@@ -220,6 +240,10 @@ public final class AstBuilder {
         OptionalLong min = OptionalLong.empty();
         for (SkyLangParser.AnnotationContext a : ctx.annotation()) {
             String name = a.name.getText();
+            if (a.STRING() != null) {
+                throw new IllegalArgumentException(
+                        "a field annotation takes no string argument: @" + name);
+            }
             switch (name) {
                 case "id" -> id = true;
                 case "unique" -> {
@@ -253,7 +277,8 @@ public final class AstBuilder {
 
     // ----- services & methods ------------------------------------------------
 
-    private Ast.Service service(SkyLangParser.ServiceContext ctx, Ast.Scope scope) {
+    private Ast.Service service(SkyLangParser.ServiceContext ctx, Ast.Scope scope,
+                                List<Ast.AnnotationUse> annotations) {
         List<Ast.Method> methods = new ArrayList<>();
         for (SkyLangParser.MethodContext m : ctx.method()) {
             methods.add(method(m));
@@ -263,20 +288,15 @@ public final class AstBuilder {
         for (int i = 1; i < ctx.ID().size(); i++) {
             uses.add(ctx.ID(i).getText());
         }
-        return new Ast.Service(ctx.ID(0).getText(), methods, uses, scope);
+        return new Ast.Service(ctx.ID(0).getText(), methods, uses, scope, annotations);
     }
 
-    /** The declared @scope — the only annotation a declaration takes; defaults to application. */
-    private static Ast.Scope scope(List<SkyLangParser.AnnotationContext> annotations, boolean service) {
+    /** The built-in @scope among the declaration's annotations, defaulting to application. */
+    private static Ast.Scope scopeOf(List<SkyLangParser.AnnotationContext> annotations) {
         Ast.Scope declared = null;
         for (SkyLangParser.AnnotationContext a : annotations) {
-            String name = a.name.getText();
-            if (!name.equals("scope")) {
-                throw new IllegalArgumentException("unknown annotation @" + name
-                        + " before a declaration");
-            }
-            if (!service) {
-                throw new IllegalArgumentException("@scope only applies to services");
+            if (!a.name.getText().equals("scope")) {
+                continue;
             }
             if (declared != null) {
                 throw new IllegalArgumentException("@scope may appear once per service");
@@ -297,7 +317,44 @@ public final class AstBuilder {
         return declared == null ? Ast.Scope.APPLICATION : declared;
     }
 
+    /** Developer-annotation uses; names resolve in the checker, @scope only fits services. */
+    private static List<Ast.AnnotationUse> uses(List<SkyLangParser.AnnotationContext> annotations,
+                                                boolean service) {
+        List<Ast.AnnotationUse> out = new ArrayList<>();
+        for (SkyLangParser.AnnotationContext a : annotations) {
+            String name = a.name.getText();
+            if (name.equals("scope")) {
+                if (!service) {
+                    throw new IllegalArgumentException("@scope only applies to services");
+                }
+                continue;
+            }
+            out.add(new Ast.AnnotationUse(name, annotationArg(a)));
+        }
+        return out;
+    }
+
+    private static void requireBare(List<SkyLangParser.AnnotationContext> annotations, String kind) {
+        if (!annotations.isEmpty()) {
+            throw new IllegalArgumentException(kind + " declaration does not take annotations");
+        }
+    }
+
+    private static Optional<Ast.Expr> annotationArg(SkyLangParser.AnnotationContext a) {
+        if (a.INT() != null) {
+            return Optional.of(new Ast.IntLit(Long.parseLong(a.INT().getText())));
+        }
+        if (a.STRING() != null) {
+            return Optional.of(new Ast.StrLit(unquote(a.STRING().getText())));
+        }
+        if (a.scope != null) {
+            return Optional.of(new Ast.NameExpr(a.scope.getText()));
+        }
+        return Optional.empty();
+    }
+
     private Ast.Method method(SkyLangParser.MethodContext ctx) {
+        List<Ast.AnnotationUse> annotations = uses(ctx.annotation(), false);
         List<Ast.Param> params = new ArrayList<>();
         if (ctx.params() != null) {
             for (SkyLangParser.ParamContext p : ctx.params().param()) {
@@ -336,7 +393,7 @@ public final class AstBuilder {
         }
 
         return new Ast.Method(ctx.ID().getText(), params, type(ctx.type()),
-                intent, requires, ensures, examples, raises, specs, nativeBody, nativeKeyword);
+                intent, requires, ensures, examples, raises, specs, nativeBody, nativeKeyword, annotations);
     }
 
     private Ast.Spec spec(SkyLangParser.SpecClauseContext ctx) {
@@ -433,7 +490,11 @@ public final class AstBuilder {
             return;
         }
         String word = node.getText();
-        sb.append(sb.isEmpty() || word.equals("'s") ? "" : " ").append(word);
+        // {name} — an annotation's reference to one of its own params — stays glued: no
+        // space after the opening brace, none before the closing one.
+        boolean glued = sb.isEmpty() || word.equals("'s") || word.equals("}")
+                || (!sb.isEmpty() && sb.charAt(sb.length() - 1) == '{');
+        sb.append(glued ? "" : " ").append(word);
     }
 
     private Ast.Type type(SkyLangParser.TypeContext ctx) {
@@ -462,7 +523,7 @@ public final class AstBuilder {
 
     // ----- views -------------------------------------------------------------
 
-    private Ast.View view(SkyLangParser.ViewContext ctx) {
+    private Ast.View view(SkyLangParser.ViewContext ctx, List<Ast.AnnotationUse> annotations) {
         Optional<String> route = ctx.route() == null
                 ? Optional.empty()
                 : Optional.of(unquote(ctx.route().STRING().getText()));
@@ -502,7 +563,7 @@ public final class AstBuilder {
             }
         }
         return new Ast.View(ctx.ID().getText(), route, shows, actions, expects, appears,
-                moreShows, params);
+                moreShows, params, annotations);
     }
 
     private Ast.Shows shows(SkyLangParser.ShowsClauseContext ctx) {
@@ -703,7 +764,8 @@ public final class AstBuilder {
         return new Ast.Flow(ctx.ID().getText(), steps, transitions, expects);
     }
 
-    private Ast.Component component(SkyLangParser.ComponentContext ctx) {
+    private Ast.Component component(SkyLangParser.ComponentContext ctx,
+                                    List<Ast.AnnotationUse> annotations) {
         List<Ast.Param> params = new ArrayList<>();
         if (ctx.params() != null) {
             for (SkyLangParser.ParamContext pc : ctx.params().param()) {
@@ -731,7 +793,7 @@ public final class AstBuilder {
             throw new IllegalArgumentException("component '" + ctx.ID().getText()
                     + "' needs a shows clause");
         }
-        return new Ast.Component(ctx.ID().getText(), params, shows, appears, expects);
+        return new Ast.Component(ctx.ID().getText(), params, shows, appears, expects, annotations);
     }
 
     // ----- examples ----------------------------------------------------------

@@ -70,6 +70,7 @@ public final class Parsing {
         List<Ast.View> views = new ArrayList<>();
         List<Ast.Flow> flows = new ArrayList<>();
         List<Ast.Component> components = new ArrayList<>();
+        List<Ast.AnnotationDecl> annotationDecls = new ArrayList<>();
         String name = null;
         for (Path part : files) {
             Ast.Module m = parseFile(part);
@@ -82,9 +83,12 @@ public final class Parsing {
             merge(m.views(), views, Ast.View::name, "page", source, declaredIn);
             merge(m.flows(), flows, Ast.Flow::name, "flow", source, declaredIn);
             merge(m.components(), components, Ast.Component::name, "component", source, declaredIn);
+            merge(m.annotationDecls(), annotationDecls, Ast.AnnotationDecl::name, "annotation",
+                    source, declaredIn);
         }
         log.debug("merged {} files into module {}", files.size(), name);
-        return new Ast.Module(name, types, policies, entities, services, views, flows, components);
+        return new Ast.Module(name, types, policies, entities, services, views, flows, components,
+                annotationDecls);
     }
 
     private static <T> void merge(List<T> from, List<T> into, Function<T, String> name,

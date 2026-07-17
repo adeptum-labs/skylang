@@ -38,7 +38,14 @@ public final class Ast {
 
     public record Module(String name, List<TypeDecl> types, List<Policy> policies,
                          List<Entity> entities, List<Service> services, List<View> views,
-                         List<Flow> flows, List<Component> components) {
+                         List<Flow> flows, List<Component> components,
+                         List<AnnotationDecl> annotationDecls) {
+        public Module(String name, List<TypeDecl> types, List<Policy> policies,
+                      List<Entity> entities, List<Service> services, List<View> views,
+                      List<Flow> flows, List<Component> components) {
+            this(name, types, policies, entities, services, views, flows, components, List.of());
+        }
+
         public Module(String name, List<Entity> entities, List<Service> services, List<View> views) {
             this(name, List.of(), List.of(), entities, services, views, List.of(), List.of());
         }
@@ -81,9 +88,25 @@ public final class Ast {
     public record FlowTransition(String trigger, String target) {
     }
 
-    /** {@code component StockBadge(product Product) { ... }} — a reusable, verified widget. */
+    /**
+     * {@code component StockBadge(product Product) { ... }} — a reusable, verified widget.
+     * The freeze hash covers this record's string form, so {@code toString} is pinned:
+     * byte-identical to the default record rendering unless annotations are attached.
+     */
     public record Component(String name, List<Param> params, ComponentShows shows,
-                            List<ComponentAppears> appears, List<String> expects) {
+                            List<ComponentAppears> appears, List<String> expects,
+                            List<AnnotationUse> annotations) {
+        public Component(String name, List<Param> params, ComponentShows shows,
+                         List<ComponentAppears> appears, List<String> expects) {
+            this(name, params, shows, appears, expects, List.of());
+        }
+
+        @Override
+        public String toString() {
+            return "Component[name=" + name + ", params=" + params + ", shows=" + shows
+                    + ", appears=" + appears + ", expects=" + expects
+                    + (annotations.isEmpty() ? "" : ", annotations=" + annotations) + "]";
+        }
     }
 
     /** {@code shows product.stock as a badge}. */
@@ -144,13 +167,49 @@ public final class Ast {
     }
 
     /**
+     * {@code annotation fast(level Int) { intent "..." expect ... } } — a developer-defined
+     * annotation. Its substituted intent/expect prose joins the synthesis prompt and the
+     * freeze spec of everything it is attached to; it never alters staged infrastructure.
+     */
+    public record AnnotationDecl(String name, List<Param> params, String intent,
+                                 List<String> expects) {
+    }
+
+    /**
+     * {@code @fast(2)} / {@code @stored("mongodb")} — one attachment of a declared
+     * annotation. Host toStrings are freeze-pinned, so this rendering is pinned too:
+     * the source form of the use.
+     */
+    public record AnnotationUse(String name, Optional<Expr> arg) {
+
+        @Override
+        public String toString() {
+            return "@" + name + arg.map(AnnotationUse::render).orElse("");
+        }
+
+        private static String render(Expr a) {
+            return "(" + switch (a) {
+                case StrLit s -> "\"" + s.value() + "\"";
+                case IntLit i -> String.valueOf(i.value());
+                case NameExpr n -> n.name();
+                default -> a.toString();
+            } + ")";
+        }
+    }
+
+    /**
      * Data with identity and invariants; {@code values} seeds and closes an enum-like
      * instance set. The freeze hash covers this record's string form, so {@code toString}
      * is pinned: byte-identical to the original record format unless {@code values} is set.
      */
-    public record Entity(String name, List<Field> fields, List<ValueDef> values) {
+    public record Entity(String name, List<Field> fields, List<ValueDef> values,
+                         List<AnnotationUse> annotations) {
         public Entity(String name, List<Field> fields) {
             this(name, fields, List.of());
+        }
+
+        public Entity(String name, List<Field> fields, List<ValueDef> values) {
+            this(name, fields, values, List.of());
         }
 
         /** The declared value names, in declaration order. */
@@ -161,7 +220,8 @@ public final class Ast {
         @Override
         public String toString() {
             return "Entity[name=" + name + ", fields=" + fields
-                    + (values.isEmpty() ? "" : ", values=" + values) + "]";
+                    + (values.isEmpty() ? "" : ", values=" + values)
+                    + (annotations.isEmpty() ? "" : ", annotations=" + annotations) + "]";
         }
     }
 
@@ -220,7 +280,8 @@ public final class Ast {
      * form, so {@code toString} is pinned: byte-identical to the original record format
      * unless a budget or a non-default scope is declared.
      */
-    public record Service(String name, List<Method> methods, List<String> uses, Scope scope) {
+    public record Service(String name, List<Method> methods, List<String> uses, Scope scope,
+                          List<AnnotationUse> annotations) {
         public Service(String name, List<Method> methods) {
             this(name, methods, List.of());
         }
@@ -229,11 +290,16 @@ public final class Ast {
             this(name, methods, uses, Scope.APPLICATION);
         }
 
+        public Service(String name, List<Method> methods, List<String> uses, Scope scope) {
+            this(name, methods, uses, scope, List.of());
+        }
+
         @Override
         public String toString() {
             return "Service[name=" + name + ", methods=" + methods
                     + (uses.isEmpty() ? "" : ", uses=" + uses)
-                    + (scope == Scope.APPLICATION ? "" : ", scope=" + scope.sky()) + "]";
+                    + (scope == Scope.APPLICATION ? "" : ", scope=" + scope.sky())
+                    + (annotations.isEmpty() ? "" : ", annotations=" + annotations) + "]";
         }
     }
 
@@ -324,7 +390,8 @@ public final class Ast {
                          List<Raise> raises,
                          List<Spec> specs,
                          Optional<String> nativeBody,
-                         String nativeKeyword) {
+                         String nativeKeyword,
+                         List<AnnotationUse> annotations) {
         public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
                       List<Expr> requires, List<Expr> ensures, List<Example> examples) {
             this(name, params, returnType, intent, requires, ensures, examples,
@@ -351,6 +418,14 @@ public final class Ast {
                     raises, specs, nativeBody, "java");
         }
 
+        public Method(String name, List<Param> params, Type returnType, Optional<String> intent,
+                      List<Expr> requires, List<Expr> ensures, List<Example> examples,
+                      List<Raise> raises, List<Spec> specs, Optional<String> nativeBody,
+                      String nativeKeyword) {
+            this(name, params, returnType, intent, requires, ensures, examples,
+                    raises, specs, nativeBody, nativeKeyword, List.of());
+        }
+
         @Override
         public String toString() {
             return "Method[name=" + name + ", params=" + params + ", returnType=" + returnType
@@ -360,7 +435,8 @@ public final class Ast {
                     + (specs.isEmpty() ? "" : ", specs=" + specs)
                     + (nativeBody.isEmpty() ? "" : ", native=" + nativeBody.get())
                     + (nativeBody.isEmpty() || "java".equals(nativeKeyword)
-                            ? "" : ", nativeKeyword=" + nativeKeyword) + "]";
+                            ? "" : ", nativeKeyword=" + nativeKeyword)
+                    + (annotations.isEmpty() ? "" : ", annotations=" + annotations) + "]";
         }
     }
 
@@ -496,7 +572,8 @@ public final class Ast {
      */
     public record View(String name, Optional<String> route, Shows shows,
                        List<Action> actions, List<Expect> expects, List<Appears> appears,
-                       List<Shows> moreShows, List<Param> params) {
+                       List<Shows> moreShows, List<Param> params,
+                       List<AnnotationUse> annotations) {
         public View(String name, Optional<String> route, Shows shows,
                     List<Action> actions, List<Expect> expects, List<Appears> appears) {
             this(name, route, shows, actions, expects, appears, List.of(), List.of());
@@ -508,12 +585,19 @@ public final class Ast {
             this(name, route, shows, actions, expects, appears, moreShows, List.of());
         }
 
+        public View(String name, Optional<String> route, Shows shows,
+                    List<Action> actions, List<Expect> expects, List<Appears> appears,
+                    List<Shows> moreShows, List<Param> params) {
+            this(name, route, shows, actions, expects, appears, moreShows, params, List.of());
+        }
+
         @Override
         public String toString() {
             return "View[name=" + name + ", route=" + route + ", shows=" + shows
                     + ", actions=" + actions + ", expects=" + expects + ", appears=" + appears
                     + (moreShows.isEmpty() ? "" : ", moreShows=" + moreShows)
-                    + (params.isEmpty() ? "" : ", params=" + params) + "]";
+                    + (params.isEmpty() ? "" : ", params=" + params)
+                    + (annotations.isEmpty() ? "" : ", annotations=" + annotations) + "]";
         }
     }
 
