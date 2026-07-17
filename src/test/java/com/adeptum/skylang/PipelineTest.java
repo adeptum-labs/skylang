@@ -902,6 +902,44 @@ class PipelineTest {
         assertEquals(1, after.calls(), "annotating a frozen method should re-synthesize it");
     }
 
+    private static final String TWO_SERVICE_SHOP = """
+            module shop
+            annotation fast { intent "Hurry." }
+            entity Product { id Int  name Text  stock Int @min(0) }
+            service Catalog {
+              all() -> [Product]
+                intent "Every product."
+              restock(p Product, units Int) -> Product
+                intent  "Increase stock."
+                requires units > 0
+                ensures  result.stock == p.stock + units
+            }
+            service Support {
+              ping() -> Int
+                intent "Always one."
+            }
+            """;
+
+    /** A service-level annotation drives the whole service: every body it owns re-freezes. */
+    @Test
+    void annotatingAServiceRegeneratesEveryMethodBody(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        Ast.Module first = Parsing.parse(TWO_SERVICE_SHOP, "shop.sky");
+        new TypeChecker().check(first);
+        new Pipeline(new StubLlm(BODY), ALWAYS_PASS)
+                .build(first, lock, buildDir, quiet(), quiet());
+
+        Ast.Module changed = Parsing.parse(
+                TWO_SERVICE_SHOP.replace("service Catalog", "@fast\nservice Catalog"), "shop.sky");
+        new TypeChecker().check(changed);
+        StubLlm after = new StubLlm(BODY);
+        new Pipeline(after, ALWAYS_PASS).build(changed, lock, buildDir, quiet(), quiet());
+
+        assertEquals(2, after.calls(),
+                "both Catalog bodies should re-synthesize; Support.ping stays frozen");
+    }
+
     @Test
     void firstBuildSynthesizesAndFreezesView(@TempDir Path root) throws Exception {
         Ast.Module module = checkedViewModule();
