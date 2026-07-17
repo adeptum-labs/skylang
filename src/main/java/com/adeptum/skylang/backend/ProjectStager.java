@@ -71,9 +71,11 @@ public final class ProjectStager {
             Files.createDirectories(main);
             Files.createDirectories(test);
             boolean db = SupportClasses.effectsOf(module).contains("db");
+            boolean cluster = module.services().stream()
+                    .anyMatch(s -> s.scope() == Ast.Scope.CLUSTER);
             Files.writeString(buildDir.resolve("pom.xml"),
-                    module.views().isEmpty() ? pom(module.name(), db, deps)
-                            : webPom(module.name(), db, deps));
+                    module.views().isEmpty() ? pom(module.name(), db, cluster, deps)
+                            : webPom(module.name(), db, cluster, deps));
 
             for (String support : SupportClasses.used(module)) {
                 Files.writeString(main.resolve(support + ".java"),
@@ -367,8 +369,10 @@ public final class ProjectStager {
         // Every generated service is a CDI bean, so a SkyLang module drops into an existing
         // application's injection container like any hand-written service — the annotation
         // costs nothing outside a container, and web views inject the service anyway.
-        sb.append("@jakarta.enterprise.context.ApplicationScoped\n");
-        sb.append("public class ").append(service.name()).append(" {\n");
+        sb.append(scopeHeader(service.scope()));
+        sb.append("public class ").append(service.name())
+                .append(passivating(service.scope()) ? " implements java.io.Serializable" : "")
+                .append(" {\n");
         sb.append(effectHandles(service, web));
         for (Ast.Method m : service.methods()) {
             String key = methodKey(module.name(), service.name(), m.name());
@@ -414,6 +418,24 @@ public final class ProjectStager {
         }
         sb.append("}\n");
         return sb.toString();
+    }
+
+    /** The declared lifecycle as CDI annotations on the staged bean. */
+    private static String scopeHeader(Ast.Scope scope) {
+        return switch (scope) {
+            case APPLICATION -> "@jakarta.enterprise.context.ApplicationScoped\n";
+            case REQUEST -> "@jakarta.enterprise.context.RequestScoped\n";
+            case SESSION -> "@jakarta.enterprise.context.SessionScoped\n";
+            // Payara's Hazelcast-backed singleton; a container without the extension
+            // ignores the extra annotation and falls back to one instance per node.
+            case CLUSTER -> "@fish.payara.cluster.Clustered\n"
+                    + "@jakarta.enterprise.context.ApplicationScoped\n";
+        };
+    }
+
+    /** Session and cluster instances may passivate or replicate, so they must serialize. */
+    private static boolean passivating(Ast.Scope scope) {
+        return scope == Ast.Scope.SESSION || scope == Ast.Scope.CLUSTER;
     }
 
     /** The Java type each declared effect binds to under the JVM profile. */
@@ -1182,9 +1204,18 @@ public final class ProjectStager {
         return sb.toString();
     }
 
-    private static String pom(String name, boolean db,
+    private static final String PAYARA_API = """
+                <dependency>
+                  <groupId>fish.payara.api</groupId>
+                  <artifactId>payara-api</artifactId>
+                  <version>6.2025.11</version>
+                  <scope>provided</scope>
+                </dependency>
+            """;
+
+    private static String pom(String name, boolean db, boolean cluster,
                               java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
-        String persistence = depsXml(deps) + (!db ? "" : """
+        String persistence = depsXml(deps) + (cluster ? PAYARA_API : "") + (!db ? "" : """
                     <dependency>
                       <groupId>jakarta.persistence</groupId>
                       <artifactId>jakarta.persistence-api</artifactId>
@@ -1249,9 +1280,9 @@ public final class ProjectStager {
      * Mojarra as the sole Faces implementation, so a generated view renders in-container for
      * verification. TomEE provides the APIs, so the aggregate api jar stays off the runtime classpath.
      */
-    private static String webPom(String name, boolean db,
+    private static String webPom(String name, boolean db, boolean cluster,
                                  java.util.List<com.adeptum.skylang.deps.Resolved> deps) {
-        String persistence = depsXml(deps) + (!db ? "" : """
+        String persistence = depsXml(deps) + (cluster ? PAYARA_API : "") + (!db ? "" : """
                     <dependency>
                       <groupId>org.eclipse.persistence</groupId>
                       <artifactId>eclipselink</artifactId>
