@@ -32,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -110,5 +111,21 @@ class TsStagerTest {
         assertTrue(tsconfig.contains("\"strict\": true"), tsconfig);
         assertTrue(tsconfig.contains("\"outDir\": \"dist\""), tsconfig);
         assertTrue(Files.exists(dir.resolve("src/Db.ts")), "the db effect stages its binding");
+    }
+
+    /** The Node target has no container to manage bean lifecycles, so a scope cannot be honored. */
+    @Test
+    void rejectsANonDefaultScope(@TempDir Path root) {
+        Ast.Module module = Parsing.parse("""
+                module shop
+                @scope(session)
+                service Cart {
+                  count() -> Int  intent "How many items."
+                }
+                """, "shop.sky");
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> new TsStager().stage(module, Map.of(), root));
+        assertTrue(e.getMessage().contains("@scope(session)"), e.getMessage());
+        assertTrue(e.getMessage().contains("ts-node"), e.getMessage());
     }
 }

@@ -52,6 +52,12 @@ public final class TsStager {
 
     public void stage(Ast.Module module, Map<String, String> bodies,
                       java.util.List<com.adeptum.skylang.deps.Resolved> deps, Path dir) {
+        for (Ast.Service s : module.services()) {
+            if (s.scope() != Ast.Scope.APPLICATION) {
+                throw new IllegalStateException("@scope(" + s.scope().sky() + ") on service "
+                        + s.name() + " is not supported by the ts-node profile");
+            }
+        }
         stagedEntities = module.entities().stream()
                 .collect(Collectors.toMap(Ast.Entity::name, e -> e, (a, b) -> a, LinkedHashMap::new));
         try {
