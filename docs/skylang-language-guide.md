@@ -220,21 +220,22 @@ application. An annotation line before the declaration picks a different lifecyc
 ```sky
 @scope(session)
 service Cart {
-  add(qty Int) -> Int
-    intent "Add qty items to this visitor's cart and return the new count."
+  lineTotal(qty Int, price Money) -> Money
+    intent "The total for qty items at the given unit price."
 }
 ```
 
 | Scope         | One instance per…                                             |
 |---------------|----------------------------------------------------------------|
-| `application` | application — shared and stateless (the default)               |
-| `request`     | request — thrown away when the response is sent                |
-| `session`     | visitor session — per-user working state, like a cart          |
-| `cluster`     | cluster — application-wide state shared across all nodes       |
+| `application` | application — shared by every caller (the default)             |
+| `request`     | request — created and dropped when the response is sent        |
+| `session`     | visitor session — the instance follows one visitor             |
+| `cluster`     | cluster — one instance spanning every node                     |
 
-The scope governs the service *instance*: with `session`, state the body keeps on the
-instance belongs to one visitor. Stored entities live in the store regardless of scope.
-§10.2 lists how each scope lowers on the JVM profile.
+The scope governs the generated *bean*: how long an instance lives and who shares it —
+which matters chiefly when the module drops into a larger application whose beans
+inject the service. Method bodies stay stateless and durable data lives in stored
+entities whatever the scope. §10.2 lists how each scope lowers on the JVM profile.
 
 ---
 

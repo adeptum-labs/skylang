@@ -27,6 +27,6 @@ view ProductList at "/products" {
 
 @scope(session)
 service Cart {
-  add(qty Int) -> Int
-    intent "Add qty items to this visitor's cart and return the new count."
+  lineTotal(qty Int, price Money) -> Money
+    intent "The total for qty items at the given unit price."
 }
