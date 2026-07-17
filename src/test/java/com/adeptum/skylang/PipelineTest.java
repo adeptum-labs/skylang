@@ -106,6 +106,20 @@ class PipelineTest {
             ```
             """;
 
+    private static final String ANNOTATED_SHOP = """
+            module shop
+            annotation fast(level Int) { intent "Prefer O({level}) memory." }
+            entity Product { id Int  name Text  stock Int @min(0) }
+            service Catalog {
+              @fast(1)
+              restock(p Product, units Int) -> Product
+                intent  "Increase stock."
+                requires units > 0
+                ensures  result.stock == p.stock + units
+                example  restock(Product(1, "Notebook", 5), 3) -> a Product with stock 8
+            }
+            """;
+
     /** Routes UI-synthesis calls to a canned view reply and every other call to a throwaway body. */
     private static StubLlm routingStub(String viewReply) {
         return new StubLlm((system, user) -> system.contains("UI-synthesis") ? viewReply : "return null;");
@@ -851,6 +865,41 @@ class PipelineTest {
         new Pipeline(after, ALWAYS_PASS).build(changed, lock, buildDir, quiet(), quiet());
 
         assertEquals(1, after.calls(), "changing the intent should re-synthesize that method");
+    }
+
+    @Test
+    void changingAnAnnotationIntentRegenerates(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        Ast.Module first = Parsing.parse(ANNOTATED_SHOP, "shop.sky");
+        new TypeChecker().check(first);
+        new Pipeline(new StubLlm(BODY), ALWAYS_PASS)
+                .build(first, lock, buildDir, quiet(), quiet());
+
+        Ast.Module changed = Parsing.parse(
+                ANNOTATED_SHOP.replace("O({level}) memory", "O({level}) allocations"), "shop.sky");
+        new TypeChecker().check(changed);
+        StubLlm after = new StubLlm(BODY);
+        new Pipeline(after, ALWAYS_PASS).build(changed, lock, buildDir, quiet(), quiet());
+
+        assertEquals(1, after.calls(), "changing an annotation's intent should re-synthesize");
+    }
+
+    @Test
+    void annotatingAFrozenMethodRegenerates(@TempDir Path root) {
+        Path lock = root.resolve("sky.lock");
+        Path buildDir = root.resolve("build/jvm-jakarta");
+        Ast.Module first = Parsing.parse(ANNOTATED_SHOP.replace("  @fast(1)\n", ""), "shop.sky");
+        new TypeChecker().check(first);
+        new Pipeline(new StubLlm(BODY), ALWAYS_PASS)
+                .build(first, lock, buildDir, quiet(), quiet());
+
+        Ast.Module changed = Parsing.parse(ANNOTATED_SHOP, "shop.sky");
+        new TypeChecker().check(changed);
+        StubLlm after = new StubLlm(BODY);
+        new Pipeline(after, ALWAYS_PASS).build(changed, lock, buildDir, quiet(), quiet());
+
+        assertEquals(1, after.calls(), "annotating a frozen method should re-synthesize it");
     }
 
     @Test

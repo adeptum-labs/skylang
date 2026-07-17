@@ -1,5 +1,9 @@
 module shop
 
+annotation memory_optimized {
+  intent "Prefer streaming, constant-memory implementations; never materialize whole collections."
+}
+
 entity Product {
   id    Int
   name  Text
@@ -8,6 +12,7 @@ entity Product {
 
 service Catalog {
 
+  @memory_optimized
   all() -> [Product]
     intent "List every product in the catalog."
 

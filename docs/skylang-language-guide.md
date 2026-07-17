@@ -369,6 +369,52 @@ example, forbid a `Secret` from ever reaching an HTTP response.
 
 ---
 
+## 7b. Developer-defined annotations
+
+A module may declare its own annotations: a named bundle of intent — and optional
+`expect` prose — that modifies how the compiler realizes whatever the annotation is
+attached to. Like a view's `expect` lines, the prose steers the model and documents the
+contract; the annotated declaration's own examples, specs and `ensures` remain the
+formal verification.
+
+```sky
+annotation memory_optimized {
+  intent "Prefer streaming, constant-memory implementations; never materialize whole collections."
+}
+
+annotation databasebacked(store Text) {
+  intent "Persist the annotated data through the {store} store declared in the dependency budget."
+  expect every read and write goes through {store}
+}
+```
+
+A declaration takes at most one `Int` or `Text` parameter; `{param}` placeholders in
+its intent and expects are replaced by the use-site argument. Attach annotations on
+the line before an `entity`, `service`, `page`/`view` or `component`, or before a
+method inside a service:
+
+```sky
+@databasebacked("mongodb")
+entity AuditEvent { id Int  message Text }
+
+service Reports {
+  @memory_optimized
+  digest(events [AuditEvent]) -> Text
+    intent "One summary line per event kind."
+}
+```
+
+The substituted text joins the synthesis prompt of every body or page rendered under
+the annotated declaration, and it joins the freeze spec: change an annotation's text
+and the module re-synthesizes; annotate a frozen method and that method re-synthesizes.
+Annotations steer synthesis only — they do not (yet) alter staged infrastructure, so
+`@databasebacked` directs how bodies use the declared dependencies rather than swapping
+the persistence layer itself. Names resolve module-wide, so a declaration may live in
+any file of the module; `scope`, `id`, `min`, `unique` and `mappedBy` stay reserved for
+the built-ins.
+
+---
+
 ## 7a. The interface layer: views, components, and flows
 
 The user interface is soft too. You do not write markup; you *declare* what a screen shows and
