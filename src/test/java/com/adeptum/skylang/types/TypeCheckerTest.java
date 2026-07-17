@@ -2246,4 +2246,130 @@ class TypeCheckerTest {
                 service S { f() -> Int  intent "x" }
                 """));
     }
+
+    // ----- developer-defined annotations -------------------------------------------
+
+    private static Ast.Module annotated(String source) {
+        return Parsing.parse(source, "shop.sky");
+    }
+
+    @Test
+    void acceptsADeclaredAnnotationUse() {
+        new TypeChecker().check(annotated("""
+                module shop
+                annotation fast(level Int) { intent "Prefer O({level}) work." }
+                entity Product { id Int }
+                @fast(1)
+                service Catalog { all() -> [Product]  intent "Every product." }
+                """));
+    }
+
+    @Test
+    void rejectsAnUndeclaredAnnotation() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation fast { intent "Hurry." }
+                entity Product { id Int }
+                @quick
+                service Catalog { all() -> [Product]  intent "Every product." }
+                """)));
+        assertTrue(e.getMessage().contains("unknown annotation @quick"), e.getMessage());
+        assertTrue(e.getMessage().contains("fast"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAReservedAnnotationName() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation unique { intent "One only." }
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("built-in"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAMissingArgument() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation stored(store Text) { intent "Use {store}." }
+                @stored
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("needs a Text argument"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAWronglyTypedArgument() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation stored(store Text) { intent "Use {store}." }
+                @stored(5)
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("expects a Text argument"), e.getMessage());
+    }
+
+    @Test
+    void rejectsABareIdentifierArgument() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation stored(store Text) { intent "Use {store}." }
+                @stored(mongodb)
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("quote"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAnArgumentToAParameterlessAnnotation() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation fast { intent "Hurry." }
+                @fast(1)
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("takes no argument"), e.getMessage());
+    }
+
+    @Test
+    void rejectsADuplicateUseOnOneTarget() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation fast { intent "Hurry." }
+                @fast
+                @fast
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("may appear once"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAPlaceholderNamingNoParameter() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation fast { intent "Prefer O({level}) work." }
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("{level}"), e.getMessage());
+    }
+
+    @Test
+    void rejectsASecondParameter() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation stored(store Text, mode Text) { intent "Use {store}." }
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("at most one parameter"), e.getMessage());
+    }
+
+    @Test
+    void rejectsANonIntTextParameter() {
+        CheckException e = assertThrows(CheckException.class, () -> new TypeChecker().check(annotated("""
+                module shop
+                annotation stored(store Money) { intent "Use {store}." }
+                entity Product { id Int }
+                """)));
+        assertTrue(e.getMessage().contains("must be Int or Text"), e.getMessage());
+    }
 }

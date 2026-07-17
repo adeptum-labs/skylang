@@ -80,6 +80,7 @@ public final class TypeChecker {
                 module.name(), module.services().size(), module.entities().size());
         registerTypeDecls(module);
         registerEntities(module);
+        checkAnnotations(module);
         if (module.services().stream().anyMatch(s -> s.uses().contains("db"))) {
             validatePersistability(module);
         }
@@ -329,6 +330,92 @@ public final class TypeChecker {
         for (Ast.Entity e : module.entities()) {
             for (Ast.Field f : e.fields()) {
                 f.uniqueScope().ifPresent(scope -> checkUniqueScope(e, f, scope));
+            }
+        }
+    }
+
+    /** Developer-annotation declarations and uses; names resolve module-wide, so this runs here. */
+    private void checkAnnotations(Ast.Module module) {
+        Map<String, Ast.AnnotationDecl> decls = new LinkedHashMap<>();
+        Set<String> reserved = Set.of("scope", "id", "min", "unique", "mappedBy");
+        java.util.regex.Pattern placeholder = java.util.regex.Pattern.compile("\\{(\\w+)}");
+        for (Ast.AnnotationDecl d : module.annotationDecls()) {
+            String where = "annotation '" + d.name() + "'";
+            if (reserved.contains(d.name())) {
+                throw new CheckException(where + " shadows a built-in annotation");
+            }
+            if (decls.put(d.name(), d) != null) {
+                throw new CheckException("duplicate " + where);
+            }
+            if (d.params().size() > 1) {
+                throw new CheckException(where + " may declare at most one parameter");
+            }
+            for (Ast.Param p : d.params()) {
+                String base = p.type().sky();
+                if (!base.equals("Int") && !base.equals("Text")) {
+                    throw new CheckException(where + ": parameter '" + p.name()
+                            + "' must be Int or Text, not " + base);
+                }
+            }
+            java.util.stream.Stream.concat(java.util.stream.Stream.of(d.intent()), d.expects().stream())
+                    .forEach(text -> {
+                        var m = placeholder.matcher(text);
+                        while (m.find()) {
+                            String name = m.group(1);
+                            if (d.params().stream().noneMatch(p -> p.name().equals(name))) {
+                                throw new CheckException(where + ": '{" + name
+                                        + "}' names no declared parameter");
+                            }
+                        }
+                    });
+        }
+        for (Ast.Entity e : module.entities()) {
+            checkUses("entity '" + e.name() + "'", e.annotations(), decls);
+        }
+        for (Ast.Service s : module.services()) {
+            checkUses("service '" + s.name() + "'", s.annotations(), decls);
+            for (Ast.Method m : s.methods()) {
+                checkUses(s.name() + "." + m.name(), m.annotations(), decls);
+            }
+        }
+        for (Ast.View v : module.views()) {
+            checkUses("page '" + v.name() + "'", v.annotations(), decls);
+        }
+        for (Ast.Component c : module.components()) {
+            checkUses("component '" + c.name() + "'", c.annotations(), decls);
+        }
+    }
+
+    private static void checkUses(String where, List<Ast.AnnotationUse> uses,
+                                  Map<String, Ast.AnnotationDecl> decls) {
+        Set<String> seen = new HashSet<>();
+        for (Ast.AnnotationUse u : uses) {
+            Ast.AnnotationDecl d = decls.get(u.name());
+            if (d == null) {
+                throw new CheckException(where + ": unknown annotation @" + u.name()
+                        + (decls.isEmpty() ? "" : " — declared: " + String.join(", ", decls.keySet())));
+            }
+            if (!seen.add(u.name())) {
+                throw new CheckException(where + ": @" + u.name() + " may appear once");
+            }
+            if (d.params().isEmpty()) {
+                if (u.arg().isPresent()) {
+                    throw new CheckException(where + ": @" + u.name() + " takes no argument");
+                }
+                continue;
+            }
+            Ast.Param p = d.params().get(0);
+            if (u.arg().isEmpty()) {
+                throw new CheckException(where + ": @" + u.name() + " needs a " + p.type().sky()
+                        + " argument for '" + p.name() + "'");
+            }
+            switch (u.arg().get()) {
+                case Ast.NameExpr n -> throw new CheckException(where + ": @" + u.name() + "("
+                        + n.name() + ") — quote text arguments: @" + u.name() + "(\"" + n.name() + "\")");
+                case Ast.IntLit i when p.type().sky().equals("Int") -> { }
+                case Ast.StrLit s when p.type().sky().equals("Text") -> { }
+                default -> throw new CheckException(where + ": @" + u.name() + " expects a "
+                        + p.type().sky() + " argument");
             }
         }
     }
