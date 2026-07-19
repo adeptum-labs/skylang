@@ -113,8 +113,10 @@ the test class, so the same `ensures` works for `long`, `String`, `Money`, and `
 operands alike — javac's overload resolution picks the semantics.
 
 Methods carry the full chapter-5 contract vocabulary. `raises Error when <condition>`
-names failures: errors are entities lowered to exceptions carrying their context fields,
-and conditions are formal expressions, the resolvable phrases (`no product has that id`,
+names failures: errors are entities lowered to exceptions carrying their context fields —
+a failure whose name is its whole specification needs no declaration, so `raises NotFound`
+alone implies the field-less entity, and only an error that carries context is declared by
+hand. Conditions are formal expressions, the resolvable phrases (`no product has that id`,
 `email already registered`), or free prose that names the failure for the reader and the
 model — prose is never statically resolved; examples pin its behaviour. Each raises with a
 derivable witness becomes a generated test (an empty store for existence, a seeded

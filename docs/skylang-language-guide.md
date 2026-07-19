@@ -683,9 +683,14 @@ the wiring; the contracts verify it.
 
 ### 10.3 The TypeScript / Node profile
 
-The same core lowered onto modern TypeScript for a Node runtime. Every type, effect, and
-contract retargets unchanged; only the framework constructs (`page`/`flow`) are absent,
-since those stay optional per profile.
+A first cut of the core lowered onto modern TypeScript for a Node runtime. Its envelope is
+`Int`/`Text`/`Bool`, entities, lists, contracts and examples; everything past that is an
+honest `error [frontend]` naming what the profile does not lower yet. Today that is:
+declared refined types, policies, `values` entities, `spec` blocks, example seeding
+(`on a ...`), the `nothing`/`whose`/prose example results, fixture arguments, every effect
+but `db` and `clock`, and the types `Money`, `Instant`, `Date`, `DateTime`, `Duration`,
+`Bytes`, `Email`, `Currency` and `Percentage`. The framework constructs (`page`/`flow`) are
+absent by design, since those stay optional per profile.
 
 | Core type      | TypeScript lowering                      |
 |----------------|-------------------------------------------|
@@ -715,14 +720,17 @@ hash(input Bytes) -> Bytes
   the npm `bcrypt` package at a pinned version.
 - `uses db` binds to a database client; effects the profile does not bind are a compile
   error to declare.
-- The verification harness compiles each `example` and `ensures` clause into a Vitest test
-  and runs the suite inside the staged project.
+- The verification harness compiles each `example` and `ensures` clause into a `node:test`
+  test and runs the suite with `node --test` inside the staged project.
 - No `page`/`flow` here — framework constructs are optional per profile.
 
-### 10.4 The Python profile
+### 10.4 The Python profile — designed, not shipped
 
 The same core lowered onto typed Python 3 for a CPython runtime. Like the Node profile it
-carries the full type, effect, and contract semantics but no `page`/`flow` constructs.
+would carry the type, effect, and contract semantics but no `page`/`flow` constructs.
+
+**This profile is not in this build.** Selecting `profile python` is refused by name; the
+`py` native-block keyword is not lexed. What follows is the design it will be built to.
 
 | Core type      | Python lowering                          |
 |----------------|-------------------------------------------|
