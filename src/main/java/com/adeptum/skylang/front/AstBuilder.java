@@ -68,8 +68,28 @@ public final class AstBuilder {
                 views.add(view(decl.view(), uses(anns, false)));
             }
         }
-        return new Ast.Module(ctx.ID().getText(), types, policies, entities, services, views,
+        String name = ctx.ID().getText();
+        Ast.Module scanned = new Ast.Module(name, types, policies, entities, services, views,
                 flows, components, annotationDecls);
+        return new Ast.Module(name, types, policies, withImpliedErrors(entities, scanned), services,
+                views, flows, components, annotationDecls);
+    }
+
+    /**
+     * A failure named in a raises clause but never declared is a field-less error entity.
+     * Declaring one carries no information — the name is the whole specification — so the
+     * builder supplies it, and an error that does carry context is still declared by hand.
+     */
+    private static List<Ast.Entity> withImpliedErrors(List<Ast.Entity> declared, Ast.Module scanned) {
+        List<String> names = new ArrayList<>(declared.stream().map(Ast.Entity::name).toList());
+        List<Ast.Entity> all = new ArrayList<>(declared);
+        for (String error : scanned.raisedErrorNames()) {
+            if (!names.contains(error)) {
+                names.add(error);
+                all.add(new Ast.Entity(error, List.of()));
+            }
+        }
+        return all;
     }
 
     // ----- policies --------------------------------------------------------------

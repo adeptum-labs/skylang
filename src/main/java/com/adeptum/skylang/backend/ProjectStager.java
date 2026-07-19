@@ -257,28 +257,7 @@ public final class ProjectStager {
 
     /** The entities named as failures — by raises clauses, spec thens, example results, or policies. */
     public static java.util.Set<String> errorEntities(Ast.Module module) {
-        java.util.Set<String> errors = new java.util.LinkedHashSet<>();
-        for (Ast.Policy p : module.policies()) {
-            if (p.rule() instanceof Ast.RequireRule rr) {
-                rr.raise().ifPresent(errors::add);
-            }
-        }
-        for (Ast.Service s : module.services()) {
-            for (Ast.Method m : s.methods()) {
-                m.raises().forEach(r -> errors.add(r.error()));
-                m.examples().forEach(ex -> {
-                    if (ex.result() instanceof Ast.RaisesResult rr) {
-                        errors.add(rr.error());
-                    }
-                });
-                m.specs().forEach(spec -> spec.then().forEach(t -> {
-                    if (t instanceof Ast.ThenRaises tr) {
-                        errors.add(tr.error());
-                    }
-                }));
-            }
-        }
-        return errors;
+        return new java.util.LinkedHashSet<>(module.raisedErrorNames());
     }
 
     /** An error entity: an exception carrying the context fields the caller needs. */

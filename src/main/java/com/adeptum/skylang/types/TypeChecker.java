@@ -677,10 +677,12 @@ public final class TypeChecker {
                         named.add(tr.error());
                     }
                 }));
+                // A field-less error entity is supplied by the builder, so an unresolved
+                // name here means the source declared it as something else entirely.
                 for (String error : named) {
                     if (!entities.containsKey(error)) {
-                        throw new CheckException(s.name() + "." + m.name() + " raises unknown error '"
-                                + error + "' — declare it as an entity");
+                        throw new CheckException(s.name() + "." + m.name() + " raises '" + error
+                                + "', which is not an entity");
                     }
                     errorEntities.add(error);
                 }
@@ -696,8 +698,8 @@ public final class TypeChecker {
             if (p.rule() instanceof Ast.RequireRule rr && rr.raise().isPresent()) {
                 String error = rr.raise().get();
                 if (!entities.containsKey(error)) {
-                    throw new CheckException("policy " + p.name() + " raises unknown error '"
-                            + error + "' — declare it as an entity");
+                    throw new CheckException("policy " + p.name() + " raises '" + error
+                            + "', which is not an entity");
                 }
                 errorEntities.add(error);
             }

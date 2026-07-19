@@ -68,9 +68,12 @@ public final class CheckCommand implements Callable<Integer> {
     /** The checkpoint transcript: what the hard layer contains, and that no model ran. */
     private void checkpoint(Ast.Module module) {
         System.out.printf("  %-30s ok%n", "parsing " + file.getFileName() + " ...");
-        if (!module.entities().isEmpty()) {
-            System.out.print(wrapped("  entities: ", module.entities().stream()
-                    .map(Ast.Entity::name).toList()));
+        // Errors are failures, not data: the checkpoint reports the model you declared.
+        java.util.List<String> errors = module.raisedErrorNames();
+        java.util.List<String> data = module.entities().stream()
+                .map(Ast.Entity::name).filter(n -> !errors.contains(n)).toList();
+        if (!data.isEmpty()) {
+            System.out.print(wrapped("  entities: ", data));
         }
         if (!module.types().isEmpty()) {
             System.out.printf("  %-30s ok%n", "refined types: " + module.types().stream()

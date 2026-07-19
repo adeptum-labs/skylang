@@ -59,6 +59,40 @@ public final class Ast {
                       List<Entity> entities, List<Service> services, List<View> views) {
             this(name, types, policies, entities, services, views, List.of(), List.of());
         }
+
+        /**
+         * Every name spoken as a failure — by a raises clause, a {@code -> raises} example,
+         * a spec's then, or a policy's else-raise — in the order it is first named.
+         */
+        public List<String> raisedErrorNames() {
+            List<String> errors = new java.util.ArrayList<>();
+            java.util.function.Consumer<String> add = n -> {
+                if (!errors.contains(n)) {
+                    errors.add(n);
+                }
+            };
+            for (Policy p : policies) {
+                if (p.rule() instanceof RequireRule rr) {
+                    rr.raise().ifPresent(add);
+                }
+            }
+            for (Service s : services) {
+                for (Method m : s.methods()) {
+                    m.raises().forEach(r -> add.accept(r.error()));
+                    m.examples().forEach(ex -> {
+                        if (ex.result() instanceof RaisesResult rr) {
+                            add.accept(rr.error());
+                        }
+                    });
+                    m.specs().forEach(spec -> spec.then().forEach(t -> {
+                        if (t instanceof ThenRaises tr) {
+                            add.accept(tr.error());
+                        }
+                    }));
+                }
+            }
+            return errors;
+        }
     }
 
     // ----- flows and components ---------------------------------------------

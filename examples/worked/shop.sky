@@ -66,17 +66,6 @@ policy ReviewsFromCustomersOnly {
   else     raise NotAPurchaser
 }
 
-entity NotFound { }
-entity OutOfStock { }
-entity AlreadyPlaced { }
-entity EmptyOrder { }
-entity DuplicateEmail { requested Email }
-entity AlreadyShipped { }
-entity NotCancellable { }
-entity PaymentFailed { }
-entity AlreadyReviewed { }
-entity NotAPurchaser { }
-
 service Catalog uses db {
 
   all() -> [Product]

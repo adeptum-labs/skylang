@@ -35,8 +35,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TypeCheckerTest {
 
     private static void check(String source) {
+        checked(source);
+    }
+
+    private static Ast.Module checked(String source) {
         Ast.Module m = Parsing.parse(source, "test.sky");
         new TypeChecker().check(m);
+        return m;
     }
 
     private static String service(String method) {
@@ -1738,12 +1743,30 @@ class TypeCheckerTest {
     }
 
     @Test
-    void raisesNamesMustBeDeclaredEntities() {
-        CheckException e = assertThrows(CheckException.class, () -> check(CATALOG.formatted("""
+    void anUndeclaredRaisesNameBecomesAFieldlessError() {
+        Ast.Module m = checked(CATALOG.formatted("""
               f(id Int) -> Product
                 intent "x"
                 raises Mystery when id <= 0
-            """)));
+            """));
+
+        Ast.Entity mystery = m.entities().stream()
+                .filter(e -> e.name().equals("Mystery")).findFirst().orElseThrow();
+        assertTrue(mystery.fields().isEmpty());
+    }
+
+    @Test
+    void aRaisesNameDeclaredAsSomethingElseIsRejected() {
+        CheckException e = assertThrows(CheckException.class, () -> check("""
+            module shop
+            type Mystery = Int(0..10)
+            entity Product { id Int @id  stock Int }
+            service Catalog uses db {
+              f(id Int) -> Product
+                intent "x"
+                raises Mystery when id <= 0
+            }
+            """));
         assertTrue(e.getMessage().contains("Mystery"), e.getMessage());
     }
 
@@ -1974,11 +1997,6 @@ class TypeCheckerTest {
 
     @Test
     void extendedResultsAreValidated() {
-        CheckException unknown = assertThrows(CheckException.class, () -> check(BANKING.formatted("""
-              f(id Int) -> Product
-                example f(1) -> raises Mystery
-            """)));
-        assertTrue(unknown.getMessage().contains("Mystery"), unknown.getMessage());
         CheckException field = assertThrows(CheckException.class, () -> check(BANKING.formatted("""
               f(id Int) -> Product
                 example f(7) on a Product with stock 5 -> bogus 8

@@ -98,18 +98,7 @@ public final class TsStager {
 
     /** Entities named by raises clauses or {@code -> raises} examples are error classes. */
     static Set<String> errorEntities(Ast.Module module) {
-        Set<String> errors = new LinkedHashSet<>();
-        for (Ast.Service s : module.services()) {
-            for (Ast.Method m : s.methods()) {
-                m.raises().forEach(r -> errors.add(r.error()));
-                for (Ast.Example ex : m.examples()) {
-                    if (ex.result() instanceof Ast.RaisesResult rr) {
-                        errors.add(rr.error());
-                    }
-                }
-            }
-        }
-        return errors;
+        return new LinkedHashSet<>(module.raisedErrorNames());
     }
 
     // ---- entities -------------------------------------------------------------------------
