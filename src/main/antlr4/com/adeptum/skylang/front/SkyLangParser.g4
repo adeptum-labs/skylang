@@ -187,7 +187,9 @@ annotationProse : (ID | STRING | INT | MONEY | DURATION | COMMA | POSS | DOT | L
                   | LT | LE | GT | GE | EQ | MINUS | FOR | ACTION | STEP | PAGE | SHOWS | TITLED
                   | LBRACE ID RBRACE)+ ;
 
-route : AT_KW STRING ;
+// 'at' stays a soft keyword so a field may be named 'at' (createdAt's terser
+// sibling); the following STRING is what marks this as a route.
+route : ID STRING ;
 
 viewClause
     : SHOWS viewQuery (AS projection)? (TITLED STRING)?  # showsClause

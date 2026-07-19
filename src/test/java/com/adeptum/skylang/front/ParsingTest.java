@@ -215,6 +215,35 @@ class ParsingTest {
     }
 
     @Test
+    void acceptsAFieldNamedAt() {
+        Ast.Module m = Parsing.parse("""
+                module t
+                entity Transfer {
+                  id     Int      @id
+                  amount Money
+                  at     Instant  = now
+                }
+                """, "t.sky");
+
+        Ast.Entity transfer = m.entities().get(0);
+        assertEquals(List.of("id", "amount", "at"), transfer.fields().stream().map(Ast.Field::name).toList());
+    }
+
+    @Test
+    void rejectsARouteNotIntroducedByAt() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> Parsing.parse("""
+                module t
+                entity Product { id Int @id }
+                service Catalog { all() -> [Product]  intent "Every product." }
+                page ProductList under "/products" {
+                  shows Catalog.all() as a table of (id)
+                }
+                """, "t.sky"));
+
+        assertTrue(e.getMessage().contains("say 'at \"/route\"'"), e.getMessage());
+    }
+
+    @Test
     void parsesPageLevelActionWithoutSubject() {
         Ast.Module m = Parsing.parse("""
                 module t

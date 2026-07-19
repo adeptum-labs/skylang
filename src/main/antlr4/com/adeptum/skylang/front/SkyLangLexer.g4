@@ -26,9 +26,10 @@ lexer grammar SkyLangLexer;
  * a bare '/.../' token would collide with division and '//' comments, so the
  * 'matching' keyword switches the lexer into RE mode for exactly one regex.
  *
- * Soft keywords ('a', 'with', 'and', 'now', and annotation names 'id'/'min'/'unique')
- * are matched as plain IDs and interpreted in AstBuilder, so they never shadow
- * identifiers (e.g. a parameter may legitimately be named 'a').
+ * Soft keywords ('a', 'with', 'and', 'now', 'at', and annotation names
+ * 'id'/'min'/'unique') are matched as plain IDs and interpreted in AstBuilder, so
+ * they never shadow identifiers (e.g. a parameter may legitimately be named 'a',
+ * and an entity may carry a field named 'at').
  */
 
 MODULE   : 'module' ;
@@ -42,7 +43,6 @@ VIEW     : 'view' ;
 SHOWS    : 'shows' ;
 ACTION   : 'action' ;
 EXPECT   : 'expect' ;
-AT_KW    : 'at' ;
 AS       : 'as' ;
 OF       : 'of' ;
 ON       : 'on' ;

@@ -524,9 +524,15 @@ public final class AstBuilder {
     // ----- views -------------------------------------------------------------
 
     private Ast.View view(SkyLangParser.ViewContext ctx, List<Ast.AnnotationUse> annotations) {
-        Optional<String> route = ctx.route() == null
-                ? Optional.empty()
-                : Optional.of(unquote(ctx.route().STRING().getText()));
+        Optional<String> route = Optional.empty();
+        if (ctx.route() != null) {
+            String lead = ctx.route().ID().getText();
+            if (!lead.equals("at")) {
+                throw new IllegalArgumentException(
+                        "say 'at \"/route\"' to give " + ctx.ID().getText() + " a route, not '" + lead + "'");
+            }
+            route = Optional.of(unquote(ctx.route().STRING().getText()));
+        }
 
         // Params first, whatever their position: the appears degrade rule needs them.
         List<Ast.Param> params = new ArrayList<>();
